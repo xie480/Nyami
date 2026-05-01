@@ -17,6 +17,7 @@ type MetaMap = Record<string, CacheItem>;
 
 class AudioCache {
   private ready: Promise<void>;
+  private downloading = new Map<string, Promise<string>>();
 
   constructor() {
     this.ready = this.init();
@@ -52,40 +53,59 @@ class AudioCache {
     headers?: Record<string, string>
   ): Promise<string> {
     await this.ready;
-    const filePath = `${CACHE_DIR}/${bvid}_${quality}.m4a`;
+    const cacheKey = this.key(bvid, quality);
+
+    // 防止同一音频并发下载导致重复写入文件或缓存冲突
+    if (this.downloading.has(cacheKey)) {
+      return this.downloading.get(cacheKey)!;
+    }
+
+    // 检查是否已有缓存
     const existing = await this.has(bvid, quality);
     if (existing) return existing;
 
-    const result = await RNFS.downloadFile({
-      fromUrl: streamUrl,
-      toFile: filePath,
-      headers,
-      background: true,
-      discretionary: true,
-    }).promise;
-
-    if (result.statusCode !== 200 && result.statusCode !== 206) {
-      // 清理可能的残留文件以防止缓存误判
+    const downloadPromise = (async () => {
+      const filePath = `${CACHE_DIR}/${bvid}_${quality}.m4a`;
       try {
-        if (await RNFS.exists(filePath)) {
-          await RNFS.unlink(filePath);
-        }
-      } catch {}
-      throw new Error(`下载失败 ${result.statusCode}`);
-    }
+        const result = await RNFS.downloadFile({
+          fromUrl: streamUrl,
+          toFile: filePath,
+          headers,
+          background: true,
+          discretionary: true,
+        }).promise;
 
-    const stat = await RNFS.stat(filePath);
-    const meta = this.getMeta();
-    meta[this.key(bvid, quality)] = {
-      bvid,
-      quality,
-      path: filePath,
-      size: Number(stat.size),
-      lastAccess: Date.now(),
-    };
-    this.setMeta(meta);
-    this.tryEvict();
-    return filePath;
+        if (result.statusCode !== 200 && result.statusCode !== 206) {
+          // 清理可能的残留文件以防止缓存误判
+          try {
+            if (await RNFS.exists(filePath)) {
+              await RNFS.unlink(filePath);
+            }
+          } catch {}
+          throw new Error(`下载失败 ${result.statusCode}`);
+        }
+
+        const stat = await RNFS.stat(filePath);
+        const meta = this.getMeta();
+        meta[cacheKey] = {
+          bvid,
+          quality,
+          path: filePath,
+          size: Number(stat.size),
+          lastAccess: Date.now(),
+        };
+        this.setMeta(meta);
+        // 触发空间回收（不需要 await，后台执行即可）
+        this.tryEvict();
+        return filePath;
+      } finally {
+        // 下载结束后移除记录，确保后续请求能重新触发下载（若失败则会重新尝试）
+        this.downloading.delete(cacheKey);
+      }
+    })();
+
+    this.downloading.set(cacheKey, downloadPromise);
+    return downloadPromise;
   }
 
   getTotalSize(): number {

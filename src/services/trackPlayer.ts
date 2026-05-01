@@ -6,6 +6,8 @@ import { audioCache } from './audioCache';
 import { netStatus } from './netStatus';
 import { useSettingsStore } from '../store/settingsStore';
 import { config } from '../config';
++// 用于防止同一索引的 lazyResolve 并发执行，避免重复替换
++const resolving = new Set<number>();
 import type { FavoriteVideo } from '../types/domain';
 
 let _ready = false;
@@ -69,17 +71,20 @@ export async function loadQueue(videos: FavoriteVideo[], startBvid?: string) {
 }
 
 async function lazyResolve(index: number) {
-  const queue = await TrackPlayer.getQueue();
-  const t = queue[index];
-  if (!t || !String(t.url).startsWith('placeholder://')) return;
-  
-  const bvid = String(t.url).replace('placeholder://', '');
-  const quality = useSettingsStore.getState().quality;
-  
-  let url = '';
-  let headers: Record<string, string> | undefined;
-  
+  // 防止同一索引并发解析导致重复替换
+  if (resolving.has(index)) return;
+  resolving.add(index);
   try {
+    const queue = await TrackPlayer.getQueue();
+    const t = queue[index];
+    if (!t || !String(t.url).startsWith('placeholder://')) return;
+    
+    const bvid = String(t.url).replace('placeholder://', '');
+    const quality = useSettingsStore.getState().quality;
+    
+    let url = '';
+    let headers: Record<string, string> | undefined;
+    
     const cached = await audioCache.has(bvid, quality);
     if (cached) {
       url = `file://${cached}`;
@@ -89,24 +94,33 @@ async function lazyResolve(index: number) {
       headers = { Referer: config.referer, 'User-Agent': config.userAgent };
     }
 
-    // 【修复】竞态条件防护：检查当前播放的 track 是否还是我们正在解析的这个
+    // 检查当前播放的 track 是否仍然是我们正在解析的这个
     const activeTrackIndex = await TrackPlayer.getActiveTrackIndex();
     if (activeTrackIndex !== index) {
       return; // 用户已经切歌，放弃替换
     }
 
+    // 再次确认 placeholder 仍在该位置，防止并发解析导致重复替换
+    const freshQueue = await TrackPlayer.getQueue();
+    const freshTrack = freshQueue[index];
+    if (!freshTrack || !String(freshTrack.url).startsWith('placeholder://')) {
+      return;
+    }
+
     const newTrack = { ...t, url, headers };
-    
-    await TrackPlayer.add(newTrack, index + 1);
-    await TrackPlayer.skip(index + 1);
+    // 替换逻辑：先移除占位，随后在同一位置插入真实 track，最后跳转播放
     await TrackPlayer.remove(index);
+    await TrackPlayer.add(newTrack, index);
+    await TrackPlayer.skip(index);
   } catch (error) {
     console.error(`[TrackPlayer] 解析音频失败 (BVID: ${bvid}):`, error);
-    // 【修复】异常处理：解析失败时自动跳到下一首
+    // 解析失败时自动跳到下一首（仅当仍在同一索引）
     const activeTrackIndex = await TrackPlayer.getActiveTrackIndex();
     if (activeTrackIndex === index) {
       await TrackPlayer.skipToNext().catch(() => {});
     }
+  } finally {
+    resolving.delete(index);
   }
 }
 
