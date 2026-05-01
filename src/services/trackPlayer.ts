@@ -55,6 +55,7 @@ async function buildTrack(v: FavoriteVideo) {
 }
 
 export async function loadQueue(videos: FavoriteVideo[], startBvid?: string) {
+  if (!videos || videos.length === 0) return; // 新增边界保护
   await TrackPlayer.reset();
   const startIndex = Math.max(0, videos.findIndex((v) => v.bvid === startBvid));
   const current = await buildTrack(videos[startIndex]);
@@ -108,10 +109,13 @@ async function lazyResolve(index: number) {
     }
 
     const newTrack = { ...t, url, headers };
-    // 替换逻辑：先移除占位，随后在同一位置插入真实 track，最后跳转播放
+    // 【修复】平滑替换策略：先在 index 后面插入新 track，跳过去，再删掉原来的 placeholder
+    await TrackPlayer.add(newTrack, index + 1);
+    const postAddActiveTrackIndex = await TrackPlayer.getActiveTrackIndex();
+    if (postAddActiveTrackIndex === index) {
+      await TrackPlayer.skip(index + 1);
+    }
     await TrackPlayer.remove(index);
-    await TrackPlayer.add(newTrack, index);
-    await TrackPlayer.skip(index);
   } catch (error) {
     console.error(`[TrackPlayer] 解析音频失败 (BVID: ${bvid}):`, error);
     // 解析失败时自动跳到下一首（仅当仍在同一索引）
@@ -153,6 +157,11 @@ export async function PlaybackService() {
   // 【修复】增加错误监听，遇到播放错误自动跳过
   TrackPlayer.addEventListener(Event.PlaybackError, async (error) => {
     console.error('[TrackPlayer] 播放错误:', error);
+    // 【修复】如果是 placeholder 引起的错误（通常包含 placeholder 字样或无法识别协议），忽略它，等待 lazyResolve 完成
+    if (error.message && error.message.includes('placeholder')) {
+      console.log('[TrackPlayer] 忽略 placeholder 预期内报错');
+      return;
+    }
     await TrackPlayer.skipToNext().catch(() => {});
   });
 }
