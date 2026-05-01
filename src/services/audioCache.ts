@@ -65,6 +65,12 @@ class AudioCache {
     }).promise;
 
     if (result.statusCode !== 200 && result.statusCode !== 206) {
+      // 清理可能的残留文件以防止缓存误判
+      try {
+        if (await RNFS.exists(filePath)) {
+          await RNFS.unlink(filePath);
+        }
+      } catch {}
       throw new Error(`下载失败 ${result.statusCode}`);
     }
 

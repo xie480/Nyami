@@ -79,21 +79,35 @@ async function lazyResolve(index: number) {
   let url = '';
   let headers: Record<string, string> | undefined;
   
-  const cached = await audioCache.has(bvid, quality);
-  if (cached) {
-    url = `file://${cached}`;
-  } else {
-    const info = await audioService.getInfo(bvid, quality);
-    url = info.audio.baseUrl;
-    headers = { Referer: config.referer, 'User-Agent': config.userAgent };
-  }
+  try {
+    const cached = await audioCache.has(bvid, quality);
+    if (cached) {
+      url = `file://${cached}`;
+    } else {
+      const info = await audioService.getInfo(bvid, quality);
+      url = info.audio.baseUrl;
+      headers = { Referer: config.referer, 'User-Agent': config.userAgent };
+    }
 
-  const newTrack = { ...t, url, headers };
-  
-  // 无缝替换策略：插入真实音频 -> 跳至真实音频 -> 移除旧占位音频
-  await TrackPlayer.add(newTrack, index + 1);
-  await TrackPlayer.skip(index + 1);
-  await TrackPlayer.remove(index);
+    // 【修复】竞态条件防护：检查当前播放的 track 是否还是我们正在解析的这个
+    const activeTrackIndex = await TrackPlayer.getActiveTrackIndex();
+    if (activeTrackIndex !== index) {
+      return; // 用户已经切歌，放弃替换
+    }
+
+    const newTrack = { ...t, url, headers };
+    
+    await TrackPlayer.add(newTrack, index + 1);
+    await TrackPlayer.skip(index + 1);
+    await TrackPlayer.remove(index);
+  } catch (error) {
+    console.error(`[TrackPlayer] 解析音频失败 (BVID: ${bvid}):`, error);
+    // 【修复】异常处理：解析失败时自动跳到下一首
+    const activeTrackIndex = await TrackPlayer.getActiveTrackIndex();
+    if (activeTrackIndex === index) {
+      await TrackPlayer.skipToNext().catch(() => {});
+    }
+  }
 }
 
 async function autoCache(bvid: string) {
@@ -121,5 +135,10 @@ export async function PlaybackService() {
   TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async (e) => {
     if (e.index !== undefined) await lazyResolve(e.index);
     if (e.lastTrack?.id) autoCache(e.lastTrack.id as string);
+  });
+  // 【修复】增加错误监听，遇到播放错误自动跳过
+  TrackPlayer.addEventListener(Event.PlaybackError, async (error) => {
+    console.error('[TrackPlayer] 播放错误:', error);
+    await TrackPlayer.skipToNext().catch(() => {});
   });
 }
