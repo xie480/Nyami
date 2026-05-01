@@ -19,25 +19,35 @@ interface FavoriteListResp {
 }
 
 export const biliApi = {
+  /** 获取用户全部收藏夹 */
   getFavoriteFolders(upMid: string) {
     return biliGet<FolderListResp>('/x/v3/fav/folder/created/list-all', {
       params: { up_mid: upMid },
     });
   },
 
+  /** 获取收藏夹内视频（分页） */
   getFavoriteVideos(mediaId: string | number, pn = 1, ps = 20) {
     return biliGet<FavoriteListResp>('/x/v3/fav/resource/list', {
       params: { media_id: mediaId, pn, ps, platform: 'web', order: 'mtime' },
     });
   },
 
+  /** 获取视频元信息（含 cid） */
   getVideoInfo(bvid: string) {
+    if (!bvid) {
+      return Promise.reject(new Error('bvid 不能为空'));
+    }
     return biliGet<BiliVideoInfo>('/x/web-interface/view', {
       params: { bvid },
     });
   },
-
+  
+  /** 获取播放地址（DASH，含独立音频流，需 WBI 签名） */
   async getPlayUrl(bvid: string, cid: number) {
+    if (!bvid || cid == null) {
+      throw new Error('bvid 和 cid 不能为空');
+    }
     const { imgKey, subKey } = await getWbiKeys();
     const query = encWbi(
       { bvid, cid, fnval: 16, fnver: 0, fourk: 1 },

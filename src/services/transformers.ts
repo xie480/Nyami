@@ -23,11 +23,15 @@ export function trimFavoriteVideo(m: BiliFavoriteVideoMedia): FavoriteVideo {
     duration: m.duration,
     page: m.page,
     pubtime: m.pubtime,
-    upper: { mid: m.upper?.mid, name: m.upper?.name },
+    upper: {
+      mid: m.upper?.mid ?? 0,
+      name: m.upper?.name ?? '未知UP主',
+    },
     attr: m.attr,
   };
 }
 
+/** B 站 dash 字段在某些 case 下是 snake_case，做下兼容 */
 export function normalizeAudio(a: BiliDashAudio) {
   return {
     id: a.id,
