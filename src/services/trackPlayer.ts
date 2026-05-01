@@ -169,10 +169,18 @@ export async function PlaybackService() {
   // 【修复】增加错误监听，遇到播放错误自动跳过
   TrackPlayer.addEventListener(Event.PlaybackError, async (error) => {
     console.error('[TrackPlayer] 播放错误:', error);
-    // 【修复】如果是 placeholder 引起的错误（通常包含 placeholder 字样或无法识别协议），忽略它，等待 lazyResolve 完成
-    if (error.message && error.message.includes('placeholder')) {
-      console.log('[TrackPlayer] 忽略 placeholder 预期内报错');
-      return;
+    // Revised handling: determine if error originates from a placeholder track by inspecting the active track URL
+    try {
+      const activeIndex = await TrackPlayer.getActiveTrackIndex();
+      const queue = await TrackPlayer.getQueue();
+      const activeTrack = queue[activeIndex];
+      if (activeTrack && typeof activeTrack.url === 'string' && activeTrack.url.startsWith('placeholder://')) {
+        console.log('[TrackPlayer] Ignoring placeholder track playback error');
+        // Let lazyResolve replace the placeholder later; do not skip or pause.
+        return;
+      }
+    } catch (e) {
+      // If inspection fails, proceed with generic error handling.
     }
     
     // 【修复】如果当前无网络，暂停播放而不是跳过
