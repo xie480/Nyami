@@ -1,12 +1,14 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, FlatList, TouchableOpacity, Text, StyleSheet,
   ActivityIndicator,
+  Alert, Platform, ToastAndroid,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import TrackPlayer from 'react-native-track-player';
 import { Header } from '../components/Header';
+// Removed duplicate import, already imported above
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
@@ -23,6 +25,11 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const t = useTheme();
   const { mediaId, title } = route.params;
   const setQueue = usePlayerStore((s) => s.setQueue);
+  // Refs to keep pagination state up‑to‑date across closures
+  const pageRef = useRef(1);
+  const hasMoreRef = useRef(true);
+  const loadingRef = useRef(false);
+  const listRef = useRef<FavoriteVideo[]>([]);
 
   const [list, setList] = useState<FavoriteVideo[]>([]);
   const [page, setPage] = useState(1);
@@ -32,49 +39,97 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const [error, setError] = useState<string | null>(null);
 
   const loadMore = useCallback(async () => {
-    if (loading || !hasMore) return;
+    if (loadingRef.current || !hasMoreRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
     try {
-      const r = await favoriteService.getVideos(mediaId, page);
-      setList((v) => [...v, ...r.list]);
+      const r = await favoriteService.getVideos(mediaId, pageRef.current);
+      // Merge with existing list using ref to avoid stale closures
+      const newList = [...listRef.current, ...r.list];
+      setList(newList);
+      listRef.current = newList;
       setHasMore(r.hasMore);
-      setPage((p) => p + 1);
+      hasMoreRef.current = r.hasMore;
+      pageRef.current += 1;
+      setPage(pageRef.current);
       setError(null);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
+      loadingRef.current = false;
       setIniting(false);
     }
-  }, [mediaId, page, hasMore, loading]);
+  }, [mediaId]);
 
-  useEffect(() => { loadMore(); /* eslint-disable-next-line */ }, []);
+  // Reset pagination refs when mediaId changes
+  useEffect(() => {
+    setList([]);
+    setPage(1);
+    setHasMore(true);
+    setLoading(false);
+    setIniting(true);
+    setError(null);
+    pageRef.current = 1;
+    hasMoreRef.current = true;
+    loadingRef.current = false;
+    listRef.current = [];
+    loadMore();
+  }, [mediaId]);
 
   // Ensure all pages are loaded before playing whole list
   const ensureAllLoaded = async () => {
-    while (hasMore) {
+    while (hasMoreRef.current) {
       await loadMore();
     }
   };
 
   const playFrom = async (idx: number) => {
-    const target = list[idx];
-    setQueue(list, target.bvid);
-    await loadQueue(list, target.bvid);
-    await TrackPlayer.play();
-    navigation.navigate('Player');
+    try {
+      const target = list[idx];
+      setQueue(list, target.bvid);
+      await loadQueue(list, target.bvid);
+      await TrackPlayer.play();
+      navigation.navigate('Player');
+    } catch (e: any) {
+      const msg = e.message || '播放失败';
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(msg, ToastAndroid.SHORT);
+      } else {
+        Alert.alert('播放错误', msg);
+      }
+    }
   };
 
   const playAll = async () => {
-    if (hasMore) await ensureAllLoaded();
-    playFrom(0);
+    try {
+      if (hasMoreRef.current) await ensureAllLoaded();
+      await playFrom(0);
+    } catch (e: any) {
+      const msg = e.message || '播放全部失败';
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(msg, ToastAndroid.SHORT);
+      } else {
+        Alert.alert('播放错误', msg);
+      }
+    }
   };
 
   const shuffle = async () => {
-    if (hasMore) await ensureAllLoaded();
-    const shuffled = [...list].sort(() => Math.random() - 0.5);
-    setList(shuffled);
-    playFrom(0);
+    try {
+      if (hasMoreRef.current) await ensureAllLoaded();
+      const shuffled = [...list].sort(() => Math.random() - 0.5);
+      setList(shuffled);
+      listRef.current = shuffled;
+      await playFrom(0);
+    } catch (e: any) {
+      const msg = e.message || '随机播放失败';
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(msg, ToastAndroid.SHORT);
+      } else {
+        Alert.alert('播放错误', msg);
+      }
+    }
   };
 
   const s = StyleSheet.create({
