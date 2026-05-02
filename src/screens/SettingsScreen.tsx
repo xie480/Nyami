@@ -10,6 +10,7 @@ import { useSettingsStore } from '../store/settingsStore';
 import { useUserStore } from '../store/userStore';
 import { audioCache } from '../services/audioCache';
 import { cookieService, favoriteService } from '../services';
+import type { SyncProgressEvent } from '../services/favoriteService';
 import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,7 +36,9 @@ export const SettingsScreen = () => {
   const [cacheSize, setCacheSize] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
   const [cookie, setCookie] = useState(cookieService.get());
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'done'>('idle');
+  const [progressData, setProgressData] = useState<SyncProgressEvent | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [globalIndexCount, setGlobalIndexCount] = useState(0);
 
   const refresh = () => {
@@ -63,15 +66,19 @@ export const SettingsScreen = () => {
       Alert.alert('提示', '请先设置 UID');
       return;
     }
-    setIsSyncing(true);
+    setSyncStatus('syncing');
+    setProgressData(null);
+    setSyncError(null);
     try {
-      await favoriteService.syncGlobalIndex(uid, true);
+      await favoriteService.syncGlobalIndex(uid, true, (event) => {
+        setProgressData(event);
+      });
       setGlobalIndexCount(favoriteService.getGlobalIndex().length);
-      Alert.alert('同步完成', `已同步 ${favoriteService.getGlobalIndex().length} 个视频`);
+      setSyncStatus('done');
+      setTimeout(() => setSyncStatus('idle'), 3000);
     } catch (e: any) {
-      Alert.alert('同步失败', e.message || '未知错误');
-    } finally {
-      setIsSyncing(false);
+      setSyncStatus('error');
+      setSyncError(e.message || '未知错误');
     }
   };
 
@@ -154,14 +161,39 @@ export const SettingsScreen = () => {
         <View style={s.group}>
           <ListItem
             title="同步全局索引"
-            subtitle={`当前已索引 ${globalIndexCount} 个视频`}
-            onPress={onSyncGlobalIndex}
+            subtitle={
+              syncStatus === 'syncing' && progressData
+                ? `正在同步... ${progressData.completedTasks}/${progressData.totalTasks} 任务, ${progressData.processedVideos}/${progressData.totalVideos} 视频`
+                : syncStatus === 'error'
+                ? `同步失败: ${syncError}`
+                : syncStatus === 'done'
+                ? '同步完成'
+                : `当前已索引 ${globalIndexCount} 个视频`
+            }
+            onPress={syncStatus === 'syncing' ? undefined : onSyncGlobalIndex}
             right={
-              <Text style={{ color: isSyncing ? t.colors.textHint : t.colors.primary, fontSize: t.fontSize.base }}>
-                {isSyncing ? '同步中...' : '开始同步'}
-              </Text>
+              syncStatus === 'syncing' ? (
+                <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.base }}>同步中...</Text>
+              ) : syncStatus === 'error' ? (
+                <Text style={{ color: t.colors.error, fontSize: t.fontSize.base }}>重试</Text>
+              ) : (
+                <Text style={{ color: t.colors.primary, fontSize: t.fontSize.base }}>开始同步</Text>
+              )
             }
           />
+          {syncStatus === 'syncing' && progressData && (
+            <View style={{ paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md }}>
+              <View style={{ height: 4, backgroundColor: t.colors.divider, borderRadius: 2, overflow: 'hidden' }}>
+                <View
+                  style={{
+                    height: '100%',
+                    backgroundColor: t.colors.primary,
+                    width: `${(progressData.completedTasks / Math.max(1, progressData.totalTasks)) * 100}%`,
+                  }}
+                />
+              </View>
+            </View>
+          )}
         </View>
 
         <Text style={s.section}>缓存</Text>
