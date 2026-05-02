@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { storage } from '../core/storage';
 import type { Quality } from '../types/domain';
 
@@ -34,7 +34,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'settingsStore',
-      getStorage: () => mmkvStorage,
+      storage: createJSONStorage(() => mmkvStorage),
     },
   ),
 );

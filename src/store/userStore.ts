@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { storage } from '../core/storage';
 
 // MMKV storage adapter for Zustand persist
@@ -23,7 +23,7 @@ export const useUserStore = create<UserState>()(
     }),
     {
       name: 'userStore',
-      getStorage: () => mmkvStorage,
+      storage: createJSONStorage(() => mmkvStorage),
     },
   ),
 );

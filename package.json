@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "android": "react-native run-android",
+    "android": "set \"PATH=%PATH%;E:\\AndroidSDK\\platform-tools\" && react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
@@ -19,9 +19,9 @@
     "react-native": "0.74.5",
     "react-native-fast-image": "^8.6.3",
     "react-native-fs": "^2.20.0",
-    "react-native-mmkv": "^4.3.1",
+    "react-native-mmkv": "^2.12.2",
     "react-native-safe-area-context": "^5.7.0",
-    "react-native-screens": "^4.24.0",
+    "react-native-screens": "4.5.0",
     "react-native-track-player": "^4.1.2",
     "react-native-vector-icons": "^10.3.0",
     "zustand": "^5.0.12"

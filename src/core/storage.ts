@@ -1,6 +1,6 @@
-import { createMMKV } from 'react-native-mmkv';
+import { MMKV } from 'react-native-mmkv';
 
-const mmkv = createMMKV({ id: 'bili-music' });
+const mmkv = new MMKV({ id: 'bili-music' });
 
 export { mmkv };
 
@@ -17,13 +17,13 @@ export const storage = {
     try { return JSON.parse(s) as T; } catch { return null; }
   },
   setJSON: (k: string, v: any) => mmkv.set(k, JSON.stringify(v)),
-  delete:  (k: string) => mmkv.remove(k),
+  delete:  (k: string) => mmkv.delete(k),
   contains:(k: string) => mmkv.contains(k),
   getAllKeys: () => mmkv.getAllKeys(),
   /** 删除所有以 prefix 开头的 key */
   deletePrefix: (prefix: string) => {
     for (const k of mmkv.getAllKeys()) {
-      if (k.startsWith(prefix)) mmkv.remove(k);
+      if (k.startsWith(prefix)) mmkv.delete(k);
     }
   },
 };

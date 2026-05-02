@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { FavoriteVideo } from '../types/domain';
 import { storage } from '../core/storage';
 
@@ -28,7 +28,7 @@ export const usePlayerStore = create<PlayerState>()(
     }),
     {
       name: 'playerStore',
-      getStorage: () => mmkvStorage,
+      storage: createJSONStorage(() => mmkvStorage),
     },
   ),
 );
