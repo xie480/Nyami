@@ -17,39 +17,39 @@ const Stack = createNativeStackNavigator();
 export default function App() {
   const isDark = useColorScheme() === 'dark';
   const [isOnline, setIsOnline] = useState(true);
-+  const navigationRef = useNavigationContainerRef();
-+
-+  // Initialize player, network status listener, and back handler
-+  useEffect(() => {
-+    setupPlayer();
-+    netStatus.init();
-+    const unsubscribe = netStatus.onChange((type) => {
-+      const nowOnline = type !== 'none';
-+      setIsOnline(nowOnline);
-+      if (!nowOnline) {
-+        // Show a toast / alert when network goes offline
-+        const message = '网络已断开，当前仅可播放本地缓存音频';
-+        if (Platform.OS === 'android') {
-+          ToastAndroid.show(message, ToastAndroid.LONG);
-+        } else {
-+          Alert.alert('网络断开', message);
-+        }
-+      }
-+    });
-+
-+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-+      if (navigationRef.isReady() && navigationRef.canGoBack()) {
-+        navigationRef.goBack();
-+        return true;
-+      }
-+      return false;
-+    });
-+
-+    return () => {
-+      unsubscribe();
-+      backHandler.remove();
-+    };
-+  }, []);
+  const navigationRef = useNavigationContainerRef();
+
+  // Initialize player, network status listener, and back handler
+  useEffect(() => {
+    setupPlayer();
+    netStatus.init();
+    const unsubscribe = netStatus.onChange((type) => {
+      const nowOnline = type !== 'none';
+      setIsOnline(nowOnline);
+      if (!nowOnline) {
+        // Show a toast / alert when network goes offline
+        const message = '网络已断开，当前仅可播放本地缓存音频';
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(message, ToastAndroid.LONG);
+        } else {
+          Alert.alert('网络断开', message);
+        }
+      }
+    });
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (navigationRef.isReady() && navigationRef.canGoBack()) {
+        navigationRef.goBack();
+        return true;
+      }
+      return false;
+    });
+
+    return () => {
+      unsubscribe();
+      backHandler.remove();
+    };
+  }, []);
 
   return (
     <SafeAreaProvider>
