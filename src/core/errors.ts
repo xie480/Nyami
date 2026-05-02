@@ -54,7 +54,7 @@ export class RateLimitError extends BiliError {
 export function normalizeError(err: any): BiliError {
   if (err instanceof BiliError) return err;
   if (err?.code === 'ECONNABORTED') return new NetworkError('请求超时');
-  if (err?.response?.status === 429) return new RateLimitError();
+  if (err?.response?.status === 429 || err?.response?.status === 412) return new RateLimitError();
   if (err?.message) return new NetworkError(err.message, err);
   return new NetworkError('未知错误', err);
 }

@@ -1,10 +1,10 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import { config } from '../config';
 import { storage } from './storage';
-import { bucket } from './rateLimit';
+import { adaptiveBucket } from './adaptiveRateLimit';
 import {
   AuthRequiredError, BiliApiError, normalizeError,
-  ResourceUnavailableError,
+  ResourceUnavailableError, RateLimitError,
 } from './errors';
 import type { BiliResponse } from '../types/bili';
 
@@ -21,16 +21,23 @@ function createInstance(): AxiosInstance {
 
   // 请求拦截：限流 + 自动注入 Cookie
   ins.interceptors.request.use(async (cfg) => {
-    await bucket.acquire();
+    await adaptiveBucket.acquire();
     const cookie = storage.getString('biliCookie');
     if (cookie) cfg.headers.Cookie = cookie;
     return cfg;
   });
 
-  // 响应拦截：归一化错误
+  // 响应拦截：归一化错误 + 状态上报
   ins.interceptors.response.use(
-    (res) => res,
-    (err) => Promise.reject(normalizeError(err))
+    (res) => {
+      adaptiveBucket.reportSuccess();
+      return res;
+    },
+    (err) => {
+      const isRateLimit = err?.response?.status === 412 || err?.response?.status === 429;
+      adaptiveBucket.reportError(isRateLimit);
+      return Promise.reject(normalizeError(err));
+    }
   );
   return ins;
 }
@@ -70,9 +77,11 @@ export async function biliGet<T>(
         throw err;
       }
       if (attempt < retries) {
-        await new Promise((r) =>
-          setTimeout(r, config.retry.delayMs * (attempt + 1))
-        );
+        let delay = config.retry.delayMs * (attempt + 1);
+        if (err instanceof RateLimitError) {
+          delay = 3000; // 触发风控时等待更长时间
+        }
+        await new Promise((r) => setTimeout(r, delay));
       }
     }
   }

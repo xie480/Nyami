@@ -8,6 +8,7 @@ import type {
   PageResult,
 } from '../types/domain';
 import { storage } from '../core/storage';
+import { TaskQueue } from '../utils/taskQueue';
 
 export const favoriteService = {
   /**
@@ -80,32 +81,79 @@ export const favoriteService = {
     try {
       const folders = await this.getFolders(uid, force);
       const allVideos = new Map<string, FavoriteVideo>();
-      
-      for (const folder of folders) {
-        let page = 1;
-        let hasMore = true;
-        while (hasMore) {
+      const queue = new TaskQueue(5); // 最大并发5
+
+      // 带有指数退避的执行包装器
+      const executeWithBackoff = async (task: () => Promise<any>, maxRetries = 4) => {
+        for (let i = 0; i <= maxRetries; i++) {
           try {
-            const res = await this.getVideos(folder.id, page, 20, force);
-            for (const v of res.list) {
-              if (!allVideos.has(v.bvid)) {
-                allVideos.set(v.bvid, { ...v, folderIds: [folder.id] });
-              } else {
-                const existing = allVideos.get(v.bvid)!;
-                if (!existing.folderIds) existing.folderIds = [];
-                if (!existing.folderIds.includes(folder.id)) {
-                  existing.folderIds.push(folder.id);
-                }
-              }
+            return await queue.add(task);
+          } catch (e: any) {
+            const isRateLimit = e?.name === 'RateLimitError' || e?.message?.includes('412') || e?.message?.includes('429');
+            if (isRateLimit && i < maxRetries) {
+              const delay = Math.pow(2, i) * 1000 + Math.random() * 1000; // 指数退避 + 抖动
+              console.log(`Rate limited, waiting ${Math.round(delay)}ms before retry ${i + 1}...`);
+              await new Promise(r => setTimeout(r, delay));
+              continue;
             }
-            hasMore = res.hasMore;
-            page++;
-          } catch (e) {
-            console.warn(`Failed to fetch videos for folder ${folder.id} page ${page}`, e);
-            break; // Skip to next folder on error
+            throw e;
+          }
+        }
+      };
+
+      const processVideos = (folderId: number, list: FavoriteVideo[]) => {
+        for (const v of list) {
+          if (!allVideos.has(v.bvid)) {
+            allVideos.set(v.bvid, { ...v, folderIds: [folderId] });
+          } else {
+            const existing = allVideos.get(v.bvid)!;
+            if (!existing.folderIds) existing.folderIds = [];
+            if (!existing.folderIds.includes(folderId)) {
+              existing.folderIds.push(folderId);
+            }
+          }
+        }
+      };
+
+      // 1. 并发获取所有收藏夹的第一页
+      const firstPageTasks = folders.map(folder =>
+        executeWithBackoff(() => this.getVideos(folder.id, 1, 20, force))
+          .then(res => ({ folder, res }))
+          .catch(e => {
+            console.warn(`Failed to fetch first page for folder ${folder.id}`, e);
+            return null;
+          })
+      );
+      
+      const firstPages = await Promise.all(firstPageTasks);
+      const subsequentTasks: Array<() => Promise<void>> = [];
+
+      // 2. 收集后续需要拉取的页数
+      for (const result of firstPages) {
+        if (result) {
+          const { folder, res } = result;
+          processVideos(folder.id, res.list);
+          
+          // 如果有更多页，生成后续任务
+          if (res.hasMore) {
+            // B站收藏夹接口每页20条，可以通过 mediaCount 估算总页数
+            const totalPages = Math.ceil(folder.mediaCount / 20);
+            for (let page = 2; page <= totalPages; page++) {
+              subsequentTasks.push(async () => {
+                try {
+                  const pageRes = await executeWithBackoff(() => this.getVideos(folder.id, page, 20, force));
+                  processVideos(folder.id, pageRes.list);
+                } catch (e) {
+                  console.warn(`Failed to fetch videos for folder ${folder.id} page ${page}`, e);
+                }
+              });
+            }
           }
         }
       }
+      
+      // 3. 执行所有后续任务
+      await Promise.all(subsequentTasks.map(task => task()));
       
       storage.setJSON('globalIndex', Array.from(allVideos.values()));
     } catch (e) {
