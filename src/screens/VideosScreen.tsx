@@ -50,6 +50,13 @@ export const VideosScreen = ({ route, navigation }: any) => {
 
   useEffect(() => { loadMore(); /* eslint-disable-next-line */ }, []);
 
+  // Ensure all pages are loaded before playing whole list
+  const ensureAllLoaded = async () => {
+    while (hasMore) {
+      await loadMore();
+    }
+  };
+
   const playFrom = async (idx: number) => {
     const target = list[idx];
     setQueue(list, target.bvid);
@@ -58,8 +65,13 @@ export const VideosScreen = ({ route, navigation }: any) => {
     navigation.navigate('Player');
   };
 
-  const playAll = () => playFrom(0);
-  const shuffle = () => {
+  const playAll = async () => {
+    if (hasMore) await ensureAllLoaded();
+    playFrom(0);
+  };
+
+  const shuffle = async () => {
+    if (hasMore) await ensureAllLoaded();
     const shuffled = [...list].sort(() => Math.random() - 0.5);
     setList(shuffled);
     playFrom(0);

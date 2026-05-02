@@ -1,6 +1,14 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { storage } from '../core/storage';
 import type { Quality } from '../types/domain';
+
+// MMKV storage adapter for zustand persist
+const mmkvStorage = {
+  getItem: (name: string) => Promise.resolve(storage.getString(name) ?? null),
+  setItem: (name: string, value: string) => Promise.resolve(storage.setString(name, value)),
+  removeItem: (name: string) => Promise.resolve(storage.delete(name)),
+};
 
 interface Settings {
   quality: Quality;
@@ -14,31 +22,19 @@ interface SettingsState extends Settings {
   setWifiOnly: (v: boolean) => void;
 }
 
-const KEY = 'settings';
-const init: Settings =
-  storage.getJSON<Settings>(KEY) || {
-    quality: 'low',
-    autoCacheOnWifi: true,
-    wifiOnly: false,
-  };
-
-const persist = (s: Partial<Settings>, prev: Settings) => {
-  const next = { ...prev, ...s };
-  storage.setJSON(KEY, next);
-};
-
-export const useSettingsStore = create<SettingsState>((set, get) => ({
-  ...init,
-  setQuality: (q) => {
-    set({ quality: q });
-    persist({ quality: q }, get());
-  },
-  setAutoCacheOnWifi: (v) => {
-    set({ autoCacheOnWifi: v });
-    persist({ autoCacheOnWifi: v }, get());
-  },
-  setWifiOnly: (v) => {
-    set({ wifiOnly: v });
-    persist({ wifiOnly: v }, get());
-  },
-}));
+export const useSettingsStore = create<SettingsState>()(
+  persist(
+    (set) => ({
+      quality: 'low',
+      autoCacheOnWifi: true,
+      wifiOnly: false,
+      setQuality: (q) => set({ quality: q }),
+      setAutoCacheOnWifi: (v) => set({ autoCacheOnWifi: v }),
+      setWifiOnly: (v) => set({ wifiOnly: v }),
+    }),
+    {
+      name: 'settingsStore',
+      getStorage: () => mmkvStorage,
+    },
+  ),
+);

@@ -47,6 +47,12 @@ export const SettingsScreen = () => {
   };
 
   const onSaveCookie = () => {
+    // Validate cookie format before saving
+    const sess = cookieService.extractSessdata(cookie);
+    if (!sess) {
+      Alert.alert('无效的 Cookie', '请确保输入包含 SESSDATA=...');
+      return;
+    }
     cookieService.set(cookie);
     Alert.alert('已保存', '已清除相关缓存，重新进入收藏夹将使用新身份');
   };
