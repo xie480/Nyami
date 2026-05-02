@@ -14,6 +14,7 @@ import { FoldersScreen } from './screens/FoldersScreen';
 import { VideosScreen } from './screens/VideosScreen';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { favoriteService } from './services/favoriteService';
 
 const Stack = createNativeStackNavigator();
 
@@ -54,6 +55,14 @@ export default function App() {
       backHandler.remove();
     };
   }, []);
+
+  // Rebuild global index on startup or when uid changes
+  useEffect(() => {
+    if (uid) {
+      favoriteService.clearGlobalIndex();
+      favoriteService.syncGlobalIndex(uid).catch(console.warn);
+    }
+  }, [uid]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

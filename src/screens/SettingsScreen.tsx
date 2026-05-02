@@ -9,7 +9,7 @@ import { Switch } from '../components/Switch';
 import { useSettingsStore } from '../store/settingsStore';
 import { useUserStore } from '../store/userStore';
 import { audioCache } from '../services/audioCache';
-import { cookieService } from '../services';
+import { cookieService, favoriteService } from '../services';
 import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,13 +35,18 @@ export const SettingsScreen = () => {
   const [cacheSize, setCacheSize] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
   const [cookie, setCookie] = useState(cookieService.get());
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [globalIndexCount, setGlobalIndexCount] = useState(0);
 
   const refresh = () => {
     setCacheSize(audioCache.getTotalSize());
     setCacheCount(audioCache.getCount());
   };
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    refresh();
+    setGlobalIndexCount(favoriteService.getGlobalIndex().length);
+  }, []);
 
   const onClear = () => {
     Alert.alert('确认清空', '将删除所有已缓存的音频文件', [
@@ -51,6 +56,23 @@ export const SettingsScreen = () => {
         onPress: async () => { await audioCache.clearAll(); refresh(); },
       },
     ]);
+  };
+
+  const onSyncGlobalIndex = async () => {
+    if (!uid) {
+      Alert.alert('提示', '请先设置 UID');
+      return;
+    }
+    setIsSyncing(true);
+    try {
+      await favoriteService.syncGlobalIndex(uid, true);
+      setGlobalIndexCount(favoriteService.getGlobalIndex().length);
+      Alert.alert('同步完成', `已同步 ${favoriteService.getGlobalIndex().length} 个视频`);
+    } catch (e: any) {
+      Alert.alert('同步失败', e.message || '未知错误');
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const onSaveCookie = () => {
@@ -125,6 +147,20 @@ export const SettingsScreen = () => {
           <ListItem
             title="WiFi 下自动缓存已播放音频"
             right={<Switch value={autoCacheOnWifi} onValueChange={setAutoCacheOnWifi} />}
+          />
+        </View>
+
+        <Text style={s.section}>全局索引</Text>
+        <View style={s.group}>
+          <ListItem
+            title="同步全局索引"
+            subtitle={`当前已索引 ${globalIndexCount} 个视频`}
+            onPress={onSyncGlobalIndex}
+            right={
+              <Text style={{ color: isSyncing ? t.colors.textHint : t.colors.primary, fontSize: t.fontSize.base }}>
+                {isSyncing ? '同步中...' : '开始同步'}
+              </Text>
+            }
           />
         </View>
 

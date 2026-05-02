@@ -3,7 +3,7 @@ import { View, FlatList, RefreshControl, StyleSheet, TouchableOpacity, Platform,
 import { Header } from '../components/Header';
 import { useSelectionStore } from '../store/selectionStore';
 import TrackPlayer from 'react-native-track-player';
-// import { usePlayerStore } from '../store/playerStore'; // Unused import removed
+import { usePlayerStore } from '../store/playerStore';
 import { ListItem } from '../components/ListItem';
 import { IconButton } from '../components/IconButton';
 import { Loading } from '../components/Loading';
@@ -12,7 +12,7 @@ import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
-import { appendQueue as tpAppendQueue } from '../services/trackPlayer';
+import { appendQueue as tpAppendQueue, loadQueue } from '../services/trackPlayer';
 import { useUserStore } from '../store/userStore';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +21,7 @@ import type { FavoriteFolder } from '../types/domain';
 export const FoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
   const uid = useUserStore((s) => s.uid);
+  const setQueue = usePlayerStore((s) => s.setQueue);
   const { selectedIds, toggle, clear } = useSelectionStore();
   const [folders, setFolders] = useState<FavoriteFolder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +88,29 @@ export const FoldersScreen = ({ navigation }: any) => {
         <FlatList
           contentContainerStyle={s.list}
           data={folders}
+          ListHeaderComponent={
+            <Button
+              title="🔀 全局随机播放"
+              variant="secondary"
+              onPress={async () => {
+                const globalIndex = favoriteService.getGlobalIndex();
+                if (globalIndex.length === 0) {
+                  if (Platform.OS === 'android') {
+                    ToastAndroid.show('全局索引为空或正在同步中，请稍后再试', ToastAndroid.SHORT);
+                  } else {
+                    Alert.alert('提示', '全局索引为空或正在同步中，请稍后再试');
+                  }
+                  return;
+                }
+                const shuffled = [...globalIndex].sort(() => Math.random() - 0.5);
+                setQueue(shuffled, shuffled[0]?.bvid);
+                await loadQueue(shuffled, shuffled[0]?.bvid);
+                await TrackPlayer.play();
+                navigation.navigate('Player');
+              }}
+              style={{ marginBottom: t.spacing.md }}
+            />
+          }
           keyExtractor={(it) => String(it.id)}
           ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}
           refreshControl={
@@ -112,10 +136,8 @@ export const FoldersScreen = ({ navigation }: any) => {
                   subtitle={`${item.mediaCount} 个视频`}
                   icon="folder-music-outline"
                   showArrow={!isMultiSelectMode}
-                  onPress={() => {
-                    if (!isMultiSelectMode) {
-                      navigation.navigate('Videos', { mediaId: item.id, title: item.title });
-                    }
+                  onPress={isMultiSelectMode ? undefined : () => {
+                    navigation.navigate('Videos', { mediaId: item.id, title: item.title });
                   }}
                 />
               </View>
@@ -130,20 +152,27 @@ export const FoldersScreen = ({ navigation }: any) => {
             try {
               // Fetch all videos from selected folders
               const ids = Array.from(selectedIds);
-              const fetchAll = async (folderId: number) => {
-                const videos: any[] = [];
-                let page = 1;
-                let hasMore = true;
-                while (hasMore) {
-                  const res = await favoriteService.getVideos(folderId, page);
-                  videos.push(...res.list);
-                  hasMore = res.hasMore;
-                  page += 1;
-                }
-                return videos;
-              };
-              const results = await Promise.all(ids.map(fetchAll));
-              const allVideos = results.flat();
+              let allVideos: any[] = [];
+              const globalIndex = favoriteService.getGlobalIndex();
+              
+              if (globalIndex.length > 0) {
+                allVideos = globalIndex.filter(v => v.folderIds?.some(id => ids.includes(id)));
+              } else {
+                const fetchAll = async (folderId: number) => {
+                  const videos: any[] = [];
+                  let page = 1;
+                  let hasMore = true;
+                  while (hasMore) {
+                    const res = await favoriteService.getVideos(folderId, page);
+                    videos.push(...res.list);
+                    hasMore = res.hasMore;
+                    page += 1;
+                  }
+                  return videos;
+                };
+                const results = await Promise.all(ids.map(fetchAll));
+                allVideos = results.flat();
+              }
 
               // Shuffle
               const shuffled = allVideos.slice().sort(() => Math.random() - 0.5);

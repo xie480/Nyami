@@ -3,6 +3,7 @@ import {
   View, FlatList, TouchableOpacity, Text, StyleSheet,
   ActivityIndicator,
   Alert, Platform, ToastAndroid,
+  Modal,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -42,12 +43,32 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const [loading, setLoading] = useState(false);
   const [initing, setIniting] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<FavoriteVideo | null>(null);
 
   const loadMore = useCallback(async () => {
     if (loadingRef.current || !hasMoreRef.current) return;
     loadingRef.current = true;
     setLoading(true);
     try {
+      const globalIndex = favoriteService.getGlobalIndex();
+      if (globalIndex.length > 0) {
+        const folderVideos = globalIndex.filter(v => v.folderIds?.includes(mediaId));
+        if (folderVideos.length > 0) {
+          if (pageRef.current === 1) {
+            setList(folderVideos);
+            listRef.current = folderVideos;
+            setHasMore(false);
+            hasMoreRef.current = false;
+          }
+          setError(null);
+          setLoading(false);
+          loadingRef.current = false;
+          setIniting(false);
+          return;
+        }
+      }
+
       const r = await favoriteService.getVideos(mediaId, pageRef.current);
       // Merge with existing list using ref to avoid stale closures
       const newList = [...listRef.current, ...r.list];
@@ -158,6 +179,24 @@ export const VideosScreen = ({ route, navigation }: any) => {
     upper: { fontSize: t.fontSize.xs, color: t.colors.textSub },
     duration: { fontSize: t.fontSize.xs, color: t.colors.textHint },
     footer: { padding: t.spacing.lg, alignItems: 'center' },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'flex-end',
+    },
+    modalContent: {
+      backgroundColor: t.colors.background,
+      borderTopLeftRadius: 12,
+      borderTopRightRadius: 12,
+      padding: t.spacing.lg,
+      maxHeight: '80%',
+    },
+    modalTitle: {
+      fontSize: t.fontSize.lg,
+      fontWeight: '600',
+      marginBottom: t.spacing.md,
+      textAlign: 'center',
+    },
   });
 
   return (
@@ -192,13 +231,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
               </View>
               <IconButton name="dots-vertical" size={24} color={t.colors.text}
                 onPress={() => {
-                  insertNext(item);
-                  const msg = '已添加至下一首播放';
-                  if (Platform.OS === 'android') {
-                    ToastAndroid.show(msg, ToastAndroid.SHORT);
-                  } else {
-                    Alert.alert('', msg);
-                  }
+                  setSelectedVideo(item);
+                  setModalVisible(true);
                 }} />
             </TouchableOpacity>
           )}
@@ -217,6 +251,36 @@ export const VideosScreen = ({ route, navigation }: any) => {
           }
         />
       )}
+      {/* Bottom Action Modal */}
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.modalContent}>
+            <Text style={s.modalTitle}>操作</Text>
+            <Button
+              title="加入下一首播放"
+              onPress={() => {
+                if (selectedVideo) {
+                  insertNext(selectedVideo);
+                  const msg = '已添加至下一首播放';
+                  if (Platform.OS === 'android') {
+                    ToastAndroid.show(msg, ToastAndroid.SHORT);
+                  } else {
+                    Alert.alert('', msg);
+                  }
+                }
+                setModalVisible(false);
+              }}
+              style={{ marginBottom: t.spacing.md }}
+            />
+            <Button title="关闭" variant="secondary" onPress={() => setModalVisible(false)} />
+          </View>
+        </View>
+      </Modal>
       <MiniPlayer />
     </SafeAreaView>
   );

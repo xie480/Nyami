@@ -16,9 +16,13 @@ interface PlayerState {
   queue: FavoriteVideo[];
   currentBvid: string | null;
   playbackError: string | null;
+  playMode: 'sequential' | 'shuffle';
+  originalQueue: FavoriteVideo[];
   setQueue: (q: FavoriteVideo[], bvid?: string) => void;
   setCurrentBvid: (bvid: string | null) => void;
   setPlaybackError: (msg: string | null) => void;
+  setPlayMode: (mode: 'sequential' | 'shuffle') => void;
+  togglePlayMode: () => void;
   insertNext: (video: FavoriteVideo) => Promise<void>;
   removeFromQueue: (bvid: string) => Promise<void>;
   reorderQueue: (videos: FavoriteVideo[], startBvid?: string) => Promise<void>;
@@ -31,10 +35,23 @@ export const usePlayerStore = create<PlayerState>()(
       queue: [],
       currentBvid: null,
       playbackError: null,
+      playMode: 'sequential',
+      originalQueue: [],
       setQueue: (queue, bvid) =>
-        set({ queue, currentBvid: bvid ?? queue[0]?.bvid ?? null }),
+        set({ queue, currentBvid: bvid ?? queue[0]?.bvid ?? null, originalQueue: queue }),
       setCurrentBvid: (bvid) => set({ currentBvid: bvid }),
       setPlaybackError: (msg) => set({ playbackError: msg }),
+      setPlayMode: (mode) => set({ playMode: mode }),
+      togglePlayMode: () => set(state => {
+        if (state.playMode === 'sequential') {
+          // Shuffle the queue while preserving original order
+          const shuffled = [...state.queue].sort(() => Math.random() - 0.5);
+          return { playMode: 'shuffle', queue: shuffled };
+        } else {
+          // Restore original order
+          return { playMode: 'sequential', queue: state.originalQueue };
+        }
+      }),
       // Insert a video to be played next after the current track
       insertNext: async (video) => {
         await tpInsertNext(video);

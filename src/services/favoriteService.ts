@@ -7,6 +7,7 @@ import type {
   FavoriteVideo,
   PageResult,
 } from '../types/domain';
+import { storage } from '../core/storage';
 
 export const favoriteService = {
   /**
@@ -69,5 +70,60 @@ export const favoriteService = {
   /** 失效某用户的收藏夹列表缓存 */
   invalidateFolderList(uid: string) {
     cache.delete(`folders:${uid}`);
+  },
+
+  /**
+   * 同步全局索引
+   */
+  async syncGlobalIndex(uid: string, force = false): Promise<void> {
+    if (!uid) return;
+    try {
+      const folders = await this.getFolders(uid, force);
+      const allVideos = new Map<string, FavoriteVideo>();
+      
+      for (const folder of folders) {
+        let page = 1;
+        let hasMore = true;
+        while (hasMore) {
+          try {
+            const res = await this.getVideos(folder.id, page, 20, force);
+            for (const v of res.list) {
+              if (!allVideos.has(v.bvid)) {
+                allVideos.set(v.bvid, { ...v, folderIds: [folder.id] });
+              } else {
+                const existing = allVideos.get(v.bvid)!;
+                if (!existing.folderIds) existing.folderIds = [];
+                if (!existing.folderIds.includes(folder.id)) {
+                  existing.folderIds.push(folder.id);
+                }
+              }
+            }
+            hasMore = res.hasMore;
+            page++;
+          } catch (e) {
+            console.warn(`Failed to fetch videos for folder ${folder.id} page ${page}`, e);
+            break; // Skip to next folder on error
+          }
+        }
+      }
+      
+      storage.setJSON('globalIndex', Array.from(allVideos.values()));
+    } catch (e) {
+      console.warn('Failed to sync global index', e);
+    }
+  },
+
+  /**
+   * 获取全局索引
+   */
+  getGlobalIndex(): FavoriteVideo[] {
+    return storage.getJSON<FavoriteVideo[]>('globalIndex') || [];
+  },
+
+  /**
+   * 清理全局索引
+   */
+  clearGlobalIndex() {
+    storage.delete('globalIndex');
   },
 };

@@ -175,6 +175,8 @@ async function lazyResolve(index: number) {
       const info = await audioService.getInfo(bvid, quality);
       url = info.audio.baseUrl;
       headers = { Referer: config.referer };
+      // 触发后台自动下载
+      autoCache(bvid).catch(() => {});
     }
 
     // 动态查找当前 placeholder 的实际索引，防止队列变化导致 index 失效

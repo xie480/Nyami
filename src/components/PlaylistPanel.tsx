@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Modal } from 'react-native';
+import { TouchableOpacity } from 'react-native-gesture-handler';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import { useTheme } from '../theme';
 import { usePlayerStore } from '../store/playerStore';
@@ -15,6 +16,8 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const queue = usePlayerStore((s) => s.queue);
   const reorderQueue = usePlayerStore((s) => s.reorderQueue);
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
+  const playMode = usePlayerStore((s) => s.playMode);
+  const togglePlayMode = usePlayerStore((s) => s.togglePlayMode);
 
   const renderItem = useCallback(
     ({ item, drag, isActive }: RenderItemParams<FavoriteVideo>) => (
