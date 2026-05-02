@@ -25,6 +25,34 @@ function pickAudio(audios: ReturnType<typeof normalizeAudio>[], quality: Quality
   return sorted[0];
 }
 
+// 选择最快可用 CDN URL，使用并发 HEAD（或带 Range 的 GET）请求并缓存结果
+async function selectFastestUrl(bvid: string, baseUrl: string, backupUrls: string[]): Promise<string> {
+  const cacheKey = `fastestUrl:${bvid}`;
+  const cached = cache.get<string>(cacheKey);
+  if (cached) return cached;
+  const urls = [baseUrl, ...(backupUrls || [])];
+  const tryUrl = async (url: string): Promise<string> => {
+    try {
+      const res = await fetch(url, { method: 'HEAD' });
+      if (res.ok) return url;
+    } catch {}
+    try {
+      const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' } });
+      if (res.ok) return url;
+    } catch {}
+    throw new Error('unreachable');
+  };
+  try {
+    const fastest = await Promise.any(urls.map(tryUrl));
+    cache.set(cacheKey, fastest, config.cacheTTL.audioUrl);
+    return fastest;
+  } catch {
+    // 所有 CDN 均不可达，回退至原始 baseUrl
+    cache.set(cacheKey, baseUrl, config.cacheTTL.audioUrl);
+    return baseUrl;
+  }
+}
+
 export const audioService = {
   /**
    * 获取音频元信息
@@ -68,7 +96,8 @@ export const audioService = {
             id: audio.id,
             bitrate: Math.round((audio.bandwidth || 0) / 1000),
             mimeType: audio.mimeType,
-            baseUrl: audio.baseUrl,
+            // 使用最快的 CDN URL
+            baseUrl: await selectFastestUrl(bvid, audio.baseUrl, audio.backupUrl),
             backupUrl: audio.backupUrl,
           },
         };

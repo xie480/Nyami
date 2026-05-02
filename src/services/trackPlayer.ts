@@ -7,6 +7,8 @@ import { netStatus } from './netStatus';
 import { useSettingsStore } from '../store/settingsStore';
 import { config } from '../config';
 import { usePlayerStore } from '../store/playerStore';
+import { performanceMonitor } from './performanceMonitor';
+import { State } from 'react-native-track-player';
 // 用于防止同一索引的 lazyResolve 并发执行，避免重复替换
 const resolving = new Set<number>();
 import type { FavoriteVideo } from '../types/domain';
@@ -21,6 +23,11 @@ export async function setupPlayer() {
       android: {
         appKilledPlaybackBehavior:
           AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
+        // 缓冲策略参数（秒）
+        minBuffer: 1.5,      // 1500 ms
+        maxBuffer: 30,      // 30000 ms
+        playBuffer: 0.5,     // 500 ms
+        backBuffer: 0,      // 0 ms（默认）
       },
       capabilities: [
         Capability.Play, Capability.Pause,
@@ -88,6 +95,8 @@ async function lazyResolve(index: number) {
     if (!t || !String(t.url).startsWith('placeholder://')) return;
     
     bvid = String(t.url).replace('placeholder://', '');
+    // 记录轨道开始加载时间
+    performanceMonitor.start(bvid);
     const quality = useSettingsStore.getState().quality;
     
     let url = '';
@@ -164,7 +173,27 @@ export async function PlaybackService() {
     TrackPlayer.seekTo(position)
   );
 
+  // Performance monitoring: track playback state changes
+  TrackPlayer.addEventListener(Event.PlaybackState, async (playbackState) => {
+    // playbackState is of type PlaybackState, with .state property.
+    const playerState = (playbackState as any).state;
+    const activeTrack = await TrackPlayer.getActiveTrack();
+    if (!activeTrack?.id) return;
+    const bvid = activeTrack.id as string;
+    if (playerState === State.Playing) {
+      performanceMonitor.firstFrame(bvid);
+      performanceMonitor.stallEnd(bvid);
+    } else if (playerState === State.Buffering) {
+      performanceMonitor.stallStart(bvid);
+    }
+  });
+
   TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async (e) => {
+    // Record start of track loading/playback
+    const activeTrack = await TrackPlayer.getActiveTrack();
+    if (activeTrack?.id) {
+      performanceMonitor.start(activeTrack.id as string);
+    }
     if (e.index !== undefined) {
       await lazyResolve(e.index);
       // prefetch next track if exists for seamless playback
