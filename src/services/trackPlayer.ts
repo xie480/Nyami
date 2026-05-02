@@ -51,7 +51,8 @@ async function buildTrack(v: FavoriteVideo) {
     id: v.bvid, url: info.audio.baseUrl,
     title: v.title, artist: v.upper.name,
     artwork: v.cover, duration: v.duration,
-    headers: { Referer: config.referer, 'User-Agent': config.userAgent },
+    userAgent: config.userAgent,
+    headers: { Referer: config.referer },
   };
 }
 
@@ -98,7 +99,7 @@ async function lazyResolve(index: number) {
     } else {
       const info = await audioService.getInfo(bvid, quality);
       url = info.audio.baseUrl;
-      headers = { Referer: config.referer, 'User-Agent': config.userAgent };
+      headers = { Referer: config.referer };
     }
 
     // 动态查找当前 placeholder 的实际索引，防止队列变化导致 index 失效
@@ -108,7 +109,7 @@ async function lazyResolve(index: number) {
       return; // 找不到对应的 placeholder，可能已被用户操作移出队列或已解析
     }
 
-    const newTrack = { ...t, url, headers };
+    const newTrack = { ...t, url, userAgent: config.userAgent, headers };
     // 平滑替换策略：先在 actualIndex 后面插入新 track，跳过去，再删掉原来的 placeholder
     await TrackPlayer.add(newTrack, actualIndex + 1);
     const postAddActiveTrackIndex = await TrackPlayer.getActiveTrackIndex();
