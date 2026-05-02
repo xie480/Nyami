@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { SafeAreaView, StatusBar } from 'react-native';
 import {
   View, Text, ScrollView, StyleSheet, Alert, TextInput,
 } from 'react-native';
@@ -11,6 +12,7 @@ import { audioCache } from '../services/audioCache';
 import { cookieService } from '../services';
 import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Quality } from '../types/domain';
 
 const QUALITY_OPTIONS: Array<{ key: Quality; title: string; subtitle: string }> = [
@@ -21,6 +23,7 @@ const QUALITY_OPTIONS: Array<{ key: Quality; title: string; subtitle: string }> 
 
 export const SettingsScreen = () => {
   const t = useTheme();
+  const insets = useSafeAreaInsets();
   const {
     quality, autoCacheOnWifi, wifiOnly,
     setQuality, setAutoCacheOnWifi, setWifiOnly,
@@ -89,7 +92,8 @@ export const SettingsScreen = () => {
   });
 
   return (
-    <View style={s.container}>
+    <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title="设置" showBack />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
         <Text style={s.section}>音质</Text>
@@ -181,6 +185,6 @@ export const SettingsScreen = () => {
           <ListItem title="开源协议" subtitle="本应用仅供个人学习使用" />
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, FlatList, RefreshControl, StyleSheet, TouchableOpacity, Platform, Alert, ToastAndroid, Text } from 'react-native';
+import { View, FlatList, RefreshControl, StyleSheet, TouchableOpacity, Platform, Alert, ToastAndroid, Text, SafeAreaView, StatusBar } from 'react-native';
 import { Header } from '../components/Header';
 import { useSelectionStore } from '../store/selectionStore';
 import TrackPlayer from 'react-native-track-player';
@@ -15,6 +15,7 @@ import { favoriteService } from '../services';
 import { appendQueue as tpAppendQueue } from '../services/trackPlayer';
 import { useUserStore } from '../store/userStore';
 import { useTheme } from '../theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FavoriteFolder } from '../types/domain';
 
 export const FoldersScreen = ({ navigation }: any) => {
@@ -25,6 +26,7 @@ export const FoldersScreen = ({ navigation }: any) => {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const load = useCallback(async (force = false) => {
     setError(null);
@@ -39,6 +41,10 @@ export const FoldersScreen = ({ navigation }: any) => {
   }, [uid]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    StatusBar.setBarStyle(t.isDark ? 'light-content' : 'dark-content');
+    StatusBar.setTranslucent(true);
+  }, [t.isDark]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -51,9 +57,10 @@ export const FoldersScreen = ({ navigation }: any) => {
   });
 
   return (
-    <View style={s.container}>
+    <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header
-        title="收藏夹"
+        title="BiliMusic"
         showBack={false}
         left={<TouchableOpacity onPress={() => {
           if (isMultiSelectMode) {
@@ -164,6 +171,6 @@ export const FoldersScreen = ({ navigation }: any) => {
         </View>
       )}
       <MiniPlayer />
-    </View>
+    </SafeAreaView>
   );
 };

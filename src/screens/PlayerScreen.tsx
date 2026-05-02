@@ -5,7 +5,7 @@ import TrackPlayer, {
   useActiveTrack, usePlaybackState, useProgress, State,
 } from 'react-native-track-player';
 import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { IconButton } from '../components/IconButton';
 import { useUIStore } from '../store/uiStore';
 import { ProgressBar } from '../components/ProgressBar';
@@ -88,8 +88,8 @@ export const PlayerScreen = () => {
   };
 
   return (
-    <View style={s.container}>
-      <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} />
+    <SafeAreaView style={s.container}>
+      <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <View style={s.header}>
         <IconButton name="chevron-down" size={28} onPress={() => nav.goBack()} />
         <IconButton name="dots-horizontal" size={24} />
@@ -139,6 +139,6 @@ export const PlayerScreen = () => {
           <Text style={s.statusText}>·  来源 {sourceText}</Text>
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 };

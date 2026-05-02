@@ -8,6 +8,7 @@ import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import TrackPlayer from 'react-native-track-player';
 import { IconButton } from '../components/IconButton';
+import { SafeAreaView, StatusBar } from 'react-native';
 import { Header } from '../components/Header';
 // Removed duplicate import, already imported above
 import { Loading } from '../components/Loading';
@@ -20,10 +21,12 @@ import { loadQueue } from '../services/trackPlayer';
 import { usePlayerStore } from '../store/playerStore';
 import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FavoriteVideo } from '../types/domain';
 
 export const VideosScreen = ({ route, navigation }: any) => {
   const t = useTheme();
+  const insets = useSafeAreaInsets();
   const { mediaId, title } = route.params;
   const setQueue = usePlayerStore((s) => s.setQueue);
   const insertNext = usePlayerStore((s) => s.insertNext);
@@ -158,7 +161,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
   });
 
   return (
-    <View style={s.container}>
+    <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title={`${title} (${list.length})`} showBack />
       {initing ? (
         <Loading />
@@ -214,6 +218,6 @@ export const VideosScreen = ({ route, navigation }: any) => {
         />
       )}
       <MiniPlayer />
-    </View>
+    </SafeAreaView>
   );
 };

@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, Alert,
+  View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, Alert, SafeAreaView, StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Button } from '../components/Button';
 import { useUserStore } from '../store/userStore';
 import { useTheme } from '../theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const HomeScreen = ({ navigation }: any) => {
   const t = useTheme();
   const { uid, setUid } = useUserStore();
   const [input, setInput] = useState(uid);
+  const insets = useSafeAreaInsets();
 
   const onEnter = () => {
     if (!/^\d{1,20}$/.test(input)) {
@@ -51,15 +53,14 @@ export const HomeScreen = ({ navigation }: any) => {
   });
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={s.container}
-    >
+    <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <View style={s.iconWrap}>
         <Icon name="music" size={44} color={t.colors.primary} />
       </View>
-      <Text style={s.title}>B 站音乐</Text>
-      <Text style={s.subtitle}>离线收听你的收藏</Text>
+      <Text style={s.title}>BiliMusic</Text>
+      <Text style={s.subtitle}>你所热爱的，就是你的生活</Text>
       <TextInput
         style={s.input}
         placeholder="请输入 B 站 UID"
@@ -78,5 +79,6 @@ export const HomeScreen = ({ navigation }: any) => {
         设置
       </Text>
     </KeyboardAvoidingView>
+  </SafeAreaView>
   );
 };
