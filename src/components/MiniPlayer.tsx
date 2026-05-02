@@ -7,6 +7,8 @@ import TrackPlayer, {
 import { useNavigation } from '@react-navigation/native';
 import { IconButton } from './IconButton';
 import { useTheme } from '../theme';
+import { useUIStore } from '../store/uiStore';
+import { PlaylistPanel } from './PlaylistPanel';
 
 export const MiniPlayer: React.FC = () => {
   const t = useTheme();
@@ -72,6 +74,9 @@ export const MiniPlayer: React.FC = () => {
           />
           <IconButton name="skip-next" size={26} color={t.colors.text}
                       onPress={() => TrackPlayer.skipToNext()} />
+          {/* Playlist button */}
+          <IconButton name="playlist-music" size={24} color={t.colors.text}
+                      onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
         </View>
       </View>
     </View>

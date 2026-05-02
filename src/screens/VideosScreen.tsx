@@ -7,6 +7,7 @@ import {
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import TrackPlayer from 'react-native-track-player';
+import { IconButton } from '../components/IconButton';
 import { Header } from '../components/Header';
 // Removed duplicate import, already imported above
 import { Loading } from '../components/Loading';
@@ -25,6 +26,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const t = useTheme();
   const { mediaId, title } = route.params;
   const setQueue = usePlayerStore((s) => s.setQueue);
+  const insertNext = usePlayerStore((s) => s.insertNext);
   // Refs to keep pagination state up‑to‑date across closures
   const pageRef = useRef(1);
   const hasMoreRef = useRef(true);
@@ -184,6 +186,16 @@ export const VideosScreen = ({ route, navigation }: any) => {
                   <Text style={s.duration}>{formatDuration(item.duration)}</Text>
                 </View>
               </View>
+              <IconButton name="dots-vertical" size={24} color={t.colors.text}
+                onPress={() => {
+                  insertNext(item);
+                  const msg = '已添加至下一首播放';
+                  if (Platform.OS === 'android') {
+                    ToastAndroid.show(msg, ToastAndroid.SHORT);
+                  } else {
+                    Alert.alert('', msg);
+                  }
+                }} />
             </TouchableOpacity>
           )}
           onEndReached={loadMore}

@@ -7,6 +7,8 @@ import TrackPlayer, {
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from '../components/IconButton';
+import { useUIStore } from '../store/uiStore';
+import { PlaylistPanel } from '../components/PlaylistPanel';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
@@ -21,6 +23,7 @@ export const PlayerScreen = () => {
   const playback = usePlaybackState();
   const progress = useProgress();
   const quality = useSettingsStore((s) => s.quality);
+  const playlistVisible = useUIStore(state => state.playlistVisible);
 
   const isPlaying = playback.state === State.Playing;
   const isBuffering = playback.state === State.Buffering || playback.state === State.Loading;
@@ -91,6 +94,8 @@ export const PlayerScreen = () => {
       <View style={s.header}>
         <IconButton name="chevron-down" size={28} onPress={() => nav.goBack()} />
         <IconButton name="dots-horizontal" size={24} />
+        <IconButton name="playlist-music" size={24} color={t.colors.text}
+          onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
       </View>
 
       <View style={s.body}>
@@ -134,6 +139,8 @@ export const PlayerScreen = () => {
         <View style={s.statusItem}>
           <Text style={s.statusText}>·  来源 {sourceText}</Text>
         </View>
+        {/* Playlist Panel Modal */}
+        <PlaylistPanel visible={playlistVisible} onClose={() => useUIStore.getState().setPlaylistVisible(false)} />
       </View>
     </View>
   );

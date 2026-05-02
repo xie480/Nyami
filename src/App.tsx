@@ -1,8 +1,11 @@
+import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
+import { useUserStore } from './store/userStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useColorScheme, Alert, Platform, ToastAndroid, BackHandler } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler'; // [新增] 导入 GestureHandlerRootView
 import { ThemeProvider } from './theme';
 import { setupPlayer } from './services/trackPlayer';
 import { netStatus } from './services/netStatus';
@@ -18,6 +21,7 @@ export default function App() {
   const isDark = useColorScheme() === 'dark';
   const [isOnline, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
+  const uid = useUserStore((s) => s.uid);
 
   // Initialize player, network status listener, and back handler
   useEffect(() => {
@@ -52,22 +56,27 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <NavigationContainer ref={navigationRef} theme={isDark ? DarkTheme : DefaultTheme}>
-          <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
-            <Stack.Screen name="Home" component={HomeScreen} />
-            <Stack.Screen name="Folders" component={FoldersScreen} />
-            <Stack.Screen name="Videos" component={VideosScreen} />
-            <Stack.Screen
-              name="Player"
-              component={PlayerScreen}
-              options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
-            />
-            <Stack.Screen name="Settings" component={SettingsScreen} />
-          </Stack.Navigator>
-        </NavigationContainer>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <NavigationContainer ref={navigationRef} theme={isDark ? DarkTheme : DefaultTheme}>
+            <Stack.Navigator
+              initialRouteName={uid ? 'Folders' : 'Home'}
+              screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
+            >
+              <Stack.Screen name="Home" component={HomeScreen} />
+              <Stack.Screen name="Folders" component={FoldersScreen} />
+              <Stack.Screen name="Videos" component={VideosScreen} />
+              <Stack.Screen
+                name="Player"
+                component={PlayerScreen}
+                options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
+              />
+              <Stack.Screen name="Settings" component={SettingsScreen} />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

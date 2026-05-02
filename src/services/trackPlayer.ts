@@ -9,9 +9,9 @@ import { config } from '../config';
 import { usePlayerStore } from '../store/playerStore';
 import { performanceMonitor } from './performanceMonitor';
 import { State } from 'react-native-track-player';
+import type { FavoriteVideo } from '../types/domain';
 // 用于防止同一索引的 lazyResolve 并发执行，避免重复替换
 const resolving = new Set<number>();
-import type { FavoriteVideo } from '../types/domain';
 
 let _ready = false;
 
@@ -82,6 +82,72 @@ export async function loadQueue(videos: FavoriteVideo[], startBvid?: string) {
   if (videos.length > startIndex + 1) {
     lazyResolve(startIndex + 1).catch(() => {});
   }
+}
+
+/**
+ * Insert a video to be played next after the current track.
+ */
+export async function insertNext(video: FavoriteVideo): Promise<void> {
+  const idx = await TrackPlayer.getActiveTrackIndex();
+  const nativeQueue = await TrackPlayer.getQueue();
+  const insertPos = idx >= 0 ? idx + 1 : nativeQueue.length;
+  await TrackPlayer.add(
+    {
+      id: video.bvid,
+      url: `placeholder://${video.bvid}`,
+      title: video.title,
+      artist: video.upper.name,
+      artwork: video.cover,
+      duration: video.duration,
+    },
+    insertPos
+  );
+  // Update Zustand store synchronized queue
+  const cur = usePlayerStore.getState();
+  const newQueue = [...cur.queue];
+  newQueue.splice(insertPos, 0, video);
+  cur.setQueue(newQueue, cur.currentBvid);
+}
+
+/**
+ * Remove a specific video from the queue by its BVID.
+ */
+export async function removeFromQueue(bvid: string): Promise<void> {
+  const nativeQueue = await TrackPlayer.getQueue();
+  const idx = nativeQueue.findIndex((t) => t.id === bvid);
+  if (idx !== -1) {
+    await TrackPlayer.remove(idx);
+    const cur = usePlayerStore.getState();
+    const filtered = cur.queue.filter((v) => v.bvid !== bvid);
+    cur.setQueue(filtered, cur.currentBvid);
+  }
+}
+
+/**
+ * Reorder the entire queue. Optionally start playing from a specific BVID.
+ */
+export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string): Promise<void> {
+  // Rebuild the queue using loadQueue to keep placeholder logic
+  await loadQueue(videos, startBvid);
+}
+
+/**
+ * Append a batch of videos to the end of the queue.
+ */
+export async function appendQueue(videos: FavoriteVideo[], startBvid?: string): Promise<void> {
+  for (const v of videos) {
+    await TrackPlayer.add({
+      id: v.bvid,
+      url: `placeholder://${v.bvid}`,
+      title: v.title,
+      artist: v.upper.name,
+      artwork: v.cover,
+      duration: v.duration,
+    });
+  }
+  const cur = usePlayerStore.getState();
+  const combined = [...cur.queue, ...videos];
+  cur.setQueue(combined, startBvid ?? cur.currentBvid);
 }
 
 async function lazyResolve(index: number) {

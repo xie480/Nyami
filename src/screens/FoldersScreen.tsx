@@ -1,13 +1,18 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, FlatList, RefreshControl, StyleSheet } from 'react-native';
+import { View, FlatList, RefreshControl, StyleSheet, TouchableOpacity, Platform, Alert, ToastAndroid } from 'react-native';
 import { Header } from '../components/Header';
+import { useSelectionStore } from '../store/selectionStore';
+import TrackPlayer from 'react-native-track-player';
+// import { usePlayerStore } from '../store/playerStore'; // Unused import removed
 import { ListItem } from '../components/ListItem';
+import { IconButton } from '../components/IconButton';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
-import { IconButton } from '../components/IconButton';
+import { Button } from '../components/Button';
 import { favoriteService } from '../services';
+import { appendQueue as tpAppendQueue } from '../services/trackPlayer';
 import { useUserStore } from '../store/userStore';
 import { useTheme } from '../theme';
 import type { FavoriteFolder } from '../types/domain';
@@ -15,6 +20,7 @@ import type { FavoriteFolder } from '../types/domain';
 export const FoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
   const uid = useUserStore((s) => s.uid);
+  const { selectedIds, toggle, clear } = useSelectionStore();
   const [folders, setFolders] = useState<FavoriteFolder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -47,7 +53,7 @@ export const FoldersScreen = ({ navigation }: any) => {
     <View style={s.container}>
       <Header
         title="收藏夹"
-        showBack
+        showBack={false}
         right={<IconButton name="cog-outline" onPress={() => navigation.navigate('Settings')} />}
       />
       {folders === null && !error ? (
@@ -69,21 +75,67 @@ export const FoldersScreen = ({ navigation }: any) => {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.colors.primary} />
           }
           renderItem={({ item }) => (
-            <View style={{ borderRadius: t.radius.lg, overflow: 'hidden' }}>
-              <ListItem
-                title={item.title}
-                subtitle={`${item.mediaCount} 个视频`}
-                icon="folder-music-outline"
-                showArrow
-                onPress={() =>
-                  navigation.navigate('Videos', {
-                    mediaId: item.id, title: item.title,
-                  })
-                }
-              />
-            </View>
+            <TouchableOpacity onPress={() => toggle(item.id)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: t.spacing.md, paddingHorizontal: t.spacing.lg, backgroundColor: t.colors.surface }}>
+              <IconButton name={selectedIds.has(item.id) ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} color={t.colors.text} />
+              <View style={{ flex: 1, marginLeft: t.spacing.md }}>
+                <ListItem
+                  title={item.title}
+                  subtitle={`${item.mediaCount} 个视频`}
+                  icon="folder-music-outline"
+                  showArrow
+                  onPress={() => navigation.navigate('Videos', { mediaId: item.id, title: item.title })}
+                />
+              </View>
+            </TouchableOpacity>
           )}
         />
+      )}
+      {/* Mix Play Bar */}
+      {selectedIds.size > 0 && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: t.spacing.md, backgroundColor: t.colors.surface, borderTopWidth: 1, borderColor: t.colors.divider }}>
+          <Button title="混合播放" onPress={async () => {
+            try {
+              // Fetch all videos from selected folders
+              const ids = Array.from(selectedIds);
+              const fetchAll = async (folderId: number) => {
+                const videos: any[] = [];
+                let page = 1;
+                let hasMore = true;
+                while (hasMore) {
+                  const res = await favoriteService.getVideos(folderId, page);
+                  videos.push(...res.list);
+                  hasMore = res.hasMore;
+                  page += 1;
+                }
+                return videos;
+              };
+              const results = await Promise.all(ids.map(fetchAll));
+              const allVideos = results.flat();
+
+              // Shuffle
+              const shuffled = allVideos.slice().sort(() => Math.random() - 0.5);
+
+              // Append to queue and start playback
+              await tpAppendQueue(shuffled);
+              await TrackPlayer.play();
+              clear();
+
+              if (Platform.OS === 'android') {
+                ToastAndroid.show('已开始混合播放', ToastAndroid.SHORT);
+              } else {
+                Alert.alert('提示', '已开始混合播放');
+              }
+            } catch (e: any) {
+              const msg = e.message || '混合播放失败';
+              if (Platform.OS === 'android') {
+                ToastAndroid.show(msg, ToastAndroid.SHORT);
+              } else {
+                Alert.alert('错误', msg);
+              }
+            }
+          }} />
+          <IconButton name="close" size={24} color={t.colors.text} onPress={clear} />
+        </View>
       )}
       <MiniPlayer />
     </View>

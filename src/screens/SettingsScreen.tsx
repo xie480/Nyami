@@ -6,6 +6,7 @@ import { Header } from '../components/Header';
 import { ListItem } from '../components/ListItem';
 import { Switch } from '../components/Switch';
 import { useSettingsStore } from '../store/settingsStore';
+import { useUserStore } from '../store/userStore';
 import { audioCache } from '../services/audioCache';
 import { cookieService } from '../services';
 import { formatBytes } from '../utils/format';
@@ -24,6 +25,9 @@ export const SettingsScreen = () => {
     quality, autoCacheOnWifi, wifiOnly,
     setQuality, setAutoCacheOnWifi, setWifiOnly,
   } = useSettingsStore();
+  const uid = useUserStore((s) => s.uid);
+  const setUid = useUserStore((s) => s.setUid);
+  const [newUid, setNewUid] = useState(uid);
 
   const [cacheSize, setCacheSize] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
@@ -158,6 +162,18 @@ export const SettingsScreen = () => {
           <Text style={s.saveText} onPress={onSaveCookie}>保存</Text>
         </View>
 
+        {/* UID 编辑区 */}
+        <Text style={s.section}>用户 UID</Text>
+        <View style={s.group}>
+          <TextInput
+            style={s.input}
+            value={newUid}
+            onChangeText={setNewUid}
+            placeholder="请输入 UID"
+            placeholderTextColor={t.colors.textHint}
+          />
+          <Text style={s.saveText} onPress={() => { setUid(newUid); Alert.alert('已保存', 'UID 已更新'); }}>保存 UID</Text>
+        </View>
         <Text style={s.section}>关于</Text>
         <View style={s.group}>
           <ListItem title="版本号" right={<Text style={{ color: t.colors.textSub }}>v1.0.0</Text>} />
