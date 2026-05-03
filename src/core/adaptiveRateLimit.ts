@@ -1,9 +1,16 @@
 import { RateLimitError } from './errors';
 
+interface Waiter {
+  resolve: () => void;
+  reject: (err: Error) => void;
+}
+
 export class AdaptiveRateLimiter {
   private currentRate: number;
   private tokens: number;
   private lastRefill: number;
+  private waitQueue: Waiter[] = [];
+  private timer: ReturnType<typeof setTimeout> | null = null;
   
   private readonly minRate = 0.5;
   private readonly maxRate = 10;
@@ -26,8 +33,24 @@ export class AdaptiveRateLimiter {
     if (waitMs > 10000) {
       throw new RateLimitError('限流：请稍后再试');
     }
-    await new Promise(r => setTimeout(r, waitMs));
-    return this.acquire();
+    // 加入等待队列，由 refill 精准唤醒并扣除令牌，避免惊群效应
+    return new Promise((resolve, reject) => {
+      this.waitQueue.push({ resolve, reject });
+      this.scheduleWake();
+    });
+  }
+
+  private scheduleWake() {
+    if (this.timer) return;
+    if (this.waitQueue.length === 0) return;
+    const waitMs = Math.max(0, ((1 - this.tokens) / this.currentRate) * 1000);
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.refill();
+      if (this.waitQueue.length > 0) {
+        this.scheduleWake();
+      }
+    }, waitMs);
   }
 
   private refill() {
@@ -35,6 +58,16 @@ export class AdaptiveRateLimiter {
     const delta = (now - this.lastRefill) / 1000;
     this.tokens = Math.min(this.currentRate, this.tokens + delta * this.currentRate);
     this.lastRefill = now;
+    // 尝试唤醒等待队列中的请求
+    this.tryWake();
+  }
+
+  private tryWake() {
+    while (this.waitQueue.length > 0 && this.tokens >= 1) {
+      const waiter = this.waitQueue.shift()!;
+      this.tokens -= 1; // 确保被唤醒的请求消耗令牌，维持并发上限
+      waiter.resolve();
+    }
   }
 
   reportSuccess() {

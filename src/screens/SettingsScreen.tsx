@@ -225,7 +225,7 @@ export const SettingsScreen = ({ navigation }: any) => {
           />
         </View>
 
-        <Text style={s.section}>登录（可选）</Text>
+        <Text style={s.section}>登录</Text>
         <View style={[s.group, s.cookieBox]}>
           <Text style={{ fontSize: t.fontSize.base, color: t.colors.text, marginBottom: t.spacing.sm }}>
             SESSDATA Cookie

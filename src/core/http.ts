@@ -75,7 +75,14 @@ export async function biliGet<T>(
     const combinedSignal = options.signal ?? abortController.signal;
     // 若用户提供了 signal，我们在其 abort 时同步 abort 内部的 controller
     if (options.signal) {
-      options.signal.addEventListener('abort', () => abortController.abort());
+      // AbortSignal 在较新的 TS 类型中 addEventListener 可能标记为可选，使用 onabort 作为兼容方案
+      const onAbort = () => abortController.abort();
+      if (typeof options.signal.addEventListener === 'function') {
+        options.signal.addEventListener('abort', onAbort);
+      } else {
+        // 回退到 onabort 属性赋值（已废弃但兼容旧环境）
+        (options.signal as any).onabort = onAbort;
+      }
     }
     const requestOptions: AxiosRequestConfig = { ...options, signal: combinedSignal };
     try {
@@ -95,11 +102,11 @@ export async function biliGet<T>(
       ) {
         throw err;
       }
+      if (err instanceof RateLimitError) {
+        throw err; // 限流错误不在底层重试，交给上层指数退避处理
+      }
       if (attempt < retries) {
         let delay = config.retry.delayMs * (attempt + 1);
-        if (err instanceof RateLimitError) {
-          delay = 3000; // 触发风控时等待更长时间
-        }
         await new Promise((r) => setTimeout(r, delay));
       }
     }

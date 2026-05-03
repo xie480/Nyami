@@ -111,8 +111,12 @@ export const favoriteService = {
     const folderDone = new Set<number>();
     // 已成功同步的文件夹
     const syncedFolders = new Set<number>();
+    // 记录同步过程中发生错误的文件夹
+    const failedFolders = new Set<number>();
+    // 待更新的同步元数据
+    const pendingMetaUpdates = new Map<number, FolderSyncMeta>();
     
-    const queue = new TaskQueue(5);
+    const queue = new TaskQueue(2);
   
     let completedTasks = 0;
     let totalTasks = 0;
@@ -241,6 +245,7 @@ export const favoriteService = {
         .catch(err => {
           completedTasks++;
           reportProgress();
+          failedFolders.add(plan.folder.id);
           throw err;
         })
     );
@@ -281,12 +286,12 @@ export const favoriteService = {
           }
           syncedFolders.add(folder.id);
           folderDone.add(folder.id);
-          syncMetaMap[folder.id] = {
+          pendingMetaUpdates.set(folder.id, {
             folderId: folder.id,
             lastSyncTime: now,
             latestBvid: res.list[0].bvid,
             mediaCount: folder.mediaCount,
-          };
+          });
           continue;
         }
         // cursorIndex === -1，游标不在此页，需继续翻页
@@ -297,14 +302,14 @@ export const favoriteService = {
         upsertVideo(folder.id, v);
       }
       
-      // 更新游标为第一页第一个视频（最新）
+      // 记录待更新的游标为第一页第一个视频（最新）
       if (res.list.length > 0) {
-        syncMetaMap[folder.id] = {
+        pendingMetaUpdates.set(folder.id, {
           folderId: folder.id,
           lastSyncTime: now,
           latestBvid: res.list[0].bvid,
           mediaCount: folder.mediaCount,
-        };
+        });
       }
       syncedFolders.add(folder.id);
       
@@ -339,6 +344,9 @@ export const favoriteService = {
                 upsertVideo(folder.id, v);
               }
               processedVideos += pageRes.list.length;
+            } catch (err) {
+              failedFolders.add(folder.id);
+              throw err;
             } finally {
               completedTasks++;
               reportProgress();
@@ -367,9 +375,18 @@ export const favoriteService = {
     // ── 4. 容错保存：仅在数据成功收集后原子性写入 ──
     // 失败的任务不会影响已成功收集的数据
     storage.setJSON('globalIndex', Array.from(allVideos.values()));
+    
+    // 仅更新完全成功的文件夹的元数据
+    for (const [folderId, meta] of pendingMetaUpdates.entries()) {
+      if (!failedFolders.has(folderId)) {
+        syncMetaMap[folderId] = meta;
+      } else {
+        console.warn(`[favoriteService] 文件夹 ${folderId} 同步部分失败，跳过更新游标以触发下次全量/重试`);
+      }
+    }
     storage.setSyncMetaMap(syncMetaMap);
     
-    console.log(`[favoriteService] 增量同步完成: 索引总数=${allVideos.size}, 同步文件夹=${syncedFolders.size}, 需校准=${dirtyCount}`);
+    console.log(`[favoriteService] 增量同步完成: 索引总数=${allVideos.size}, 同步文件夹=${syncedFolders.size}, 失败文件夹=${failedFolders.size}, 需校准=${dirtyCount}`);
   },
 
   /**
