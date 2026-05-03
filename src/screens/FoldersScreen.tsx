@@ -95,7 +95,7 @@ export const FoldersScreen = ({ navigation }: any) => {
           data={folders}
           ListHeaderComponent={
             <Button
-              title="🔀 全局随机播放"
+              title="全局随机播放"
               variant="secondary"
               onPress={async () => {
                 const globalIndex = favoriteService.getGlobalIndex();

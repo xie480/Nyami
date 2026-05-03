@@ -23,9 +23,15 @@ export class TaskQueue {
     const task = this.queue.shift();
     if (task) {
       try {
-        await task();
+        // 任务级超时兜底，防止单个任务永久阻塞（默认 60 秒）
+        const timeoutMs = 60000; // 60 秒
+        await Promise.race([
+          task(),
+          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Task timeout')), timeoutMs)),
+        ]);
       } catch (e) {
-        // Errors are handled in the wrapper inside add()
+        // 记录超时或其他错误，但不影响后续任务执行
+        console.warn(`[TaskQueue] Task failed or timed out: ${e?.message}`);
       }
     }
     this.running--;

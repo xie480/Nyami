@@ -64,7 +64,7 @@ describe('syncGlobalIndex', () => {
 
     const progressEvents: any[] = [];
     
-    await favoriteService.syncGlobalIndex('test_uid', true, (event) => {
+    await favoriteService.syncGlobalIndex('test_uid', [], true, (event) => {
       progressEvents.push(event);
     });
     

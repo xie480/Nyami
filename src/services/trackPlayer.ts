@@ -23,11 +23,6 @@ export async function setupPlayer() {
       android: {
         appKilledPlaybackBehavior:
           AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
-        // 缓冲策略参数（秒）
-        minBuffer: 1.5,      // 1500 ms
-        maxBuffer: 30,      // 30000 ms
-        playBuffer: 0.5,     // 500 ms
-        backBuffer: 0,      // 0 ms（默认）
       },
       capabilities: [
         Capability.Play, Capability.Pause,
@@ -43,41 +38,25 @@ export async function setupPlayer() {
   _ready = true;
 }
 
-async function buildTrack(v: FavoriteVideo) {
-  const quality = useSettingsStore.getState().quality;
-  const cached = await audioCache.has(v.bvid, quality);
-  if (cached) {
-    return {
-      id: v.bvid, url: `file://${cached}`,
-      title: v.title, artist: v.upper.name,
-      artwork: v.cover, duration: v.duration,
-    };
-  }
-  const info = await audioService.getInfo(v.bvid, quality);
-  return {
-    id: v.bvid, url: info.audio.baseUrl,
-    title: v.title, artist: v.upper.name,
-    artwork: v.cover, duration: v.duration,
-    userAgent: config.userAgent,
-    headers: { Referer: config.referer, Origin: 'https://www.bilibili.com' },
-  };
-}
+// buildTrack removed – placeholder logic used in loadQueue
 
 export async function loadQueue(videos: FavoriteVideo[], startBvid?: string) {
   if (!videos || videos.length === 0) return; // 新增边界保护
   await TrackPlayer.reset();
   const startIndex = Math.max(0, videos.findIndex((v) => v.bvid === startBvid));
-  const current = await buildTrack(videos[startIndex]);
 
-  const tracks = videos.map((v, i) =>
-    i === startIndex ? current : {
-      id: v.bvid, url: `placeholder://${v.bvid}`,
-      title: v.title, artist: v.upper.name,
-      artwork: v.cover, duration: v.duration,
-    }
-  );
+  const tracks = videos.map((v) => ({
+    id: v.bvid,
+    url: `placeholder://${v.bvid}`,
+    title: v.title,
+    artist: v.upper.name,
+    artwork: v.cover,
+    duration: v.duration,
+  }));
   await TrackPlayer.add(tracks);
   await TrackPlayer.skip(startIndex);
+  // Resolve the placeholder for the current track
+  await lazyResolve(startIndex);
   // 预加载下一首（若存在），减少切歌时网络延迟
   if (videos.length > startIndex + 1) {
     lazyResolve(startIndex + 1).catch(() => {});
@@ -88,7 +67,8 @@ export async function loadQueue(videos: FavoriteVideo[], startBvid?: string) {
  * Insert a video to be played next after the current track.
  */
 export async function insertNext(video: FavoriteVideo): Promise<void> {
-  const idx = await TrackPlayer.getActiveTrackIndex();
+  const rawIdx = await TrackPlayer.getActiveTrackIndex();
+  const idx = typeof rawIdx === 'number' ? rawIdx : -1;
   const nativeQueue = await TrackPlayer.getQueue();
   const insertPos = idx >= 0 ? idx + 1 : nativeQueue.length;
   await TrackPlayer.add(
@@ -106,7 +86,7 @@ export async function insertNext(video: FavoriteVideo): Promise<void> {
   const cur = usePlayerStore.getState();
   const newQueue = [...cur.queue];
   newQueue.splice(insertPos, 0, video);
-  cur.setQueue(newQueue, cur.currentBvid);
+  cur.setQueue(newQueue, cur.currentBvid ?? undefined);
 }
 
 /**
@@ -119,7 +99,7 @@ export async function removeFromQueue(bvid: string): Promise<void> {
     await TrackPlayer.remove(idx);
     const cur = usePlayerStore.getState();
     const filtered = cur.queue.filter((v) => v.bvid !== bvid);
-    cur.setQueue(filtered, cur.currentBvid);
+    cur.setQueue(filtered, cur.currentBvid ?? undefined);
   }
 }
 
@@ -147,7 +127,7 @@ export async function appendQueue(videos: FavoriteVideo[], startBvid?: string): 
   }
   const cur = usePlayerStore.getState();
   const combined = [...cur.queue, ...videos];
-  cur.setQueue(combined, startBvid ?? cur.currentBvid);
+  cur.setQueue(combined, startBvid ?? cur.currentBvid ?? undefined);
 }
 
 async function lazyResolve(index: number) {
@@ -165,17 +145,20 @@ async function lazyResolve(index: number) {
     performanceMonitor.start(bvid);
     const quality = useSettingsStore.getState().quality;
     
-    let url = '';
+    let url: string;
     let headers: Record<string, string> | undefined;
     
-    const cached = await audioCache.has(bvid, quality);
-    if (cached) {
-      url = `file://${cached}`;
+    const cachedPath = await audioCache.has(bvid, quality);
+    if (cachedPath) {
+      url = `file://${cachedPath}`;
     } else {
       const info = await audioService.getInfo(bvid, quality);
-      url = info.audio.baseUrl;
-      headers = { Referer: config.referer, Origin: 'https://www.bilibili.com' };
-      // 触发后台自动下载
+      const downloadedPath = await audioCache.download(bvid, quality, info.audio.baseUrl, {
+        Referer: config.referer,
+        'User-Agent': config.userAgent,
+      });
+      url = `file://${downloadedPath}`;
+      // 触发后台自动下载（如在 Wi‑Fi 环境下）保持已有逻辑
       autoCache(bvid).catch(() => {});
     }
 
@@ -190,8 +173,9 @@ async function lazyResolve(index: number) {
     // 平滑替换策略：先在 actualIndex 后面插入新 track，跳过去，再删掉原来的 placeholder
     await TrackPlayer.add(newTrack, actualIndex + 1);
     const postAddActiveTrackIndex = await TrackPlayer.getActiveTrackIndex();
-    if (postAddActiveTrackIndex === actualIndex) {
+    if (postAddActiveTrackIndex !== undefined && postAddActiveTrackIndex === actualIndex) {
       await TrackPlayer.skip(actualIndex + 1);
+      await TrackPlayer.play(); // 确保播放恢复
     }
     await TrackPlayer.remove(actualIndex);
   } catch (error) {
@@ -209,7 +193,7 @@ async function lazyResolve(index: number) {
     // 解析失败时自动跳到下一首（仅当当前播放的确实是解析失败的这首歌）
     const activeTrackIndex = await TrackPlayer.getActiveTrackIndex();
     const freshQueue = await TrackPlayer.getQueue();
-    const activeTrack = freshQueue[activeTrackIndex];
+    const activeTrack = typeof activeTrackIndex === 'number' ? freshQueue[activeTrackIndex] : undefined;
     
     if (activeTrack && activeTrack.id === bvid) {
       await TrackPlayer.skipToNext().catch(() => {});
@@ -280,7 +264,7 @@ export async function PlaybackService() {
     try {
       const activeIndex = await TrackPlayer.getActiveTrackIndex();
       const queue = await TrackPlayer.getQueue();
-      const activeTrack = queue[activeIndex];
+      const activeTrack = typeof activeIndex === 'number' ? queue[activeIndex] : undefined;
       if (activeTrack && typeof activeTrack.url === 'string' && activeTrack.url.startsWith('placeholder://')) {
         console.log('[TrackPlayer] Ignoring placeholder track playback error');
         // Let lazyResolve replace the placeholder later; do not skip or pause.

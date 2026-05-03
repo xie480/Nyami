@@ -22,7 +22,7 @@ export const favoriteService = {
    * 获取某 UID 的全部收藏夹
    * 带缓存，10 分钟内不会重复请求
    */
-  async getFolders(uid: string, force = false): Promise<FavoriteFolder[]> {
+  async getFolders(uid: string, force = false, signal?: AbortSignal): Promise<FavoriteFolder[]> {
     if (!uid || !uid.trim()) {
       throw new Error('UID 不能为空');
     }
@@ -32,7 +32,7 @@ export const favoriteService = {
       key,
       config.cacheTTL.folders,
       async () => {
-        const data = await biliApi.getFavoriteFolders(uid);
+        const data = await biliApi.getFavoriteFolders(uid, signal);
         return (data.list || []).map(trimFolder);
       },
       true // 持久化
@@ -47,7 +47,8 @@ export const favoriteService = {
     mediaId: number,
     pn = 1,
     ps = 20,
-    force = false
+    force = false,
+    signal?: AbortSignal
   ): Promise<PageResult<FavoriteVideo>> {
     if (!mediaId) {
       throw new Error('收藏夹 ID 不能为空');
@@ -58,7 +59,7 @@ export const favoriteService = {
       key,
       config.cacheTTL.folderVideos,
       async () => {
-        const data = await biliApi.getFavoriteVideos(mediaId, pn, ps);
+        const data = await biliApi.getFavoriteVideos(mediaId, pn, ps, signal);
         return {
           list: (data.medias || [])
             .filter((m) => m.attr === 0)
@@ -84,21 +85,21 @@ export const favoriteService = {
    * 同步全局索引
    * @param hiddenFolderIds 用户隐藏（不参与索引）的收藏夹 ID 列表
    */
-  async syncGlobalIndex(uid: string, hiddenFolderIds: number[] = [], force = false, onProgress?: (event: SyncProgressEvent) => void): Promise<void> {
+  async syncGlobalIndex(uid: string, hiddenFolderIds: number[] = [], force = false, onProgress?: (event: SyncProgressEvent) => void, signal?: AbortSignal): Promise<void> {
     if (!uid) return;
     
-    let folders = await this.getFolders(uid, force);
+    let folders = await this.getFolders(uid, force, signal);
     // 过滤掉用户隐藏的收藏夹，仅对可见收藏夹构建索引
     folders = folders.filter(f => !hiddenFolderIds.includes(f.id));
     const allVideos = new Map<string, FavoriteVideo>();
     const queue = new TaskQueue(5); // 最大并发5
-
+  
     let completedTasks = 0;
-    // 提前计算所有需要拉取的页数，避免进度条回退或超过 100%
-    let totalTasks = folders.reduce((sum, f) => sum + Math.max(1, Math.ceil(f.mediaCount / 20)), 0);
+    // 总任务数先设为 0，后续根据实际任务计算
+    let totalTasks = 0;
     let processedVideos = 0;
     let totalVideos = folders.reduce((sum, f) => sum + f.mediaCount, 0);
-
+  
     const reportProgress = () => {
       if (onProgress) {
         onProgress({
@@ -109,10 +110,10 @@ export const favoriteService = {
         });
       }
     };
-
+  
     // 初始报告一次进度，让 UI 尽早显示 0% 进度条
     reportProgress();
-
+  
     // 带有指数退避的执行包装器
     const executeWithBackoff = async (task: () => Promise<any>, maxRetries = 4) => {
       for (let i = 0; i <= maxRetries; i++) {
@@ -130,7 +131,7 @@ export const favoriteService = {
         }
       }
     };
-
+  
     const processVideos = (folderId: number, list: FavoriteVideo[]) => {
       for (const v of list) {
         if (!allVideos.has(v.bvid)) {
@@ -144,10 +145,10 @@ export const favoriteService = {
         }
       }
     };
-
+  
     // 1. 并发获取所有可见收藏夹的第一页（部分失败不中断整体流程）
     const firstPageTasks = folders.map(folder =>
-      executeWithBackoff(() => this.getVideos(folder.id, 1, 20, force))
+      executeWithBackoff(() => this.getVideos(folder.id, 1, 20, force, signal))
         .then(res => {
           completedTasks++;
           processedVideos += res.list.length;
@@ -176,7 +177,7 @@ export const favoriteService = {
       throw new Error(`所有收藏夹第一页请求均失败: ${firstPageErrors.join('; ')}`);
     }
     const subsequentTasks: Array<() => Promise<void>> = [];
-
+  
     // 2. 收集后续需要拉取的页数
     for (const result of firstPages) {
       const { folder, res } = result;
@@ -186,12 +187,13 @@ export const favoriteService = {
       if (res.hasMore) {
         // B站收藏夹接口每页20条，可以通过 mediaCount 估算总页数
         const totalPages = Math.ceil(folder.mediaCount / 20);
-        // totalTasks 已经在初始时计算完毕，这里不需要再累加
+        // 计算总任务数：已完成的任务 + 将要生成的后续任务数
+        // 因为 firstPageTasks 已经计入 completedTasks（成功或失败），这里仅加后续任务数量
         
         for (let page = 2; page <= totalPages; page++) {
           subsequentTasks.push(async () => {
             try {
-              const pageRes = await executeWithBackoff(() => this.getVideos(folder.id, page, 20, force));
+              const pageRes = await executeWithBackoff(() => this.getVideos(folder.id, page, 20, force, signal));
               processVideos(folder.id, pageRes.list);
               processedVideos += pageRes.list.length;
             } finally {
@@ -203,6 +205,10 @@ export const favoriteService = {
       }
     }
     
+    // 计算总任务数（包括已经完成的任务和剩余的后续任务）
+    totalTasks = completedTasks + subsequentTasks.length;
+    reportProgress();
+  
     // 3. 执行所有后续任务（部分失败不中断整体流程）
     const subsequentResults = await Promise.allSettled(subsequentTasks.map(task => task()));
     const subsequentErrors: string[] = [];

@@ -20,12 +20,12 @@ const encWbi = (params, imgKey, subKey) => {
     .sort()
     .map(key => {
       const value = params[key].toString().replace(chrFilter, '');
-      return `\${encodeURIComponent(key)}=\${encodeURIComponent(value)}`;
+      return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
     })
     .join('&');
 
   const wbiSign = crypto.createHash('md5').update(query + mixinKey).digest('hex');
-  return `\${query}&w_rid=\${wbiSign}`;
+  return `${query}&w_rid=${wbiSign}`;
 };
 
 async function test() {
@@ -54,19 +54,19 @@ async function test() {
       const navRes = await axios.get('https://api.bilibili.com/x/web-interface/nav', { headers });
       const imgUrl = navRes.data.data.wbi_img.img_url;
       const subUrl = navRes.data.data.wbi_img.sub_url;
-      const imgKey = imgUrl.substring(imgUrl.lastIndexOf('/') + 1, imgUrl.length).split('.')[0];
-      const subKey = subUrl.substring(subUrl.lastIndexOf('/') + 1, subUrl.length).split('.')[0];
+      const imgKey = imgUrl.substring(imgUrl.lastIndexOf('/') + 1).split('.')[0];
+      const subKey = subUrl.substring(subUrl.lastIndexOf('/') + 1).split('.')[0];
 
       const params = { bvid, cid, fnval: 16, fnver: 0, fourk: 1 };
       const query = encWbi(params, imgKey, subKey);
 
       console.log('Testing getPlayUrl...');
-      const res4 = await axios.get(`https://api.bilibili.com/x/player/wbi/playurl?\${query}\`, { headers });
+      const res4 = await axios.get(`https://api.bilibili.com/x/player/wbi/playurl?${query}`, { headers });
       console.log('getPlayUrl:', res4.data.code);
     }
   } catch (e) {
     console.error('Error:', e.response ? e.response.status : e.message);
   }
-      }
-  test();
-      
+}
+
+test();

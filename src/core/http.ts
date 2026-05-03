@@ -60,13 +60,26 @@ export async function biliGet<T>(
   retries = config.retry.maxAttempts
 ): Promise<T> {
   let lastError: any;
+  const absoluteTimeout = 30000; // 30 秒的绝对超时
   for (let attempt = 0; attempt <= retries; attempt++) {
+    // 为每次尝试创建独立的 AbortController，以实现绝对超时
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), absoluteTimeout);
+    // 合并用户传入的 signal（若有）和内部的 abortController.signal
+    const combinedSignal = options.signal ?? abortController.signal;
+    // 若用户提供了 signal，我们在其 abort 时同步 abort 内部的 controller
+    if (options.signal) {
+      options.signal.addEventListener('abort', () => abortController.abort());
+    }
+    const requestOptions: AxiosRequestConfig = { ...options, signal: combinedSignal };
     try {
-      const res = await http.get<BiliResponse<T>>(url, options);
+      const res = await http.get<BiliResponse<T>>(url, requestOptions);
+      clearTimeout(timeoutId);
       const { code, data, message } = res.data;
       if (code !== 0) mapBusinessError(code, message);
       return data;
     } catch (err: any) {
+      clearTimeout(timeoutId);
       lastError = err;
       // 仅对网络错误重试，业务错误立即抛出
       if (
