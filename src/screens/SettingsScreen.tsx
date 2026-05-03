@@ -126,7 +126,7 @@ export const SettingsScreen = ({ navigation }: any) => {
     <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title="设置" showBack />
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <Text style={s.section}>音质</Text>
         <View style={s.group}>
           {QUALITY_OPTIONS.map((opt, i) => (

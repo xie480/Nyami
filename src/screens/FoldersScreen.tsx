@@ -92,6 +92,7 @@ export const FoldersScreen = ({ navigation }: any) => {
       ) : (
         <FlatList
           contentContainerStyle={s.list}
+          showsVerticalScrollIndicator={false}
           data={folders}
           ListHeaderComponent={
             <Button

@@ -23,7 +23,13 @@ function createInstance(): AxiosInstance {
   ins.interceptors.request.use(async (cfg) => {
     await adaptiveBucket.acquire();
     const cookie = storage.getString('biliCookie');
-    if (cookie) cfg.headers.Cookie = cookie;
+    if (cookie) {
+      if (typeof cfg.headers.set === 'function') {
+        cfg.headers.set('Cookie', cookie);
+      } else {
+        cfg.headers.Cookie = cookie;
+      }
+    }
     return cfg;
   });
 

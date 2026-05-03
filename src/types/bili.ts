@@ -49,6 +49,10 @@ export interface BiliPlayUrlData {
     audio?: BiliDashAudio[];
     video?: any[];
   };
+  durl?: {
+    url: string;
+    backup_url?: string[];
+  }[];
 }
 
 export interface BiliWbiKeys {

@@ -93,7 +93,20 @@ export const audioService = {
         );
 
         const playUrl = await biliApi.getPlayUrl(bvid, info.cid);
-        const audios = (playUrl.dash?.audio || []).map(normalizeAudio);
+        
+        let audios = (playUrl.dash?.audio || []).map(normalizeAudio);
+        
+        // 如果没有 dash 音频流，尝试回退到 durl（MP4 混合流）
+        if (audios.length === 0 && playUrl.durl && playUrl.durl.length > 0) {
+          audios = playUrl.durl.map(d => ({
+            id: 30216, // 默认给个低音质 ID
+            bandwidth: 0,
+            mimeType: 'audio/mp4',
+            baseUrl: d.url,
+            backupUrl: d.backup_url || [],
+          }));
+        }
+
         if (audios.length === 0) {
           throw new ResourceUnavailableError('该视频无可用音频流');
         }

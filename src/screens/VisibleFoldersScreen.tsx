@@ -126,6 +126,7 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
           <FlatList
             contentContainerStyle={s.list}
             data={folders!}
+            showsVerticalScrollIndicator={false}
             keyExtractor={(it) => String(it.id)}
             extraData={localHidden}
             ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}

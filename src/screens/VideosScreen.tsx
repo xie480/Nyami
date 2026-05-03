@@ -213,6 +213,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
         <FlatList
           data={list}
           keyExtractor={(it) => it.bvid}
+          showsVerticalScrollIndicator={false}
           ListHeaderComponent={
             <View style={s.actions}>
               <Button title="▶ 全部播放" onPress={playAll} style={s.actionBtn} />

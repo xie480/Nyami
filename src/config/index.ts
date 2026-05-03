@@ -2,9 +2,9 @@
   /** B 站 API 基础地址 */
   biliBaseURL: 'https://api.bilibili.com',
 
-  /** 请求 User-Agent（统一使用移动端 Safari）*/
+  /** 请求 User-Agent（统一使用 PC Chrome，避免 B 站强制返回 MP4 导致无 dash 音频流）*/
   userAgent:
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 
   /** 请求 Referer（B 站接口必需）*/
   referer: 'https://www.bilibili.com/',

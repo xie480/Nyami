@@ -42,40 +42,21 @@ async function test() {
     const subKey = subUrl.substring(subUrl.lastIndexOf('/') + 1, subUrl.length).split('.')[0];
 
     const bvid = 'BV1S2RuB5EK2';
-    const infoRes = await axios.get(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://www.bilibili.com/'
-      }
-    });
-    const cid = infoRes.data.data.cid;
+    const cid = 1402958282;
 
     const mobileUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1';
-    const pcUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-    // Test 1: fnval 16, Mobile UA
+    
+    // Test without Referer
     const params1 = { bvid, cid, fnval: 16, fnver: 0, fourk: 1 };
     const query1 = encWbi(params1, imgKey, subKey);
     const res1 = await axios.get(`https://api.bilibili.com/x/player/wbi/playurl?${query1}`, {
-      headers: { 'User-Agent': mobileUA, 'Referer': 'https://www.bilibili.com/' }
+      headers: { 'User-Agent': mobileUA } // No Referer
     });
-    console.log('Test 1 (fnval: 16, Mobile UA) dash:', !!res1.data.data.dash);
-
-    // Test 2: fnval 16, PC UA
-    const params2 = { bvid, cid, fnval: 16, fnver: 0, fourk: 1 };
-    const query2 = encWbi(params2, imgKey, subKey);
-    const res2 = await axios.get(`https://api.bilibili.com/x/player/wbi/playurl?${query2}`, {
-      headers: { 'User-Agent': pcUA, 'Referer': 'https://www.bilibili.com/' }
-    });
-    console.log('Test 2 (fnval: 16, PC UA) dash:', !!res2.data.data.dash);
-
-    // Test 3: fnval 4048, PC UA
-    const params3 = { bvid, cid, fnval: 4048, fnver: 0, fourk: 1 };
-    const query3 = encWbi(params3, imgKey, subKey);
-    const res3 = await axios.get(`https://api.bilibili.com/x/player/wbi/playurl?${query3}`, {
-      headers: { 'User-Agent': pcUA, 'Referer': 'https://www.bilibili.com/' }
-    });
-    console.log('Test 3 (fnval: 4048, PC UA) dash:', !!res3.data.data.dash);
+    console.log('No Referer code:', res1.data.code);
+    console.log('No Referer message:', res1.data.message);
+    if (res1.data.data) {
+      console.log('No Referer dash:', !!res1.data.data.dash);
+    }
 
   } catch (e) {
     console.error(e.message);
