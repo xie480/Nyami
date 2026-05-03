@@ -1,4 +1,4 @@
-import { biliGet } from '../core/http';
+﻿import { biliGet } from '../core/http';
 import { encWbi, getWbiKeys } from '../core/wbi';
 import type {
   BiliFolder,
@@ -56,7 +56,7 @@ export const biliApi = {
     }
     const { imgKey, subKey } = await getWbiKeys();
     const query = encWbi(
-      { bvid, cid, fnval: 16, fnver: 0, fourk: 1 },
+      { bvid, cid, fnval: 4048, fnver: 0, fourk: 1, platform: 'html5' },
       imgKey,
       subKey
     );

@@ -1,4 +1,4 @@
-import TrackPlayer, {
+﻿import TrackPlayer, {
   AppKilledPlaybackBehavior, Capability, Event,
 } from 'react-native-track-player';
 import { audioService } from './audioService';
@@ -59,7 +59,7 @@ async function buildTrack(v: FavoriteVideo) {
     title: v.title, artist: v.upper.name,
     artwork: v.cover, duration: v.duration,
     userAgent: config.userAgent,
-    headers: { Referer: config.referer },
+    headers: { Referer: config.referer, Origin: 'https://www.bilibili.com' },
   };
 }
 
@@ -174,7 +174,7 @@ async function lazyResolve(index: number) {
     } else {
       const info = await audioService.getInfo(bvid, quality);
       url = info.audio.baseUrl;
-      headers = { Referer: config.referer };
+      headers = { Referer: config.referer, Origin: 'https://www.bilibili.com' };
       // 触发后台自动下载
       autoCache(bvid).catch(() => {});
     }

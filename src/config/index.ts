@@ -1,4 +1,4 @@
-export const config = {
+﻿export const config = {
   /** B 站 API 基础地址 */
   biliBaseURL: 'https://api.bilibili.com',
 
@@ -19,7 +19,7 @@ export const config = {
   },
 
   /** HTTP 请求超时 */
-  httpTimeout: 12000,
+  httpTimeout: 20000,
 
   /** 速率限制：每秒最多 2 次请求 */
   rateLimit: {
@@ -29,7 +29,7 @@ export const config = {
 
   /** 重试次数 */
   retry: {
-    maxAttempts: 2,
-    delayMs: 800,
+    maxAttempts: 3,
+    delayMs: 1200,
   },
 };
