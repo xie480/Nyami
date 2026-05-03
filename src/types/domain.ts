@@ -53,4 +53,6 @@ export interface FolderSyncMeta {
   mediaCount: number;
   /** 标记该文件夹需要下次全量校准（检测到删除或同步中断时设置） */
   needsFullSync?: boolean;
+  /** 最近一次同步完成的页码，用于断点续传 */
+  lastSyncedPage?: number;
 }

@@ -18,9 +18,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Quality } from '../types/domain';
 
 const QUALITY_OPTIONS: Array<{ key: Quality; title: string; subtitle: string }> = [
-  { key: 'low', title: '省流', subtitle: '64 kbps，约 1.9MB / 4 分钟' },
-  { key: 'medium', title: '标准', subtitle: '132 kbps，约 3.8MB / 4 分钟' },
-  { key: 'high', title: '高音质', subtitle: '192 kbps，约 5.5MB / 4 分钟' },
+  { key: 'low', title: '省流', subtitle: '64 kbps · 约 1.9MB / 4 分钟' },
+  { key: 'medium', title: '标准', subtitle: '132 kbps · 约 3.8MB / 4 分钟' },
+  { key: 'high', title: '高音质', subtitle: '192 kbps · 约 5.5MB / 4 分钟' },
 ];
 
 export const SettingsScreen = ({ navigation }: any) => {
@@ -173,7 +173,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             subtitle={
               syncStatus === 'syncing'
                 ? progressData
-                  ? `正在同步... ${progressData.completedTasks}/${progressData.totalTasks} 任务, ${progressData.processedVideos}/${progressData.totalVideos} 视频`
+                  ? `${progressData.completedTasks}/${progressData.totalTasks} 任务, ${progressData.processedVideos}/${progressData.totalVideos} 视频`
                   : '正在获取收藏夹列表...'
                 : syncStatus === 'error'
                 ? `同步失败: ${syncError}`

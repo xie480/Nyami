@@ -96,33 +96,20 @@ export const favoriteService = {
     // 过滤掉用户隐藏的收藏夹，仅对可见收藏夹构建索引
     folders = folders.filter(f => !hiddenFolderIds.includes(f.id));
     
-    // 加载现有全局索引作为增量合并的基础
-    const existingIndex = this.getGlobalIndex();
-    const allVideos = new Map<string, FavoriteVideo>();
-    for (const v of existingIndex) {
-      allVideos.set(v.bvid, { ...v });
-    }
-    
     // 加载同步元数据
     const syncMetaMap = storage.getSyncMetaMap();
     const now = Date.now();
     
-    // 已命中游标、无需继续翻页的文件夹
-    const folderDone = new Set<number>();
-    // 已成功同步的文件夹
-    const syncedFolders = new Set<number>();
     // 记录同步过程中发生错误的文件夹
     const failedFolders = new Set<number>();
-    // 待更新的同步元数据
-    const pendingMetaUpdates = new Map<number, FolderSyncMeta>();
+    // 已成功同步的文件夹
+    const syncedFolders = new Set<number>();
     
-    const queue = new TaskQueue(2);
-  
     let completedTasks = 0;
     let totalTasks = 0;
     let processedVideos = 0;
     let totalVideos = 0;
-  
+    
     const reportProgress = () => {
       if (onProgress) {
         onProgress({
@@ -133,9 +120,10 @@ export const favoriteService = {
         });
       }
     };
-  
+    
+    const queue = new TaskQueue(2);
+    
     // 带有指数退避的执行包装器
-        // 带有指数退避的执行包装器
     const executeWithBackoff = async <T>(task: () => Promise<T>, maxRetries = 4): Promise<T> => {
       for (let i = 0; i <= maxRetries; i++) {
         try {
@@ -154,13 +142,17 @@ export const favoriteService = {
       // 添加兜底的 throw 语句，解决 ts(2366) 报错
       throw new Error('Unreachable');
     };
-  
-    // Upsert 合并：将视频加入全局索引，正确处理多收藏夹归属并更新元信息
-    const upsertVideo = (folderId: number, video: FavoriteVideo) => {
-      if (!allVideos.has(video.bvid)) {
-        allVideos.set(video.bvid, { ...video, folderIds: [folderId] });
+
+    // Upsert 合并辅助函数：将视频加入局部 videoMap
+    const upsertToMap = (
+      videoMap: Map<string, FavoriteVideo>,
+      folderId: number,
+      video: FavoriteVideo
+    ) => {
+      if (!videoMap.has(video.bvid)) {
+        videoMap.set(video.bvid, { ...video, folderIds: [folderId] });
       } else {
-        const existing = allVideos.get(video.bvid)!;
+        const existing = videoMap.get(video.bvid)!;
         if (!existing.folderIds) existing.folderIds = [];
         if (!existing.folderIds.includes(folderId)) {
           existing.folderIds.push(folderId);
@@ -174,7 +166,7 @@ export const favoriteService = {
         existing.attr = video.attr;
       }
     };
-  
+    
     // ── 判断每个文件夹的同步模式 ──
     interface FolderSyncPlan {
       folder: FavoriteFolder;
@@ -229,177 +221,138 @@ export const favoriteService = {
       }
     }
     
+    // 计算活跃文件夹数作为总任务数
+    const activePlans = plans.filter(p => p.mode !== 'skip');
+    totalTasks = activePlans.length;
     reportProgress();
     
-    // ── 1. 并发获取所有活跃收藏夹的第一页 ──
-    const activePlans = plans.filter(p => p.mode !== 'skip');
-    
-    const firstPageTasks = activePlans.map(plan =>
-      executeWithBackoff(() => this.getVideos(plan.folder.id, 1, 20, force, signal))
-        .then(res => {
-          completedTasks++;
-          processedVideos += res.list.length;
-          reportProgress();
-          return { plan, res };
-        })
-        .catch(err => {
-          completedTasks++;
-          reportProgress();
-          failedFolders.add(plan.folder.id);
-          throw err;
-        })
-    );
-    
-    const firstPageResults = await Promise.allSettled(firstPageTasks);
-    const firstPages: Array<{ plan: FolderSyncPlan; res: PageResult<FavoriteVideo> }> = [];
-    const firstPageErrors: string[] = [];
-    for (const result of firstPageResults) {
-      if (result.status === 'fulfilled') {
-        firstPages.push(result.value);
-      } else {
-        firstPageErrors.push(result.reason?.message || '未知错误');
-      }
-    }
-    if (firstPages.length === 0 && firstPageErrors.length > 0 && activePlans.length > 0) {
-      throw new Error(`所有收藏夹第一页请求均失败: ${firstPageErrors.join('; ')}`);
-    }
-    
-    const subsequentTasks: Array<() => Promise<void>> = [];
-    
-    // ── 2. 处理第一页结果，生成后续任务 ──
-    for (const { plan, res } of firstPages) {
+    // ── 逐个文件夹串行同步，每个文件夹独立处理分页并立即落盘分片 ──
+    for (const plan of activePlans) {
+      if (signal?.aborted) break;
+      
       const { folder, mode, cursorBvid } = plan;
       
-      // 检查第一页是否命中游标（增量模式）
-      if (mode === 'incremental' && cursorBvid) {
-        const cursorIndex = res.list.findIndex((v: FavoriteVideo) => v.bvid === cursorBvid);
-        if (cursorIndex === 0) {
-          // 第一个视频就是游标 = 无新数据
-          syncedFolders.add(folder.id);
-          folderDone.add(folder.id);
-          continue;
+      try {
+        // 加载该文件夹的现有分片数据
+        let existingVideos: FavoriteVideo[] = [];
+        if (mode === 'incremental') {
+          existingVideos = storage.getFolderIndex(folder.id);
         }
-        if (cursorIndex > 0) {
-          // 游标在第一页中间 → 只取游标前的新视频
-          for (const v of res.list.slice(0, cursorIndex)) {
-            upsertVideo(folder.id, v);
+        // 全量模式从零开始
+        
+        const videoMap = new Map<string, FavoriteVideo>();
+        for (const v of existingVideos) {
+          videoMap.set(v.bvid, { ...v });
+        }
+        
+        let page = 1;
+        let hasMore = true;
+        let folderDone = false;
+        let folderProcessedVideos = 0;
+        
+        while (hasMore && !folderDone && !signal?.aborted) {
+          try {
+            const pageRes = await executeWithBackoff(() =>
+              this.getVideos(folder.id, page, 20, force, signal)
+            );
+            
+            // 增量模式：检查是否命中游标
+            if (mode === 'incremental' && cursorBvid) {
+              const cursorIndex = pageRes.list.findIndex(
+                (v: FavoriteVideo) => v.bvid === cursorBvid
+              );
+              
+              if (cursorIndex === 0 && page === 1) {
+                // 第一页第一个视频就是游标 = 无新数据
+                folderDone = true;
+                break;
+              }
+              
+              if (cursorIndex >= 0) {
+                // 命中游标 → 只取游标前的新视频
+                for (const v of pageRes.list.slice(0, cursorIndex)) {
+                  upsertToMap(videoMap, folder.id, v);
+                }
+                folderDone = true;
+                folderProcessedVideos += cursorIndex;
+                break;
+              }
+              // cursorIndex === -1，游标不在此页，继续翻页
+            }
+            
+            // 处理本页所有视频
+            for (const v of pageRes.list) {
+              upsertToMap(videoMap, folder.id, v);
+            }
+            folderProcessedVideos += pageRes.list.length;
+            
+            hasMore = pageRes.hasMore;
+            page++;
+            
+            // 每拉取一页后立即落盘分片（增量持久化，支持断点续传）
+            storage.setFolderIndex(folder.id, Array.from(videoMap.values()));
+            
+          } catch (err: any) {
+            failedFolders.add(folder.id);
+            console.warn(
+              `[favoriteService] 文件夹 ${folder.id} 第 ${page} 页拉取失败:`,
+              err.message
+            );
+            break;
           }
+        }
+        
+        if (!failedFolders.has(folder.id)) {
+          // 最终落盘
+          storage.setFolderIndex(folder.id, Array.from(videoMap.values()));
           syncedFolders.add(folder.id);
-          folderDone.add(folder.id);
-          pendingMetaUpdates.set(folder.id, {
+          
+          // 更新同步元数据
+          const finalVideos = storage.getFolderIndex(folder.id);
+          syncMetaMap[folder.id] = {
             folderId: folder.id,
             lastSyncTime: now,
-            latestBvid: res.list[0].bvid,
+            latestBvid: finalVideos.length > 0 ? finalVideos[0].bvid : null,
             mediaCount: folder.mediaCount,
-          });
-          continue;
+            needsFullSync: false,
+            lastSyncedPage: page,
+          };
+          storage.updateSyncMeta(folder.id, syncMetaMap[folder.id]);
         }
-        // cursorIndex === -1，游标不在此页，需继续翻页
+        
+        processedVideos += folderProcessedVideos;
+      } catch (e: any) {
+        failedFolders.add(folder.id);
+        console.warn(
+          `[favoriteService] 文件夹 ${folder.id} 同步失败:`,
+          e.message
+        );
       }
       
-      // 处理本页所有视频
-      for (const v of res.list) {
-        upsertVideo(folder.id, v);
-      }
-      
-      // 记录待更新的游标为第一页第一个视频（最新）
-      if (res.list.length > 0) {
-        pendingMetaUpdates.set(folder.id, {
-          folderId: folder.id,
-          lastSyncTime: now,
-          latestBvid: res.list[0].bvid,
-          mediaCount: folder.mediaCount,
-        });
-      }
-      syncedFolders.add(folder.id);
-      
-      // 生成后续页任务
-      if (res.hasMore && !folderDone.has(folder.id)) {
-        const totalPages = Math.ceil(folder.mediaCount / 20);
-        for (let page = 2; page <= totalPages; page++) {
-          subsequentTasks.push(async () => {
-            // 如果游标已命中，跳过此任务
-            if (folderDone.has(folder.id)) {
-              completedTasks++;
-              reportProgress();
-              return;
-            }
-            try {
-              const pageRes = await executeWithBackoff(() => this.getVideos(folder.id, page, 20, force, signal));
-              
-              if (mode === 'incremental' && cursorBvid) {
-                const cursorIndex = pageRes.list.findIndex((v: FavoriteVideo) => v.bvid === cursorBvid);
-                if (cursorIndex >= 0) {
-                  // 命中游标 → 取游标前的视频，标记完成
-                  for (const v of pageRes.list.slice(0, cursorIndex)) {
-                    upsertVideo(folder.id, v);
-                  }
-                  folderDone.add(folder.id);
-                  return;
-                }
-              }
-              
-              // 全量处理
-              for (const v of pageRes.list) {
-                upsertVideo(folder.id, v);
-              }
-              processedVideos += pageRes.list.length;
-            } catch (err) {
-              failedFolders.add(folder.id);
-              throw err;
-            } finally {
-              completedTasks++;
-              reportProgress();
-            }
-          });
-        }
-      }
+      completedTasks++;
+      reportProgress();
     }
     
-    // 计算总任务数（含已完成的 + 后续的）
-    totalTasks = completedTasks + subsequentTasks.length;
-    reportProgress();
-  
-    // ── 3. 执行所有后续任务 ──
-    const subsequentResults = await Promise.allSettled(subsequentTasks.map(task => task()));
-    const subsequentErrors: string[] = [];
-    for (const result of subsequentResults) {
-      if (result.status === 'rejected') {
-        subsequentErrors.push(result.reason?.message || '未知错误');
-      }
-    }
-    if (subsequentErrors.length > 0) {
-      console.warn(`[favoriteService] 后续页面任务部分失败: ${subsequentErrors.join('; ')}`);
-    }
+    // ── 全部文件夹处理完成后，从分片重建全局索引缓存 ──
+    storage.rebuildGlobalCache();
     
-    // ── 4. 容错保存：仅在数据成功收集后原子性写入 ──
-    // 失败的任务不会影响已成功收集的数据
-    storage.setJSON('globalIndex', Array.from(allVideos.values()));
-    
-    // 仅更新完全成功的文件夹的元数据
-    for (const [folderId, meta] of pendingMetaUpdates.entries()) {
-      if (!failedFolders.has(folderId)) {
-        syncMetaMap[folderId] = meta;
-      } else {
-        console.warn(`[favoriteService] 文件夹 ${folderId} 同步部分失败，跳过更新游标以触发下次全量/重试`);
-      }
-    }
-    storage.setSyncMetaMap(syncMetaMap);
-    
-    console.log(`[favoriteService] 增量同步完成: 索引总数=${allVideos.size}, 同步文件夹=${syncedFolders.size}, 失败文件夹=${failedFolders.size}, 需校准=${dirtyCount}`);
+    console.log(
+      `[favoriteService] 增量同步完成: 同步文件夹=${syncedFolders.size}, ` +
+      `失败文件夹=${failedFolders.size}, 需校准=${dirtyCount}`
+    );
   },
 
   /**
    * 获取全局索引
    */
   getGlobalIndex(): FavoriteVideo[] {
-    return storage.getJSON<FavoriteVideo[]>('globalIndex') || [];
+    return storage.getGlobalIndexCached();
   },
 
   /**
    * 清理全局索引
    */
   clearGlobalIndex() {
-    storage.delete('globalIndex');
+    storage.clearAllIndexes();
   },
 };
