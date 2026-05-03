@@ -14,6 +14,7 @@ import { Button } from '../components/Button';
 import { favoriteService } from '../services';
 import { appendQueue as tpAppendQueue, loadQueue } from '../services/trackPlayer';
 import { useUserStore } from '../store/userStore';
+import { useSettingsStore } from '../store/settingsStore';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FavoriteFolder } from '../types/domain';
@@ -21,19 +22,23 @@ import type { FavoriteFolder } from '../types/domain';
 export const FoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
   const uid = useUserStore((s) => s.uid);
+  const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const setQueue = usePlayerStore((s) => s.setQueue);
   const { selectedIds, toggle, clear } = useSelectionStore();
-  const [folders, setFolders] = useState<FavoriteFolder[] | null>(null);
+  const [allFolders, setAllFolders] = useState<FavoriteFolder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const insets = useSafeAreaInsets();
 
+  // 根据用户偏好过滤出可见的收藏夹
+  const folders = allFolders ? allFolders.filter(f => !hiddenFolderIds.includes(f.id)) : null;
+
   const load = useCallback(async (force = false) => {
     setError(null);
     try {
       const data = await favoriteService.getFolders(uid, force);
-      setFolders(data);
+      setAllFolders(data);
     } catch (e: any) {
       setError(e.message || '加载失败');
     } finally {
@@ -81,8 +86,8 @@ export const FoldersScreen = ({ navigation }: any) => {
         <ErrorView message={error} onRetry={() => load(true)} />
       ) : folders!.length === 0 ? (
         <Empty
-          title="没有公开的收藏夹"
-          hint="可在设置中填入 SESSDATA 以加载私密收藏夹"
+          title="没有可见的收藏夹"
+          hint="可在设置 > 可见收藏夹偏好中调整展示的收藏夹"
         />
       ) : (
         <FlatList

@@ -276,7 +276,6 @@ export async function PlaybackService() {
   });
   // 【修复】增加错误监听，遇到播放错误自动跳过
   TrackPlayer.addEventListener(Event.PlaybackError, async (error) => {
-    console.error('[TrackPlayer] 播放错误:', error);
     // Revised handling: determine if error originates from a placeholder track by inspecting the active track URL
     try {
       const activeIndex = await TrackPlayer.getActiveTrackIndex();
@@ -290,6 +289,8 @@ export async function PlaybackService() {
     } catch (e) {
       // If inspection fails, proceed with generic error handling.
     }
+    
+    console.error('[TrackPlayer] 播放错误:', error);
     
     // 【修复】如果当前无网络，暂停播放而不是跳过
     if (netStatus.type === 'none') {

@@ -32,12 +32,26 @@ async function selectFastestUrl(bvid: string, baseUrl: string, backupUrls: strin
   if (cached) return cached;
   const urls = [baseUrl, ...(backupUrls || [])];
   const tryUrl = async (url: string): Promise<string> => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const commonHeaders = {
+      'User-Agent': config.userAgent,
+      Referer: config.referer,
+    };
     try {
-      const res = await fetch(url, { method: 'HEAD' });
+      const res = await fetch(url, {
+        method: 'HEAD',
+        headers: commonHeaders,
+        signal: controller.signal,
+      });
       if (res.ok) return url;
     } catch {}
     try {
-      const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' } });
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { ...commonHeaders, Range: 'bytes=0-0' },
+        signal: controller.signal,
+      });
       if (res.ok) return url;
     } catch {}
     throw new Error('unreachable');

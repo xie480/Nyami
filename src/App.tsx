@@ -1,11 +1,12 @@
 import 'react-native-gesture-handler';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useUserStore } from './store/userStore';
+import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useColorScheme, Alert, Platform, ToastAndroid, BackHandler } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler'; // [新增] 导入 GestureHandlerRootView
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider } from './theme';
 import { setupPlayer } from './services/trackPlayer';
 import { netStatus } from './services/netStatus';
@@ -14,6 +15,7 @@ import { FoldersScreen } from './screens/FoldersScreen';
 import { VideosScreen } from './screens/VideosScreen';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { VisibleFoldersScreen } from './screens/VisibleFoldersScreen';
 import { favoriteService } from './services/favoriteService';
 
 const Stack = createNativeStackNavigator();
@@ -23,6 +25,10 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
   const uid = useUserStore((s) => s.uid);
+  const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
+
+  // 记录上一次的 hiddenFolderIds，用于检测变化
+  const prevHiddenFolderIdsRef = useRef<number[]>(hiddenFolderIds);
 
   // Initialize player, network status listener, and back handler
   useEffect(() => {
@@ -32,7 +38,6 @@ export default function App() {
       const nowOnline = type !== 'none';
       setIsOnline(nowOnline);
       if (!nowOnline) {
-        // Show a toast / alert when network goes offline
         const message = '网络已断开，当前仅可播放本地缓存音频';
         if (Platform.OS === 'android') {
           ToastAndroid.show(message, ToastAndroid.LONG);
@@ -60,9 +65,24 @@ export default function App() {
   useEffect(() => {
     if (uid) {
       favoriteService.clearGlobalIndex();
-      favoriteService.syncGlobalIndex(uid).catch(console.warn);
+      favoriteService.syncGlobalIndex(uid, hiddenFolderIds).catch(console.warn);
     }
   }, [uid]);
+
+  // 监听 hiddenFolderIds 变化，自动触发全局索引重新同步
+  useEffect(() => {
+    if (!uid) return;
+    // 跳过首次渲染（由 uid effect 处理）
+    if (prevHiddenFolderIdsRef.current === hiddenFolderIds) {
+      prevHiddenFolderIdsRef.current = hiddenFolderIds;
+      return;
+    }
+    prevHiddenFolderIdsRef.current = hiddenFolderIds;
+
+    // 用户修改了可见收藏夹偏好，重新构建全局索引
+    favoriteService.clearGlobalIndex();
+    favoriteService.syncGlobalIndex(uid, hiddenFolderIds).catch(console.warn);
+  }, [hiddenFolderIds, uid]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -82,6 +102,7 @@ export default function App() {
                 options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
               />
               <Stack.Screen name="Settings" component={SettingsScreen} />
+              <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreen} />
             </Stack.Navigator>
           </NavigationContainer>
         </ThemeProvider>

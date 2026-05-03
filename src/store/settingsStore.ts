@@ -14,12 +14,14 @@ interface Settings {
   quality: Quality;
   autoCacheOnWifi: boolean;
   wifiOnly: boolean;
+  hiddenFolderIds: number[];
 }
 
 interface SettingsState extends Settings {
   setQuality: (q: Quality) => void;
   setAutoCacheOnWifi: (v: boolean) => void;
   setWifiOnly: (v: boolean) => void;
+  setHiddenFolderIds: (ids: number[]) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -28,9 +30,11 @@ export const useSettingsStore = create<SettingsState>()(
       quality: 'low',
       autoCacheOnWifi: true,
       wifiOnly: false,
+      hiddenFolderIds: [],
       setQuality: (q) => set({ quality: q }),
       setAutoCacheOnWifi: (v) => set({ autoCacheOnWifi: v }),
       setWifiOnly: (v) => set({ wifiOnly: v }),
+      setHiddenFolderIds: (ids) => set({ hiddenFolderIds: ids }),
     }),
     {
       name: 'settingsStore',

@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { SafeAreaView, StatusBar } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, ScrollView, StyleSheet, Alert, TextInput,
 } from 'react-native';
@@ -8,9 +9,9 @@ import { ListItem } from '../components/ListItem';
 import { Switch } from '../components/Switch';
 import { useSettingsStore } from '../store/settingsStore';
 import { useUserStore } from '../store/userStore';
+import { useSyncStore } from '../store/syncStore';
 import { audioCache } from '../services/audioCache';
 import { cookieService, favoriteService } from '../services';
-import type { SyncProgressEvent } from '../services/favoriteService';
 import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,11 +23,11 @@ const QUALITY_OPTIONS: Array<{ key: Quality; title: string; subtitle: string }> 
   { key: 'high', title: '高音质', subtitle: '192 kbps，约 5.5MB / 4 分钟' },
 ];
 
-export const SettingsScreen = () => {
+export const SettingsScreen = ({ navigation }: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const {
-    quality, autoCacheOnWifi, wifiOnly,
+    quality, autoCacheOnWifi, wifiOnly, hiddenFolderIds,
     setQuality, setAutoCacheOnWifi, setWifiOnly,
   } = useSettingsStore();
   const uid = useUserStore((s) => s.uid);
@@ -36,10 +37,17 @@ export const SettingsScreen = () => {
   const [cacheSize, setCacheSize] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
   const [cookie, setCookie] = useState(cookieService.get());
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'done'>('idle');
-  const [progressData, setProgressData] = useState<SyncProgressEvent | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
+  const { syncStatus, progressData, syncError, startSync, resetSyncState } = useSyncStore();
   const [globalIndexCount, setGlobalIndexCount] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      const currentStatus = useSyncStore.getState().syncStatus;
+      if (currentStatus === 'done' || currentStatus === 'error') {
+        resetSyncState();
+      }
+    }, [resetSyncState])
+  );
 
   const refresh = () => {
     setCacheSize(audioCache.getTotalSize());
@@ -51,6 +59,12 @@ export const SettingsScreen = () => {
     setGlobalIndexCount(favoriteService.getGlobalIndex().length);
   }, []);
 
+  useEffect(() => {
+    if (syncStatus === 'done') {
+      setGlobalIndexCount(favoriteService.getGlobalIndex().length);
+    }
+  }, [syncStatus]);
+
   const onClear = () => {
     Alert.alert('确认清空', '将删除所有已缓存的音频文件', [
       { text: '取消' },
@@ -61,25 +75,13 @@ export const SettingsScreen = () => {
     ]);
   };
 
-  const onSyncGlobalIndex = async () => {
+  const onSyncGlobalIndex = () => {
     if (!uid) {
       Alert.alert('提示', '请先设置 UID');
       return;
     }
-    setSyncStatus('syncing');
-    setProgressData(null);
-    setSyncError(null);
-    try {
-      await favoriteService.syncGlobalIndex(uid, true, (event) => {
-        setProgressData(event);
-      });
-      setGlobalIndexCount(favoriteService.getGlobalIndex().length);
-      setSyncStatus('done');
-      setTimeout(() => setSyncStatus('idle'), 3000);
-    } catch (e: any) {
-      setSyncStatus('error');
-      setSyncError(e.message || '未知错误');
-    }
+    // 传入 hiddenFolderIds，仅同步用户选中的收藏夹
+    startSync(uid, hiddenFolderIds, true);
   };
 
   const onSaveCookie = () => {
@@ -160,10 +162,19 @@ export const SettingsScreen = () => {
         <Text style={s.section}>全局索引</Text>
         <View style={s.group}>
           <ListItem
+            title="可见收藏夹偏好"
+            subtitle={`已选 ${(favoriteService.getGlobalIndex().length > 0 ? globalIndexCount : '...')} 个视频参与索引`}
+            onPress={() => navigation.navigate('VisibleFolders')}
+            showArrow
+          />
+          <View style={s.sep} />
+          <ListItem
             title="同步全局索引"
             subtitle={
-              syncStatus === 'syncing' && progressData
-                ? `正在同步... ${progressData.completedTasks}/${progressData.totalTasks} 任务, ${progressData.processedVideos}/${progressData.totalVideos} 视频`
+              syncStatus === 'syncing'
+                ? progressData
+                  ? `正在同步... ${progressData.completedTasks}/${progressData.totalTasks} 任务, ${progressData.processedVideos}/${progressData.totalVideos} 视频`
+                  : '正在获取收藏夹列表...'
                 : syncStatus === 'error'
                 ? `同步失败: ${syncError}`
                 : syncStatus === 'done'
@@ -181,14 +192,14 @@ export const SettingsScreen = () => {
               )
             }
           />
-          {syncStatus === 'syncing' && progressData && (
+          {syncStatus === 'syncing' && (
             <View style={{ paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md }}>
               <View style={{ height: 4, backgroundColor: t.colors.divider, borderRadius: 2, overflow: 'hidden' }}>
                 <View
                   style={{
                     height: '100%',
                     backgroundColor: t.colors.primary,
-                    width: `${(progressData.completedTasks / Math.max(1, progressData.totalTasks)) * 100}%`,
+                    width: progressData ? `${(progressData.completedTasks / Math.max(1, progressData.totalTasks)) * 100}%` : '0%',
                   }}
                 />
               </View>

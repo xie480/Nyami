@@ -20,12 +20,12 @@ const encWbi = (params, imgKey, subKey) => {
     .sort()
     .map(key => {
       const value = params[key].toString().replace(chrFilter, '');
-      return \`\${encodeURIComponent(key)}=\${encodeURIComponent(value)}\`;
+      return `\${encodeURIComponent(key)}=\${encodeURIComponent(value)}`;
     })
     .join('&');
 
   const wbiSign = crypto.createHash('md5').update(query + mixinKey).digest('hex');
-  return \`\${query}&w_rid=\${wbiSign}\`;
+  return `\${query}&w_rid=\${wbiSign}`;
 };
 
 async function test() {
@@ -61,11 +61,12 @@ async function test() {
       const query = encWbi(params, imgKey, subKey);
 
       console.log('Testing getPlayUrl...');
-      const res4 = await axios.get(\`https://api.bilibili.com/x/player/wbi/playurl?\${query}\`, { headers });
+      const res4 = await axios.get(`https://api.bilibili.com/x/player/wbi/playurl?\${query}\`, { headers });
       console.log('getPlayUrl:', res4.data.code);
     }
   } catch (e) {
     console.error('Error:', e.response ? e.response.status : e.message);
   }
-}
-test();
+      }
+  test();
+      

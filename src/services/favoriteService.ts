@@ -82,29 +82,36 @@ export const favoriteService = {
 
   /**
    * 同步全局索引
+   * @param hiddenFolderIds 用户隐藏（不参与索引）的收藏夹 ID 列表
    */
-  async syncGlobalIndex(uid: string, force = false, onProgress?: (event: SyncProgressEvent) => void): Promise<void> {
+  async syncGlobalIndex(uid: string, hiddenFolderIds: number[] = [], force = false, onProgress?: (event: SyncProgressEvent) => void): Promise<void> {
     if (!uid) return;
     
-    const folders = await this.getFolders(uid, force);
+    let folders = await this.getFolders(uid, force);
+    // 过滤掉用户隐藏的收藏夹，仅对可见收藏夹构建索引
+    folders = folders.filter(f => !hiddenFolderIds.includes(f.id));
     const allVideos = new Map<string, FavoriteVideo>();
     const queue = new TaskQueue(5); // 最大并发5
 
     let completedTasks = 0;
-    let totalTasks = folders.length; // 初始为第一页的任务数
+    // 提前计算所有需要拉取的页数，避免进度条回退或超过 100%
+    let totalTasks = folders.reduce((sum, f) => sum + Math.max(1, Math.ceil(f.mediaCount / 20)), 0);
     let processedVideos = 0;
     let totalVideos = folders.reduce((sum, f) => sum + f.mediaCount, 0);
 
     const reportProgress = () => {
       if (onProgress) {
         onProgress({
-          completedTasks,
+          completedTasks: Math.min(completedTasks, totalTasks),
           totalTasks,
-          processedVideos,
+          processedVideos: Math.min(processedVideos, totalVideos),
           totalVideos,
         });
       }
     };
+
+    // 初始报告一次进度，让 UI 尽早显示 0% 进度条
+    reportProgress();
 
     // 带有指数退避的执行包装器
     const executeWithBackoff = async (task: () => Promise<any>, maxRetries = 4) => {
@@ -138,7 +145,7 @@ export const favoriteService = {
       }
     };
 
-    // 1. 并发获取所有收藏夹的第一页
+    // 1. 并发获取所有可见收藏夹的第一页（部分失败不中断整体流程）
     const firstPageTasks = folders.map(folder =>
       executeWithBackoff(() => this.getVideos(folder.id, 1, 20, force))
         .then(res => {
@@ -147,9 +154,27 @@ export const favoriteService = {
           reportProgress();
           return { folder, res };
         })
+        .catch(err => {
+          completedTasks++; // 即使失败也算完成一个任务，避免进度卡住
+          reportProgress();
+          throw err;
+        })
     );
     
-    const firstPages = await Promise.all(firstPageTasks);
+    const firstPageResults = await Promise.allSettled(firstPageTasks);
+    const firstPages: Array<{ folder: FavoriteFolder; res: PageResult<FavoriteVideo> }> = [];
+    const firstPageErrors: string[] = [];
+    for (const result of firstPageResults) {
+      if (result.status === 'fulfilled') {
+        firstPages.push(result.value);
+      } else {
+        firstPageErrors.push(result.reason?.message || '未知错误');
+      }
+    }
+    // 如果所有收藏夹第一页都失败了，则抛出异常让 UI 层感知
+    if (firstPages.length === 0 && firstPageErrors.length > 0) {
+      throw new Error(`所有收藏夹第一页请求均失败: ${firstPageErrors.join('; ')}`);
+    }
     const subsequentTasks: Array<() => Promise<void>> = [];
 
     // 2. 收集后续需要拉取的页数
@@ -161,23 +186,34 @@ export const favoriteService = {
       if (res.hasMore) {
         // B站收藏夹接口每页20条，可以通过 mediaCount 估算总页数
         const totalPages = Math.ceil(folder.mediaCount / 20);
-        totalTasks += (totalPages - 1); // 增加后续任务数
-        reportProgress(); // 更新总任务数
+        // totalTasks 已经在初始时计算完毕，这里不需要再累加
         
         for (let page = 2; page <= totalPages; page++) {
           subsequentTasks.push(async () => {
-            const pageRes = await executeWithBackoff(() => this.getVideos(folder.id, page, 20, force));
-            processVideos(folder.id, pageRes.list);
-            completedTasks++;
-            processedVideos += pageRes.list.length;
-            reportProgress();
+            try {
+              const pageRes = await executeWithBackoff(() => this.getVideos(folder.id, page, 20, force));
+              processVideos(folder.id, pageRes.list);
+              processedVideos += pageRes.list.length;
+            } finally {
+              completedTasks++;
+              reportProgress();
+            }
           });
         }
       }
     }
     
-    // 3. 执行所有后续任务
-    await Promise.all(subsequentTasks.map(task => task()));
+    // 3. 执行所有后续任务（部分失败不中断整体流程）
+    const subsequentResults = await Promise.allSettled(subsequentTasks.map(task => task()));
+    const subsequentErrors: string[] = [];
+    for (const result of subsequentResults) {
+      if (result.status === 'rejected') {
+        subsequentErrors.push(result.reason?.message || '未知错误');
+      }
+    }
+    if (subsequentErrors.length > 0) {
+      console.warn(`[favoriteService] 后续页面任务部分失败: ${subsequentErrors.join('; ')}`);
+    }
     
     storage.setJSON('globalIndex', Array.from(allVideos.values()));
   },
