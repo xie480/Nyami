@@ -19,6 +19,7 @@ import { VisibleFoldersScreen } from './screens/VisibleFoldersScreen';
 import { favoriteService } from './services/favoriteService';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { useUIStore } from './store/uiStore';
+import { LoginModal } from './components/LoginModal';
 import { storage } from './core/storage';
 import { useSyncStore } from './store/syncStore';
 
@@ -125,6 +126,7 @@ export default function App() {
             </Stack.Navigator>
           </NavigationContainer>
           <PlaylistPanel visible={playlistVisible} onClose={() => setPlaylistVisible(false)} />
+          <LoginModal />
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

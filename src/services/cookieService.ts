@@ -1,29 +1,57 @@
-import { storage } from '../core/storage';
+import * as Keychain from 'react-native-keychain';
 import { cache } from '../core/cache';
 
-const KEY = 'biliCookie';
+// Keychain service identifier for B 站鉴权 Cookie
+const COOKIE_SERVICE = 'bili_auth_cookie';
 
+/**
+ * Cookie 管理服务（加密存储）
+ * - 使用系统安全存储（iOS Keychain / Android Keystore）
+ * - 仅保存完整的 Cookie 字符串（包含 SESSDATA、bili_jct、DedeUserID 等）
+ * - 提供 async 接口以匹配 Keychain 的 Promise API
+ */
 export const cookieService = {
-  /** 设置 Cookie，例如 "SESSDATA=xxxx;DedeUserID=12345" */
-  set(cookie: string) {
+  /**
+   * 保存 Cookie（完整字符串）
+   * @param cookie 示例: "SESSDATA=xxxx;DedeUserID=12345;..."
+   */
+  async set(cookie: string) {
     const trimmed = cookie.trim();
     if (!this.extractSessdata(trimmed)) {
       throw new Error('无效的 Cookie 格式，必须包含 SESSDATA');
     }
-    storage.setString(KEY, trimmed);
-    // 切换账号时清空相关缓存
+    // 从 Cookie 中提取 UID 作为用户名保存（便于后续查询）
+    const uid = this.extractUid(trimmed) ?? '';
+    await Keychain.setGenericPassword(uid, trimmed, {
+      service: COOKIE_SERVICE,
+      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    });
+    // 切换账号或登录后，需要清空业务缓存
     cache.deletePrefix('folders:');
     cache.deletePrefix('videos:');
     cache.deletePrefix('audioInfo:');
-    storage.delete('wbiKeys'); // WBI 也需重新获取
   },
 
-  get(): string {
-    return storage.getString(KEY) || '';
+  /** 读取已保存的 Cookie，若不存在返回空字符串 */
+  async get(): Promise<string> {
+    try {
+      const credentials = await Keychain.getGenericPassword({ service: COOKIE_SERVICE });
+      if (credentials) {
+        return credentials.password;
+      }
+    } catch (e) {
+      console.error('读取 Keychain Cookie 失败', e);
+    }
+    return '';
   },
 
-  clear() {
-    storage.delete(KEY);
+  /** 删除已保存的 Cookie 并清理业务缓存 */
+  async clear() {
+    try {
+      await Keychain.resetGenericPassword({ service: COOKIE_SERVICE });
+    } catch (e) {
+      console.error('清除 Keychain Cookie 失败', e);
+    }
     cache.deletePrefix('folders:');
     cache.deletePrefix('videos:');
     cache.deletePrefix('audioInfo:');
@@ -35,8 +63,15 @@ export const cookieService = {
     return m ? m[1] : null;
   },
 
-  /** 是否已登录 */
-  isLoggedIn(): boolean {
-    return !!this.extractSessdata(this.get());
+  /** 从 Cookie 中提取 DedeUserID（即 UID），用于登录状态展示 */
+  extractUid(cookie: string): string | null {
+    const m = cookie.match(/DedeUserID=([0-9]+)/);
+    return m ? m[1] : null;
+  },
+
+  /** 判断当前是否已登录（依据本地存储的 Cookie） */
+  async isLoggedIn(): Promise<boolean> {
+    const ck = await this.get();
+    return !!this.extractSessdata(ck);
   },
 };

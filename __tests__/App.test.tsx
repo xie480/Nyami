@@ -149,6 +149,19 @@ jest.mock('react-native-track-player', () => {
 });
 
 import React from 'react';
+
+// Mock @react-native-cookies/cookies for Jest environment
+jest.mock('@react-native-cookies/cookies', () => ({
+  __esModule: true,
+  default: {
+    get: jest.fn(() => Promise.resolve({})),
+    set: jest.fn(() => Promise.resolve()),
+    clear: jest.fn(() => Promise.resolve()),
+  },
+}));
+
+// Mock react-native-webview using manual mock to avoid native module errors in Jest environment
+jest.mock('react-native-webview');
 import App from '../App';
 
 // Note: import explicitly to use the types shipped with jest.

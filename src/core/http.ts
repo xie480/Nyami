@@ -1,12 +1,14 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import { config } from '../config';
-import { storage } from './storage';
+import { cookieService } from '../services';
 import { adaptiveBucket } from './adaptiveRateLimit';
 import {
   AuthRequiredError, BiliApiError, normalizeError,
   ResourceUnavailableError, RateLimitError,
 } from './errors';
 import type { BiliResponse } from '../types/bili';
+import { useAuthStore } from '../store/authStore';
+import { useUIStore } from '../store/uiStore';
 
 /** 创建带默认头的 axios 实例 */
 function createInstance(): AxiosInstance {
@@ -19,10 +21,10 @@ function createInstance(): AxiosInstance {
     },
   });
 
-  // 请求拦截：限流 + 自动注入 Cookie
+  // 请求拦截：限流 + 自动注入 Cookie（使用加密存储）
   ins.interceptors.request.use(async (cfg) => {
     await adaptiveBucket.acquire();
-    const cookie = storage.getString('biliCookie');
+    const cookie = await cookieService.get();
     if (cookie) {
       if (typeof cfg.headers.set === 'function') {
         cfg.headers.set('Cookie', cookie);
@@ -94,10 +96,26 @@ export async function biliGet<T>(
     } catch (err: any) {
       clearTimeout(timeoutId);
       lastError = err;
-      // 仅对网络错误重试，业务错误立即抛出
+      // 处理鉴权错误，其他业务错误直接抛出
+      if (err instanceof AuthRequiredError) {
+        // 显示登录弹窗
+        useUIStore.getState().setLoginModalVisible(true);
+        // 返回一个 Promise，等待登录完成后重试一次
+        return new Promise<T>((resolve, reject) => {
+          useAuthStore.getState().setLoginResolver(async () => {
+            try {
+              const retryRes = await http.get<BiliResponse<T>>(url, requestOptions);
+              const { code, data, message } = retryRes.data;
+              if (code !== 0) mapBusinessError(code, message);
+              resolve(data);
+            } catch (e) {
+              reject(e);
+            }
+          });
+        });
+      }
       if (
         err instanceof BiliApiError ||
-        err instanceof AuthRequiredError ||
         err instanceof ResourceUnavailableError
       ) {
         throw err;

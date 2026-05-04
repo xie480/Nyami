@@ -1,4 +1,5 @@
 import md5 from 'md5';
+import { cookieService } from '../services';
 import axios from 'axios';
 import { config } from '../config';
 import { storage } from './storage';
@@ -50,17 +51,18 @@ export async function getWbiKeys(): Promise<BiliWbiKeys> {
     return { imgKey: cached.imgKey, subKey: cached.subKey };
   }
 
+  const cookie = await cookieService.get();
   const { data } = await axios.get(
-    `${config.biliBaseURL}/x/web-interface/nav`,
-    {
-      headers: {
-        'User-Agent': config.userAgent,
-        Referer: config.referer,
-        Cookie: storage.getString('biliCookie') || '',
-      },
-      timeout: config.httpTimeout,
-    }
-  );
+        `${config.biliBaseURL}/x/web-interface/nav`,
+        {
+          headers: {
+            'User-Agent': config.userAgent,
+            Referer: config.referer,
+            Cookie: cookie || '',
+          },
+          timeout: config.httpTimeout,
+        }
+      );
 
   const imgUrl: string = data?.data?.wbi_img?.img_url || '';
   const subUrl: string = data?.data?.wbi_img?.sub_url || '';

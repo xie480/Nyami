@@ -11,7 +11,9 @@ import { useSettingsStore } from '../store/settingsStore';
 import { useUserStore } from '../store/userStore';
 import { useSyncStore } from '../store/syncStore';
 import { audioCache } from '../services/audioCache';
-import { cookieService, favoriteService } from '../services';
+import { favoriteService, cookieService } from '../services';
+import { useAuthStore } from '../store/authStore';
+import { useUIStore } from '../store/uiStore';
 import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -36,9 +38,26 @@ export const SettingsScreen = ({ navigation }: any) => {
 
   const [cacheSize, setCacheSize] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
-  const [cookie, setCookie] = useState(cookieService.get());
+  const [cookie, setCookie] = useState<string>('');
   const { syncStatus, progressData, syncError, startSync, resetSyncState } = useSyncStore();
+    
+  // Load stored cookie on mount
+  useEffect(() => {
+    (async () => {
+      const stored = await cookieService.get();
+      if (stored) setCookie(stored);
+    })();
+  }, []);
   const [globalIndexCount, setGlobalIndexCount] = useState(0);
+
+  // Auth state
+  const { loggedIn, userId, logout } = useAuthStore();
+  const { setLoginModalVisible } = useUIStore();
+  const triggerLogin = () => setLoginModalVisible(true);
+  const handleLogout = async () => {
+    await logout();
+    setLoginModalVisible(false);
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -84,14 +103,14 @@ export const SettingsScreen = ({ navigation }: any) => {
     startSync(uid, hiddenFolderIds, true);
   };
 
-  const onSaveCookie = () => {
+  const onSaveCookie = async () => {
     // Validate cookie format before saving
     const sess = cookieService.extractSessdata(cookie);
     if (!sess) {
       Alert.alert('无效的 Cookie', '请确保输入包含 SESSDATA=...');
       return;
     }
-    cookieService.set(cookie);
+    await cookieService.set(cookie);
     Alert.alert('已保存', '已清除相关缓存，重新进入收藏夹将使用新身份');
   };
 
@@ -227,22 +246,16 @@ export const SettingsScreen = ({ navigation }: any) => {
 
         <Text style={s.section}>登录</Text>
         <View style={[s.group, s.cookieBox]}>
-          <Text style={{ fontSize: t.fontSize.base, color: t.colors.text, marginBottom: t.spacing.sm }}>
-            SESSDATA Cookie
-          </Text>
-          <TextInput
-            style={s.input}
-            value={cookie}
-            onChangeText={setCookie}
-            placeholder="SESSDATA=xxxxxxxxxx"
-            placeholderTextColor={t.colors.textHint}
-            multiline
-            secureTextEntry
-          />
-          <Text style={s.cookieHint}>
-            用于加载私密收藏夹和高音质。从浏览器 F12 → Application → Cookie 中复制 SESSDATA
-          </Text>
-          <Text style={s.saveText} onPress={onSaveCookie}>保存</Text>
+          {loggedIn ? (
+            <>
+              <Text style={{ fontSize: t.fontSize.base, color: t.colors.text, marginBottom: t.spacing.sm }}>
+                已登录 UID: {userId}
+              </Text>
+              <Text style={s.saveText} onPress={handleLogout}>退出登录</Text>
+            </>
+          ) : (
+            <Text style={s.saveText} onPress={triggerLogin}>登录 B 站</Text>
+          )}
         </View>
 
         {/* UID 编辑区 */}
