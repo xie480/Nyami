@@ -29,9 +29,12 @@ import { favoriteService } from '../services';
 import { appendQueue as tpAppendQueue, loadQueue } from '../services/trackPlayer';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
+import { useSyncStore } from '../store/syncStore';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { FavoriteFolder } from '../types/domain';
+import type { FavoriteFolder, FavoriteVideo } from '../types/domain';
+import FastImage from 'react-native-fast-image';
+import { formatDuration } from '../utils/format';
 
 export const FoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
@@ -44,6 +47,8 @@ export const FoldersScreen = ({ navigation }: any) => {
   const [refreshing, setRefreshing] = useState(false);
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const insets = useSafeAreaInsets();
+  const syncStatus = useSyncStore((s) => s.syncStatus);
+  const isSyncing = syncStatus === 'syncing';
 
   // 根据用户偏好过滤出可见的收藏夹
   const folders = allFolders
@@ -52,6 +57,7 @@ export const FoldersScreen = ({ navigation }: any) => {
 
   // 全局搜索关键字
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<'title' | 'author'>('title');
   const filteredFolders = folders
     ? folders.filter((f) =>
         f.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -63,6 +69,16 @@ export const FoldersScreen = ({ navigation }: any) => {
     (acc, f) => acc + f.mediaCount,
     0
   );
+  // Determine if we are performing a global search based on non-empty query
+  const isGlobalSearch = searchQuery.trim().length > 0;
+  const globalIndex = favoriteService.getGlobalIndex();
+  const filteredVideos = isGlobalSearch ? globalIndex.filter((v) => {
+    if (searchMode === 'title') {
+      return v.title.toLowerCase().includes(searchQuery.toLowerCase());
+    } else {
+      return v.upper?.name?.toLowerCase().includes(searchQuery.toLowerCase());
+    }
+  }) : [];
 
   const load = useCallback(
     async (force = false) => {
@@ -151,14 +167,23 @@ export const FoldersScreen = ({ navigation }: any) => {
             style={{
               flex: 1,
               marginLeft: t.spacing.sm,
-              color: t.colors.text,
+              color: isSyncing ? t.colors.textHint : t.colors.text,
               fontSize: t.fontSize.base,
               padding: 0,
             }}
-            placeholder="搜索收藏夹"
+            placeholder={isSyncing ? "索引同步中，暂不可搜索" : (searchMode === 'title' ? "请输入歌曲名" : "请输入作者")}
             placeholderTextColor={t.colors.textHint}
             value={searchQuery}
             onChangeText={setSearchQuery}
+            editable={!isSyncing}
+          />
+          <IconButton
+            name={searchMode === 'title' ? 'music-note' : 'account'}
+            size={24}
+            color={t.colors.text}
+            style={{ marginLeft: t.spacing.sm }}
+            disabled={isSyncing}
+            onPress={() => setSearchMode(searchMode === 'title' ? 'author' : 'title')}
           />
         </View>
         <IconButton
@@ -174,10 +199,95 @@ export const FoldersScreen = ({ navigation }: any) => {
         <Loading />
       ) : error ? (
         <ErrorView message={error} onRetry={() => load(true)} />
-      ) : filteredFolders!.length === 0 ? (
+      ) : !isGlobalSearch && filteredFolders!.length === 0 ? (
         <Empty
-          title={searchQuery ? '没有匹配的收藏夹' : '没有可见的收藏夹'}
-          hint={searchQuery ? '' : '可在设置 > 可见收藏夹偏好中调整展示的收藏夹'}
+          title="没有可见的收藏夹"
+          hint="可在设置 > 可见收藏夹偏好中调整展示的收藏夹"
+        />
+      ) : isGlobalSearch && filteredVideos.length === 0 ? (
+        <Empty
+          title="没有匹配的歌曲"
+          hint="尝试更换搜索词或搜索模式"
+        />
+      ) : isGlobalSearch ? (
+        <FlatList
+          contentContainerStyle={s.list}
+          showsVerticalScrollIndicator={false}
+          data={filteredVideos}
+          keyExtractor={(it) => it.bvid}
+          ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}
+          renderItem={({ item, index }) => (
+            <TouchableOpacity
+              activeOpacity={0.7}
+              style={{
+                flexDirection: 'row',
+                paddingVertical: t.spacing.sm,
+                paddingHorizontal: t.spacing.lg,
+                backgroundColor: t.colors.surface,
+              }}
+              onPress={async () => {
+                const video = filteredVideos[index];
+                if (!video) return;
+                await setQueue(filteredVideos, video.bvid);
+                navigation.navigate('Player');
+              }}
+            >
+              <View>
+                <FastImage
+                  source={{ uri: item.cover }}
+                  style={{
+                    width: 120,
+                    height: 75,
+                    borderRadius: 8,
+                    backgroundColor: t.colors.surfaceHigh,
+                  }}
+                  resizeMode={FastImage.resizeMode.cover}
+                />
+                <View
+                  style={{
+                    position: 'absolute',
+                    bottom: 4,
+                    right: 4,
+                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    paddingHorizontal: 4,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 10 }}>
+                    {formatDuration(item.duration)}
+                  </Text>
+                </View>
+              </View>
+              <View style={{ flex: 1, marginLeft: t.spacing.md, justifyContent: 'center' }}>
+                <Text
+                  style={{
+                    fontSize: t.fontSize.base,
+                    color: t.colors.text,
+                    fontWeight: '500',
+                    marginBottom: t.spacing.xs,
+                  }}
+                  numberOfLines={2}
+                >
+                  {item.title}
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Icon name="account-outline" size={14} color={t.colors.textHint} />
+                  <Text
+                    style={{
+                      fontSize: t.fontSize.sm,
+                      color: t.colors.textHint,
+                      marginLeft: 2,
+                      flex: 1,
+                    }}
+                    numberOfLines={1}
+                  >
+                    {item.upper?.name || '未知作者'}
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          )}
         />
       ) : (
         <FlatList
@@ -213,25 +323,7 @@ export const FoldersScreen = ({ navigation }: any) => {
 
               {/* 右侧按钮组 */}
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <IconButton
-                  name="sort-variant"
-                  size={24}
-                  color={t.colors.text}
-                  onPress={() => {
-                    if (Platform.OS === 'android') {
-                      ToastAndroid.show('排序功能开发中', ToastAndroid.SHORT);
-                    } else {
-                      Alert.alert('提示', '排序功能开发中');
-                    }
-                  }}
-                />
-                <IconButton
-                  name="cog-outline"
-                  size={24}
-                  color={t.colors.text}
-                  style={{ marginLeft: t.spacing.sm }}
-                  onPress={() => navigation.navigate('Settings')}
-                />
+                {/* 设置按钮已在右上角保留，此处已移除 */}
                 <IconButton
                   name={isMultiSelectMode ? 'checkbox-marked' : 'checkbox-blank-outline'}
                   size={24}

@@ -28,6 +28,7 @@ import { loadQueue } from '../services/trackPlayer';
 import { usePlayerStore } from '../store/playerStore';
 import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
+import { useSyncStore } from '../store/syncStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FavoriteVideo } from '../types/domain';
 
@@ -54,7 +55,17 @@ export const VideosScreen = ({ route, navigation }: any) => {
 
   // 新增搜索和排序状态
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortOption, setSortOption] = useState<'default' | 'title' | 'duration'>('default');
+  // 定义排序枚举
+  enum SortOption {
+    TitleAsc = 'title_asc',
+    TitleDesc = 'title_desc',
+    DurationAsc = 'duration_asc',
+    DurationDesc = 'duration_desc',
+    FavoriteTimeAsc = 'favtime_asc',
+    FavoriteTimeDesc = 'favtime_desc',
+  }
+  const [sortOption, setSortOption] = useState<SortOption>(SortOption.FavoriteTimeDesc);
+  const [sortModalVisible, setSortModalVisible] = useState(false);
 
   const loadMore = useCallback(async () => {
     if (loadingRef.current || !hasMoreRef.current) return;
@@ -169,13 +180,21 @@ export const VideosScreen = ({ route, navigation }: any) => {
   // Filtering and sorting for display
   const filteredList = list.filter(v => v.title.toLowerCase().includes(searchQuery.toLowerCase()));
   const displayedList = (() => {
-    if (sortOption === 'title') {
-      return [...filteredList].sort((a, b) => a.title.localeCompare(b.title));
+    switch (sortOption) {
+      case SortOption.TitleAsc:
+        return [...filteredList].sort((a, b) => a.title.localeCompare(b.title));
+      case SortOption.TitleDesc:
+        return [...filteredList].sort((a, b) => b.title.localeCompare(a.title));
+      case SortOption.DurationAsc:
+        return [...filteredList].sort((a, b) => a.duration - b.duration);
+      case SortOption.DurationDesc:
+        return [...filteredList].sort((a, b) => b.duration - a.duration);
+      case SortOption.FavoriteTimeAsc:
+        return [...filteredList].reverse(); // 逆序得到时间正序
+      case SortOption.FavoriteTimeDesc:
+      default:
+        return filteredList; // 原始顺序即收藏时间逆序
     }
-    if (sortOption === 'duration') {
-      return [...filteredList].sort((a, b) => a.duration - b.duration);
-    }
-    return filteredList;
   })();
 
   const s = StyleSheet.create({
@@ -233,17 +252,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
     },
   });
 
-  const cycleSort = () => {
-    const next = sortOption === 'default' ? 'title' : sortOption === 'title' ? 'duration' : 'default';
-    setSortOption(next);
-    if (Platform.OS === 'android') {
-      const label = next === 'default' ? '默认' : next === 'title' ? '标题' : '时长';
-      ToastAndroid.show(`排序方式：${label}`, ToastAndroid.SHORT);
-    } else {
-      const label = next === 'default' ? '默认' : next === 'title' ? '标题' : '时长';
-      Alert.alert('提示', `排序方式：${label}`);
-    }
-  };
+  // No longer using cycleSort, sorting handled via modal
 
   return (
     <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
@@ -251,17 +260,17 @@ export const VideosScreen = ({ route, navigation }: any) => {
       <Header title={`${title} (${list.length})`} showBack />
       {/* 搜索 + 排序栏 */}
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md }}>
-        <View style={s.searchBar}>
+        <View style={[s.searchBar, { flex: 1 }]}>
           <Icon name="magnify" size={20} color={t.colors.textHint} />
           <TextInput
             style={{ flex: 1, marginLeft: t.spacing.sm, color: t.colors.text, fontSize: t.fontSize.base, padding: 0 }}
-            placeholder="搜索视频"
+            placeholder="搜索收藏夹内歌曲"
             placeholderTextColor={t.colors.textHint}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
         </View>
-        <IconButton name="sort-variant" size={24} color={t.colors.text} style={{ marginLeft: t.spacing.sm }} onPress={cycleSort} />
+        <IconButton name="sort-variant" size={24} color={t.colors.text} style={{ marginLeft: t.spacing.sm }} onPress={() => setSortModalVisible(true)} />
       </View>
 
       {initing ? (
@@ -314,32 +323,23 @@ export const VideosScreen = ({ route, navigation }: any) => {
         />
       )}
       {/* Bottom Action Modal */}
+      {/* 排序弹窗 */}
       <Modal
-        visible={modalVisible}
+        visible={sortModalVisible}
         animationType="slide"
         transparent
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={() => setSortModalVisible(false)}
       >
         <View style={s.modalOverlay}>
           <View style={s.modalContent}>
-            <Text style={s.modalTitle}>操作</Text>
-            <Button
-              title="加入下一首播放"
-              onPress={() => {
-                if (selectedVideo) {
-                  insertNext(selectedVideo);
-                  const msg = '已添加至下一首播放';
-                  if (Platform.OS === 'android') {
-                    ToastAndroid.show(msg, ToastAndroid.SHORT);
-                  } else {
-                    Alert.alert('', msg);
-                  }
-                }
-                setModalVisible(false);
-              }}
-              style={{ marginBottom: t.spacing.md }}
-            />
-            <Button title="关闭" variant="secondary" onPress={() => setModalVisible(false)} />
+            <Text style={s.modalTitle}>排序方式</Text>
+            <Button title="标题正序" onPress={() => { setSortOption(SortOption.TitleAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
+            <Button title="标题逆序" onPress={() => { setSortOption(SortOption.TitleDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
+            <Button title="时长正序" onPress={() => { setSortOption(SortOption.DurationAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
+            <Button title="时长逆序" onPress={() => { setSortOption(SortOption.DurationDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
+            <Button title="收藏时间正序" onPress={() => { setSortOption(SortOption.FavoriteTimeAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
+            <Button title="收藏时间逆序" onPress={() => { setSortOption(SortOption.FavoriteTimeDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
+            <Button title="关闭" variant="secondary" onPress={() => setSortModalVisible(false)} />
           </View>
         </View>
       </Modal>
