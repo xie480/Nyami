@@ -76,10 +76,10 @@ export default function App() {
       const lastUid = storage.getString('lastUid');
       const globalIndex = favoriteService.getGlobalIndex();
       
-      // 仅在切换账号或本地索引为空时才重新同步
+      // 仅在切换账号或本地索引为空时清理旧索引，用户需在设置页面手动同步
       if (lastUid !== uid || globalIndex.length === 0) {
+        // 仅清理旧数据，等待用户手动同步
         favoriteService.clearGlobalIndex();
-        startSync(uid, hiddenFolderIds).catch(console.warn);
         storage.setString('lastUid', uid);
       }
     } else {
@@ -101,8 +101,7 @@ export default function App() {
 
     // 用户修改了可见收藏夹偏好，重新构建全局索引
     favoriteService.clearGlobalIndex();
-    // 使用 startSync 替代 favoriteService.syncGlobalIndex 以便 UI 正确显示同步状态
-    startSync(uid, hiddenFolderIds).catch(console.warn);
+    // 自动同步已移除，用户可在设置页面手动同步
   }, [hiddenFolderIds, uid]);
 
   return (

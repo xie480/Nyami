@@ -7,6 +7,7 @@ import {
 import { Header } from '../components/Header';
 import { ListItem } from '../components/ListItem';
 import { Switch } from '../components/Switch';
+import { Button } from '../components/Button';
 import { useSettingsStore } from '../store/settingsStore';
 // Removed useUserStore - authentication now handled by authStore
 import { useSyncStore } from '../store/syncStore';
@@ -37,7 +38,7 @@ export const SettingsScreen = ({ navigation }: any) => {
 
   const [cacheSize, setCacheSize] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
-  const { syncStatus, progressData, syncError, startSync, resetSyncState } = useSyncStore();
+  const { syncStatus, progressData, syncError, startSync, abortSync, resetSyncState } = useSyncStore();
   const [globalIndexCount, setGlobalIndexCount] = useState(0);
 
   // Auth state
@@ -200,7 +201,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             onPress={syncStatus === 'syncing' ? undefined : onSyncGlobalIndex}
             right={
               syncStatus === 'syncing' ? (
-                <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.base }}>同步中...</Text>
+                <Button title="取消" variant="text" onPress={abortSync} />
               ) : syncStatus === 'error' ? (
                 <Text style={{ color: t.colors.error, fontSize: t.fontSize.base }}>重试</Text>
               ) : (
@@ -219,6 +220,9 @@ export const SettingsScreen = ({ navigation }: any) => {
                   }}
                 />
               </View>
+              <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: t.spacing.sm }}>
+                由于B站限流严重，该操作可能需要较长时间，请耐心等待
+              </Text>
             </View>
           )}
         </View>
