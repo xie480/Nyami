@@ -9,6 +9,7 @@ import { ListItem } from '../components/ListItem';
 import { Switch } from '../components/Switch';
 import { Button } from '../components/Button';
 import { useSettingsStore } from '../store/settingsStore';
+import type { ThemeMode } from '../store/settingsStore';
 // Removed useUserStore - authentication now handled by authStore
 import { useSyncStore } from '../store/syncStore';
 import { audioCache } from '../services/audioCache';
@@ -27,13 +28,19 @@ const QUALITY_OPTIONS: Array<{ key: Quality; title: string; subtitle: string }> 
   { key: 'high', title: '高音质', subtitle: '192 kbps · 约 5.5MB / 4 分钟' },
 ];
 
+const THEME_OPTIONS: Array<{ key: ThemeMode; title: string }> = [
+  { key: 'system', title: '跟随系统' },
+  { key: 'light', title: '明亮' },
+  { key: 'dark', title: '暗黑' },
+];
+
 export const SettingsScreen = ({ navigation }: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const {
     quality, autoCacheOnWifi, wifiOnly, hiddenFolderIds,
-    expandMultiPart, setQuality, setAutoCacheOnWifi,
-    setWifiOnly, setExpandMultiPart,
+    expandMultiPart, themeMode, setQuality, setAutoCacheOnWifi,
+    setWifiOnly, setExpandMultiPart, setThemeMode,
   } = useSettingsStore();
   // UID management moved to authStore (userId, userInfo)
 
@@ -145,6 +152,24 @@ export const SettingsScreen = ({ navigation }: any) => {
           <Text style={s.saveText} onPress={triggerLogin}>点击登录</Text>
         )}
       </View>
+        <Text style={s.section}>外观</Text>
+        <View style={s.group}>
+          {THEME_OPTIONS.map((opt, i) => (
+            <React.Fragment key={opt.key}>
+              {i > 0 && <View style={s.sep} />}
+              <ListItem
+                title={opt.title}
+                onPress={() => setThemeMode(opt.key)}
+                right={
+                  themeMode === opt.key ? (
+                    <Text style={{ color: t.colors.primary, fontSize: 18 }}>✓</Text>
+                  ) : null
+                }
+              />
+            </React.Fragment>
+          ))}
+        </View>
+
         <Text style={s.section}>音质</Text>
         <View style={s.group}>
           {QUALITY_OPTIONS.map((opt, i) => (

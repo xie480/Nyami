@@ -77,10 +77,10 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
           activeOpacity={0.6}
         >
           <View style={styles.info}>
-            <Text style={[styles.title, isCurrent && { color: primaryColor, fontWeight: '700' }]} numberOfLines={1} ellipsizeMode="tail">
+            <Text style={[{ color: t.colors.text }, styles.title, isCurrent && { color: primaryColor, fontWeight: '700' }]} numberOfLines={1} ellipsizeMode="tail">
               {item.title}
             </Text>
-            <Text style={styles.sub} numberOfLines={1} ellipsizeMode="tail">{item.upper.name}</Text>
+            <Text style={[styles.sub, { color: t.colors.textSub }]} numberOfLines={1} ellipsizeMode="tail">{item.upper.name}</Text>
           </View>
         </RNTouchableOpacity>
         {/* 操作按钮 - 绝对定位在右侧 */}
@@ -99,7 +99,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
         </View>
       </View>
       {isExpanded && item.parts && item.parts.length > 1 && (
-        <View style={styles.partsContainer}>
+        <View style={[styles.partsContainer, { borderLeftColor: t.colors.divider }]}>
           {item.parts.map((part) => (
             <RNTouchableOpacity
               key={part.cid}
@@ -107,8 +107,8 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
               onPress={() => onPartPress(part.cid, part.title)}
               activeOpacity={0.7}
             >
-              <Text style={styles.partTitle} numberOfLines={1}>{part.title}</Text>
-              <Text style={styles.partDuration}>{formatDuration(part.duration)}</Text>
+              <Text style={[styles.partTitle, { color: t.colors.textSub }]} numberOfLines={1}>{part.title}</Text>
+              <Text style={[styles.partDuration, { color: t.colors.textHint }]}>{formatDuration(part.duration)}</Text>
             </RNTouchableOpacity>
           ))}
         </View>
@@ -177,8 +177,8 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={[styles.container, { backgroundColor: t.colors.background }]}>
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>播放列表</Text>
+          <View style={[styles.header, { borderBottomColor: t.colors.divider }]}>
+            <Text style={[styles.headerTitle, { color: t.colors.text }]}>播放列表</Text>
             <IconButton name="close" size={24} color={t.colors.text} onPress={onClose} />
           </View>
           {visible && (

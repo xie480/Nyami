@@ -3,6 +3,8 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { storage } from '../core/storage';
 import type { Quality } from '../types/domain';
 
+export type ThemeMode = 'system' | 'light' | 'dark';
+
 // MMKV storage adapter for zustand persist
 const mmkvStorage = {
   getItem: (name: string) => Promise.resolve(storage.getString(name) ?? null),
@@ -16,6 +18,7 @@ interface Settings {
   wifiOnly: boolean;
   hiddenFolderIds: number[];
   expandMultiPart: boolean;
+  themeMode: ThemeMode;
 }
 
 interface SettingsState extends Settings {
@@ -24,6 +27,7 @@ interface SettingsState extends Settings {
   setWifiOnly: (v: boolean) => void;
   setHiddenFolderIds: (ids: number[]) => void;
   setExpandMultiPart: (v: boolean) => void;
+  setThemeMode: (mode: ThemeMode) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -34,11 +38,13 @@ export const useSettingsStore = create<SettingsState>()(
       wifiOnly: false,
       hiddenFolderIds: [],
       expandMultiPart: true,
+      themeMode: 'system',
       setQuality: (q) => set({ quality: q }),
       setAutoCacheOnWifi: (v) => set({ autoCacheOnWifi: v }),
       setWifiOnly: (v) => set({ wifiOnly: v }),
       setHiddenFolderIds: (ids) => set({ hiddenFolderIds: ids }),
       setExpandMultiPart: (v) => set({ expandMultiPart: v }),
+      setThemeMode: (mode) => set({ themeMode: mode }),
     }),
     {
       name: 'settingsStore',

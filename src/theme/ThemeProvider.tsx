@@ -3,6 +3,7 @@ import { useColorScheme } from 'react-native';
 import { lightColors, darkColors, Colors } from './colors';
 import { fontSize, fontWeight } from './typography';
 import { spacing, radius } from './spacing';
+import { useSettingsStore } from '../store/settingsStore';
 
 export interface Theme {
   colors: Colors;
@@ -16,8 +17,9 @@ export interface Theme {
 const ThemeContext = createContext<Theme | null>(null);
 
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {
-  const scheme = useColorScheme();
-  const isDark = scheme === 'dark';
+  const systemScheme = useColorScheme();
+  const { themeMode } = useSettingsStore();
+  const isDark = themeMode === 'system' ? systemScheme === 'dark' : themeMode === 'dark';
 
   const value: Theme = {
     colors: isDark ? darkColors : lightColors,
