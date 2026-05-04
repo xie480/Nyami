@@ -66,6 +66,11 @@ export const VideosScreen = ({ route, navigation }: any) => {
   }
   const [sortOption, setSortOption] = useState<SortOption>(SortOption.FavoriteTimeDesc);
   const [sortModalVisible, setSortModalVisible] = useState(false);
+  const syncStatus = useSyncStore((s) => s.syncStatus);
+  const isSyncing = syncStatus === 'syncing';
+  const globalIndex = favoriteService.getGlobalIndex();
+  const isGlobalIndexEmpty = globalIndex.length === 0;
+  const isSearchDisabled = isSyncing || isGlobalIndexEmpty;
 
   const loadMore = useCallback(async () => {
     if (loadingRef.current || !hasMoreRef.current) return;
@@ -263,14 +268,14 @@ export const VideosScreen = ({ route, navigation }: any) => {
         <View style={[s.searchBar, { flex: 1 }]}>
           <Icon name="magnify" size={20} color={t.colors.textHint} />
           <TextInput
-            style={{ flex: 1, marginLeft: t.spacing.sm, color: t.colors.text, fontSize: t.fontSize.base, padding: 0 }}
-            placeholder="搜索收藏夹内歌曲"
+            style={{ flex: 1, marginLeft: t.spacing.sm, color: isSearchDisabled ? t.colors.textHint : t.colors.text, fontSize: t.fontSize.base, padding: 0 }}
+            placeholder={isSyncing ? "索引同步中，暂不可搜索" : isGlobalIndexEmpty ? "全局索引为空，暂不可搜索" : "搜索收藏夹内歌曲"}
             placeholderTextColor={t.colors.textHint}
             value={searchQuery}
-            onChangeText={setSearchQuery}
+            onChangeText={setSearchQuery} editable={!isSearchDisabled}
           />
         </View>
-        <IconButton name="sort-variant" size={24} color={t.colors.text} style={{ marginLeft: t.spacing.sm }} onPress={() => setSortModalVisible(true)} />
+        <IconButton name="sort-variant" size={24} color={t.colors.text} style={{ marginLeft: t.spacing.sm }} disabled={isSearchDisabled} onPress={() => setSortModalVisible(true)} />
       </View>
 
       {initing ? (
@@ -333,12 +338,12 @@ export const VideosScreen = ({ route, navigation }: any) => {
         <View style={s.modalOverlay}>
           <View style={s.modalContent}>
             <Text style={s.modalTitle}>排序方式</Text>
-            <Button title="标题正序" onPress={() => { setSortOption(SortOption.TitleAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
-            <Button title="标题逆序" onPress={() => { setSortOption(SortOption.TitleDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
-            <Button title="时长正序" onPress={() => { setSortOption(SortOption.DurationAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
-            <Button title="时长逆序" onPress={() => { setSortOption(SortOption.DurationDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
-            <Button title="收藏时间正序" onPress={() => { setSortOption(SortOption.FavoriteTimeAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
-            <Button title="收藏时间逆序" onPress={() => { setSortOption(SortOption.FavoriteTimeDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm }} />
+            <Button title="标题正序" variant="secondary" onPress={() => { setSortOption(SortOption.TitleAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
+            <Button title="标题逆序" variant="secondary" onPress={() => { setSortOption(SortOption.TitleDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
+            <Button title="时长正序" variant="secondary" onPress={() => { setSortOption(SortOption.DurationAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
+            <Button title="时长逆序" variant="secondary" onPress={() => { setSortOption(SortOption.DurationDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
+            <Button title="收藏时间正序" variant="secondary" onPress={() => { setSortOption(SortOption.FavoriteTimeAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
+            <Button title="收藏时间逆序" variant="secondary" onPress={() => { setSortOption(SortOption.FavoriteTimeDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
             <Button title="关闭" variant="secondary" onPress={() => setSortModalVisible(false)} />
           </View>
         </View>

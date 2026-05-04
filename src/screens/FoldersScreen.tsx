@@ -72,6 +72,8 @@ export const FoldersScreen = ({ navigation }: any) => {
   // Determine if we are performing a global search based on non-empty query
   const isGlobalSearch = searchQuery.trim().length > 0;
   const globalIndex = favoriteService.getGlobalIndex();
+  const isGlobalIndexEmpty = globalIndex.length === 0;
+  const isSearchDisabled = isSyncing || isGlobalIndexEmpty;
   const filteredVideos = isGlobalSearch ? globalIndex.filter((v) => {
     if (searchMode === 'title') {
       return v.title.toLowerCase().includes(searchQuery.toLowerCase());
@@ -160,6 +162,7 @@ export const FoldersScreen = ({ navigation }: any) => {
             borderRadius: 20,
             paddingHorizontal: t.spacing.md,
             height: 40,
+            opacity: isSearchDisabled ? 0.4 : 1,
           }}
         >
           <Icon name="magnify" size={20} color={t.colors.textHint} />
@@ -167,22 +170,22 @@ export const FoldersScreen = ({ navigation }: any) => {
             style={{
               flex: 1,
               marginLeft: t.spacing.sm,
-              color: isSyncing ? t.colors.textHint : t.colors.text,
+              color: isSearchDisabled ? t.colors.textHint : t.colors.text,
               fontSize: t.fontSize.base,
               padding: 0,
             }}
-            placeholder={isSyncing ? "索引同步中，暂不可搜索" : (searchMode === 'title' ? "请输入歌曲名" : "请输入作者")}
+            placeholder={isSyncing ? "索引同步中，暂不可搜索" : isGlobalIndexEmpty ? "全局索引为空，暂不可搜索" : (searchMode === 'title' ? "请输入歌曲名" : "请输入作者")}
             placeholderTextColor={t.colors.textHint}
             value={searchQuery}
             onChangeText={setSearchQuery}
-            editable={!isSyncing}
+            editable={!isSearchDisabled}
           />
           <IconButton
             name={searchMode === 'title' ? 'music-note' : 'account'}
             size={24}
             color={t.colors.text}
             style={{ marginLeft: t.spacing.sm }}
-            disabled={isSyncing}
+            disabled={isSearchDisabled}
             onPress={() => setSearchMode(searchMode === 'title' ? 'author' : 'title')}
           />
         </View>
