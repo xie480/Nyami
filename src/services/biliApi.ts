@@ -64,4 +64,16 @@ export const biliApi = {
     );
     return biliGet<BiliPlayUrlData>(`/x/player/wbi/playurl?${query}`);
   },
+
+  /** 获取登录用户信息（包含 UID、用户名、头像） */
+  async getUserInfo() {
+    const data = await biliGet<any>('/x/web-interface/nav');
+    if (!data) {
+      throw new Error('获取用户信息失败');
+    }
+    const uid = data?.mid ? String(data.mid) : '';
+    const name = data?.uname ?? '';
+    const avatar = data?.face ?? '';
+    return { uid, name, avatar };
+  },
 };

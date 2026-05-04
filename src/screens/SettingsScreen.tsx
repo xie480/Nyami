@@ -1,18 +1,19 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { SafeAreaView, StatusBar } from 'react-native';
+import { SafeAreaView, StatusBar, Image } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  View, Text, ScrollView, StyleSheet, Alert, TextInput,
+  View, Text, ScrollView, StyleSheet, Alert,
 } from 'react-native';
 import { Header } from '../components/Header';
 import { ListItem } from '../components/ListItem';
 import { Switch } from '../components/Switch';
 import { useSettingsStore } from '../store/settingsStore';
-import { useUserStore } from '../store/userStore';
+// Removed useUserStore - authentication now handled by authStore
 import { useSyncStore } from '../store/syncStore';
 import { audioCache } from '../services/audioCache';
 import { favoriteService, cookieService } from '../services';
 import { useAuthStore } from '../store/authStore';
+import { biliApi } from '../services/biliApi';
 import { useUIStore } from '../store/uiStore';
 import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
@@ -32,31 +33,21 @@ export const SettingsScreen = ({ navigation }: any) => {
     quality, autoCacheOnWifi, wifiOnly, hiddenFolderIds,
     setQuality, setAutoCacheOnWifi, setWifiOnly,
   } = useSettingsStore();
-  const uid = useUserStore((s) => s.uid);
-  const setUid = useUserStore((s) => s.setUid);
-  const [newUid, setNewUid] = useState(uid);
+  // UID management moved to authStore (userId, userInfo)
 
   const [cacheSize, setCacheSize] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
-  const [cookie, setCookie] = useState<string>('');
   const { syncStatus, progressData, syncError, startSync, resetSyncState } = useSyncStore();
-    
-  // Load stored cookie on mount
-  useEffect(() => {
-    (async () => {
-      const stored = await cookieService.get();
-      if (stored) setCookie(stored);
-    })();
-  }, []);
   const [globalIndexCount, setGlobalIndexCount] = useState(0);
 
   // Auth state
-  const { loggedIn, userId, logout } = useAuthStore();
+  const { loggedIn, userId, userInfo, logout, setUserInfo } = useAuthStore();
   const { setLoginModalVisible } = useUIStore();
   const triggerLogin = () => setLoginModalVisible(true);
   const handleLogout = async () => {
     await logout();
     setLoginModalVisible(false);
+    navigation.replace('Home');
   };
 
   useFocusEffect(
@@ -95,23 +86,12 @@ export const SettingsScreen = ({ navigation }: any) => {
   };
 
   const onSyncGlobalIndex = () => {
-    if (!uid) {
-      Alert.alert('提示', '请先设置 UID');
+    if (!userId) {
+      Alert.alert('提示', '请先登录');
       return;
     }
     // 传入 hiddenFolderIds，仅同步用户选中的收藏夹
-    startSync(uid, hiddenFolderIds, true);
-  };
-
-  const onSaveCookie = async () => {
-    // Validate cookie format before saving
-    const sess = cookieService.extractSessdata(cookie);
-    if (!sess) {
-      Alert.alert('无效的 Cookie', '请确保输入包含 SESSDATA=...');
-      return;
-    }
-    await cookieService.set(cookie);
-    Alert.alert('已保存', '已清除相关缓存，重新进入收藏夹将使用新身份');
+    startSync(userId, hiddenFolderIds, true);
   };
 
   const s = StyleSheet.create({
@@ -146,6 +126,23 @@ export const SettingsScreen = ({ navigation }: any) => {
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title="设置" showBack />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <Text style={s.section}>登录</Text>
+      <View style={[s.group, s.cookieBox]}>
+        {loggedIn && userInfo ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Image source={{ uri: userInfo.avatar }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: t.spacing.md }} />
+              <View>
+                <Text style={{ fontSize: t.fontSize.base, color: t.colors.text }}>{userInfo.name}</Text>
+                <Text style={{ fontSize: t.fontSize.sm, color: t.colors.textSub }}>UID: {userInfo.uid}</Text>
+              </View>
+            </View>
+            <Text style={s.saveText} onPress={handleLogout}>退出登录</Text>
+          </View>
+        ) : (
+          <Text style={s.saveText} onPress={triggerLogin}>登录 B 站</Text>
+        )}
+      </View>
         <Text style={s.section}>音质</Text>
         <View style={s.group}>
           {QUALITY_OPTIONS.map((opt, i) => (
@@ -244,32 +241,7 @@ export const SettingsScreen = ({ navigation }: any) => {
           />
         </View>
 
-        <Text style={s.section}>登录</Text>
-        <View style={[s.group, s.cookieBox]}>
-          {loggedIn ? (
-            <>
-              <Text style={{ fontSize: t.fontSize.base, color: t.colors.text, marginBottom: t.spacing.sm }}>
-                已登录 UID: {userId}
-              </Text>
-              <Text style={s.saveText} onPress={handleLogout}>退出登录</Text>
-            </>
-          ) : (
-            <Text style={s.saveText} onPress={triggerLogin}>登录 B 站</Text>
-          )}
-        </View>
 
-        {/* UID 编辑区 */}
-        <Text style={s.section}>用户 UID</Text>
-        <View style={s.group}>
-          <TextInput
-            style={s.input}
-            value={newUid}
-            onChangeText={setNewUid}
-            placeholder="请输入 UID"
-            placeholderTextColor={t.colors.textHint}
-          />
-          <Text style={s.saveText} onPress={() => { setUid(newUid); Alert.alert('已保存', 'UID 已更新'); }}>保存 UID</Text>
-        </View>
         <Text style={s.section}>关于</Text>
         <View style={s.group}>
           <ListItem title="版本号" right={<Text style={{ color: t.colors.textSub }}>v1.0.0</Text>} />

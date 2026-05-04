@@ -1,32 +1,37 @@
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import {
-  View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, Alert, SafeAreaView, StatusBar,
+  View, Text, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Button } from '../components/Button';
-import { useUserStore } from '../store/userStore';
+import { useAuthStore } from '../store/authStore';
+import { useUIStore } from '../store/uiStore';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const HomeScreen = ({ navigation }: any) => {
   const t = useTheme();
-  const { uid, setUid } = useUserStore();
-  const [input, setInput] = useState(uid);
+  const { loggedIn } = useAuthStore();
+  const { setLoginModalVisible } = useUIStore();
   const insets = useSafeAreaInsets();
 
-  const onEnter = () => {
-    if (!/^\d{1,20}$/.test(input)) {
-      Alert.alert('提示', '请输入合法的 UID（纯数字）');
-      return;
+  useEffect(() => {
+    if (loggedIn) {
+      navigation.replace('Folders');
     }
-    setUid(input);
-    navigation.navigate('Folders');
+  }, [loggedIn, navigation]);
+
+  const onLogin = () => {
+    setLoginModalVisible(true);
   };
 
   const s = StyleSheet.create({
     container: {
-      flex: 1, padding: t.spacing.xl, backgroundColor: t.colors.background,
+      flex: 1,
+      padding: t.spacing.lg,
+      backgroundColor: t.colors.background,
       justifyContent: 'center',
+      alignItems: 'center',
     },
     iconWrap: {
       width: 80, height: 80, borderRadius: 20, backgroundColor: t.colors.primaryLight,
@@ -41,37 +46,21 @@ export const HomeScreen = ({ navigation }: any) => {
       fontSize: t.fontSize.sm, color: t.colors.textSub,
       textAlign: 'center', marginTop: t.spacing.sm, marginBottom: t.spacing.xxl,
     },
-    input: {
-      height: 48, borderWidth: 1, borderColor: t.colors.divider,
-      borderRadius: t.radius.lg, paddingHorizontal: t.spacing.lg,
-      fontSize: t.fontSize.md, color: t.colors.text,
-      backgroundColor: t.colors.surface,
-    },
-    enter: { marginTop: t.spacing.lg },
+    enter: { marginTop: t.spacing.xxl },
     settingsBtn: { alignSelf: 'center', marginTop: t.spacing.xl },
     settingsBtnText: { color: t.colors.textSub, fontSize: t.fontSize.sm },
   });
 
   return (
-    <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
+    <SafeAreaView style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
       <View style={s.iconWrap}>
         <Icon name="music" size={44} color={t.colors.primary} />
       </View>
       <Text style={s.title}>BiliMusic</Text>
       <Text style={s.subtitle}>你所热爱的，就是你的生活</Text>
-      <TextInput
-        style={s.input}
-        placeholder="请输入 B 站 UID"
-        placeholderTextColor={t.colors.textHint}
-        keyboardType="numeric"
-        value={input}
-        onChangeText={setInput}
-        returnKeyType="go"
-        onSubmitEditing={onEnter}
-      />
-      <Button title="进入" onPress={onEnter} style={s.enter} />
+      <Button title="登录 B 站" onPress={onLogin} style={s.enter} />
       <Text
         style={[s.settingsBtnText, s.settingsBtn]}
         onPress={() => navigation.navigate('Settings')}

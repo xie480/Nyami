@@ -8,7 +8,7 @@ import { IconButton } from '../components/IconButton';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
-import { useUserStore } from '../store/userStore';
+import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { favoriteService } from '../services';
 import { useTheme } from '../theme';
@@ -18,7 +18,7 @@ import type { FavoriteFolder } from '../types/domain';
 export const VisibleFoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const uid = useUserStore((s) => s.uid);
+  const uid = useAuthStore((s) => s.userId);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const setHiddenFolderIds = useSettingsStore((s) => s.setHiddenFolderIds);
 
@@ -29,6 +29,7 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
   const [localHidden, setLocalHidden] = useState<Set<number>>(new Set(hiddenFolderIds));
 
   const load = useCallback(async (force = false) => {
+    if (!uid) return;
     setError(null);
     try {
       const data = await favoriteService.getFolders(uid, force);

@@ -13,7 +13,7 @@ import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
 import { appendQueue as tpAppendQueue, loadQueue } from '../services/trackPlayer';
-import { useUserStore } from '../store/userStore';
+import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,7 +21,7 @@ import type { FavoriteFolder } from '../types/domain';
 
 export const FoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
-  const uid = useUserStore((s) => s.uid);
+  const uid = useAuthStore((s) => s.userId);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const setQueue = usePlayerStore((s) => s.setQueue);
   const { selectedIds, toggle, clear } = useSelectionStore();
@@ -35,6 +35,7 @@ export const FoldersScreen = ({ navigation }: any) => {
   const folders = allFolders ? allFolders.filter(f => !hiddenFolderIds.includes(f.id)) : null;
 
   const load = useCallback(async (force = false) => {
+    if (!uid) return;
     setError(null);
     try {
       const data = await favoriteService.getFolders(uid, force);

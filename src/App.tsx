@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState, useRef } from 'react';
-import { useUserStore } from './store/userStore';
+import { useAuthStore } from './store/authStore';
 import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -29,7 +29,7 @@ export default function App() {
   const isDark = useColorScheme() === 'dark';
   const [isOnline, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
-  const uid = useUserStore((s) => s.uid);
+  const { loggedIn, userId: uid, initAuth } = useAuthStore();
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const playlistVisible = useUIStore(state => state.playlistVisible);
   const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
@@ -40,6 +40,7 @@ export default function App() {
 
   // Initialize player, network status listener, and back handler
   useEffect(() => {
+    initAuth();
     setupPlayer();
     netStatus.init();
     const unsubscribe = netStatus.onChange((type) => {
@@ -110,7 +111,7 @@ export default function App() {
         <ThemeProvider>
           <NavigationContainer ref={navigationRef} theme={isDark ? DarkTheme : DefaultTheme}>
             <Stack.Navigator
-              initialRouteName={uid ? 'Folders' : 'Home'}
+              initialRouteName={loggedIn ? 'Folders' : 'Home'}
               screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
             >
               <Stack.Screen name="Home" component={HomeScreen} />
