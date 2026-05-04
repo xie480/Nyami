@@ -1,7 +1,8 @@
-import React, { useCallback, memo, useState } from 'react';
-import { View, Text, StyleSheet, Modal } from 'react-native';
-import { TouchableOpacity } from 'react-native-gesture-handler';
-import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
+// src/components/PlaylistPanel.tsx (refactored)
+import React, { useCallback, memo, useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo } from 'react-native';
+import TrackPlayer from 'react-native-track-player';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../theme';
 import { usePlayerStore } from '../store/playerStore';
 import { IconButton } from './IconButton';
@@ -10,31 +11,90 @@ import { formatDuration } from '../utils/format';
 import { playSpecificPart } from '../services/trackPlayer';
 
 /**
- * 全局播放列表面板，支持拖拽排序和侧滑删除。
+ * 全局播放列表面板，支持当前播放高亮、自动定位。
  * 通过 Zustand playerStore 与原生 TrackPlayer 同步。
  */
 export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => {
   const t = useTheme();
   const queue = usePlayerStore((s) => s.queue);
-  const reorderQueue = usePlayerStore((s) => s.reorderQueue);
+  const currentBvid = usePlayerStore((s) => s.currentBvid);
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
-  const playMode = usePlayerStore((s) => s.playMode);
-  const togglePlayMode = usePlayerStore((s) => s.togglePlayMode);
   const [expandedBvid, setExpandedBvid] = useState<string | null>(null);
+  const listRef = useRef<any>(null);
 
-  const PlaylistItem = memo(({ item, drag, isActive, getIndex, onPress, isExpanded, onPartPress }: RenderItemParams<FavoriteVideo> & { onPress: () => void; isExpanded: boolean; onPartPress: (cid: number, partTitle: string) => void }) => (
+  // 自动定位：面板显示时滚动到当前播放项
+  useEffect(() => {
+    if (visible && currentBvid && queue.length > 0) {
+      const index = queue.findIndex(v => v.bvid === currentBvid);
+      if (index >= 0) {
+        const timer = setTimeout(() => {
+          listRef.current?.scrollToIndex({
+            index,
+            animated: true,
+            viewPosition: 0.5,
+          });
+        }, 350);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [visible, currentBvid, queue]);
+
+  // 点击歌曲条目：立即跳转播放
+  const handlePress = useCallback(async (bvid: string) => {
+    const q = usePlayerStore.getState().queue;
+    const idx = q.findIndex(v => v.bvid === bvid);
+    if (idx !== -1) {
+      await TrackPlayer.skip(idx);
+      TrackPlayer.play();
+      usePlayerStore.getState().setCurrentBvid(bvid);
+      onClose();
+    }
+  }, [onClose]);
+
+  const PlaylistItem = memo(({
+    item,
+    onPlay,
+    isExpanded,
+    onPartPress,
+    onExpandToggle,
+    isCurrent,
+    primaryColor,
+  }: {
+    item: FavoriteVideo;
+    onPlay: () => void;
+    isExpanded: boolean;
+    onPartPress: (cid: number, partTitle: string) => void;
+    onExpandToggle: () => void;
+    isCurrent: boolean;
+    primaryColor: string;
+  }) => (
     <View>
-      <TouchableOpacity
-        style={[styles.item, { backgroundColor: isActive ? t.colors.surfaceHigh : t.colors.surface }]}
-        onLongPress={drag}
-        onPress={onPress}
-        activeOpacity={0.8}
+      <View
+        style={[
+          styles.item,
+          { backgroundColor: isCurrent ? t.colors.primaryLight : t.colors.surface },
+        ]}
       >
-        <View style={styles.info}>
-          <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.sub} numberOfLines={1}>{item.upper.name}</Text>
-        </View>
+        {/* 信息区 - 点击播放歌曲 */}
+        <RNTouchableOpacity
+          style={styles.infoTouchable}
+          onPress={onPlay}
+          activeOpacity={0.6}
+        >
+          <View style={styles.info}>
+            <Text style={[styles.title, isCurrent && { color: primaryColor, fontWeight: '700' }]} numberOfLines={1} ellipsizeMode="tail">
+              {item.title}
+            </Text>
+            <Text style={styles.sub} numberOfLines={1} ellipsizeMode="tail">{item.upper.name}</Text>
+          </View>
+        </RNTouchableOpacity>
+        {/* 操作按钮 - 绝对定位在右侧 */}
         <View style={styles.actions}>
+          {item.parts && item.parts.length > 1 && (
+            <RNTouchableOpacity onPress={onExpandToggle} style={styles.expandButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Icon name={isExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={t.colors.textHint} />
+            </RNTouchableOpacity>
+          )}
           <IconButton
             name="delete"
             size={20}
@@ -42,11 +102,11 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
             onPress={() => removeFromQueue(item.bvid)}
           />
         </View>
-      </TouchableOpacity>
+      </View>
       {isExpanded && item.parts && item.parts.length > 1 && (
         <View style={styles.partsContainer}>
           {item.parts.map((part) => (
-            <TouchableOpacity
+            <RNTouchableOpacity
               key={part.cid}
               style={styles.partItem}
               onPress={() => onPartPress(part.cid, part.title)}
@@ -54,16 +114,12 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
             >
               <Text style={styles.partTitle} numberOfLines={1}>{part.title}</Text>
               <Text style={styles.partDuration}>{formatDuration(part.duration)}</Text>
-            </TouchableOpacity>
+            </RNTouchableOpacity>
           ))}
         </View>
       )}
     </View>
   ));
-
-  const handlePress = useCallback((bvid: string) => {
-    setExpandedBvid((prev) => (prev === bvid ? null : bvid));
-  }, []);
 
   const handlePartPress = useCallback(async (bvid: string, cid: number, partTitle: string) => {
     try {
@@ -73,26 +129,29 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   }, [onClose]);
 
   const renderItem = useCallback(
-    ({ item, drag, isActive, getIndex }: RenderItemParams<FavoriteVideo>) => (
+    ({ item }: ListRenderItemInfo<FavoriteVideo>) => (
       <PlaylistItem
         item={item}
-        drag={drag}
-        isActive={isActive}
-        getIndex={getIndex}
-        onPress={() => handlePress(item.bvid)}
+        onPlay={() => handlePress(item.bvid)}
         isExpanded={expandedBvid === item.bvid}
         onPartPress={(cid, partTitle) => handlePartPress(item.bvid, cid, partTitle)}
+        onExpandToggle={() => setExpandedBvid(prev => (prev === item.bvid ? null : item.bvid))}
+        isCurrent={item.bvid === currentBvid}
+        primaryColor={t.colors.primary}
       />
     ),
-    [t.colors, removeFromQueue, expandedBvid, handlePress, handlePartPress]
+    [t.colors, expandedBvid, handlePress, handlePartPress, currentBvid]
   );
 
-  const handleDragEnd = useCallback(
-    ({ data }: { data: FavoriteVideo[] }) => {
-      reorderQueue(data);
-    },
-    [reorderQueue]
-  );
+  const handleScrollToIndexFailed = useCallback((info: any) => {
+    const timer = setTimeout(() => {
+      listRef.current?.scrollToIndex({
+        index: info.index,
+        animated: true,
+        viewPosition: 0.5,
+      });
+    }, 500);
+  }, []);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -102,11 +161,12 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
             <Text style={styles.headerTitle}>播放列表</Text>
             <IconButton name="close" size={24} color={t.colors.text} onPress={onClose} />
           </View>
-          <DraggableFlatList
+          <FlatList
+            ref={listRef}
             data={queue}
             keyExtractor={(item) => item.bvid}
             renderItem={renderItem}
-            onDragEnd={handleDragEnd}
+            onScrollToIndexFailed={handleScrollToIndexFailed}
             contentContainerStyle={styles.list}
             initialNumToRender={5}
             maxToRenderPerBatch={10}
@@ -154,9 +214,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginVertical: 4,
     borderRadius: 8,
+    position: 'relative',
+  },
+  infoTouchable: {
+    flex: 1,
+    paddingRight: 80, // 为右侧绝对定位的按钮留出空间
+    justifyContent: 'center',
   },
   info: {
-    flex: 1,
+    width: '115%',
   },
   title: {
     fontSize: 14,
@@ -168,7 +234,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   actions: {
-    marginLeft: 8,
+    position: 'absolute',
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  expandButton: {
+    padding: 4,
+    marginRight: 4,
   },
   partsContainer: {
     marginLeft: 20,

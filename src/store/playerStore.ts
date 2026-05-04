@@ -37,7 +37,7 @@ interface PlayerState {
 
 export const usePlayerStore = create<PlayerState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       queue: [],
       currentBvid: null,
       currentCid: null,
@@ -74,7 +74,12 @@ export const usePlayerStore = create<PlayerState>()(
       },
       // Reorder entire queue (replace)
       reorderQueue: async (videos, startBvid) => {
-        await tpReorderQueue(videos, startBvid);
+        const currentBvid = get().currentBvid;
+        set(state => ({
+          queue: videos,
+          originalQueue: state.playMode === 'sequential' ? videos : state.originalQueue,
+        }));
+        await tpReorderQueue(videos, currentBvid ?? startBvid ?? undefined);
       },
       // Append a list of videos to the end of the queue
       appendQueue: async (videos, startBvid) => {

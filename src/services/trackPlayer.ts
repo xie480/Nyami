@@ -107,8 +107,25 @@ export async function removeFromQueue(bvid: string): Promise<void> {
  * Reorder the entire queue. Optionally start playing from a specific BVID.
  */
 export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string): Promise<void> {
-  // Rebuild the queue using loadQueue to keep placeholder logic
-  await loadQueue(videos, startBvid);
+  const nativeQueue = await TrackPlayer.getQueue();
+  const idToIndex: Map<string, number> = new Map();
+  nativeQueue.forEach((track, index) => {
+    idToIndex.set(track.id as string, index);
+  });
+
+  const moves: { from: number; to: number }[] = [];
+  for (let i = 0; i < videos.length; i++) {
+    const bvid = videos[i].bvid;
+    const currentIndex = idToIndex.get(bvid);
+    if (currentIndex !== undefined && currentIndex !== i) {
+      moves.push({ from: currentIndex, to: i });
+    }
+  }
+
+  moves.sort((a, b) => b.from - a.from);
+  for (const move of moves) {
+    await TrackPlayer.move(move.from, move.to);
+  }
 }
 
 /**

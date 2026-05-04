@@ -168,10 +168,18 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const shuffle = async () => {
     try {
       if (hasMoreRef.current) await ensureAllLoaded();
+      // 创建列表副本并打乱，不影响原 list 状态
       const shuffled = [...list].sort(() => Math.random() - 0.5);
-      setList(shuffled);
-      listRef.current = shuffled;
-      await playFrom(0);
+      
+      if (shuffled.length === 0) return;
+      
+      const target = shuffled[0];
+      
+      // 直接将打乱后的列表注入到播放队列中，实现状态分离
+      setQueue(shuffled, target.bvid);
+      await loadQueue(shuffled, target.bvid);
+      await TrackPlayer.play();
+      navigation.navigate('Player');
     } catch (e: any) {
       const msg = e.message || '随机播放失败';
       if (Platform.OS === 'android') {
@@ -262,7 +270,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
   return (
     <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
-      <Header title={`${title} (${list.length})`} showBack />
+      <Header title={`${title}`} showBack />
       {/* 搜索 + 排序栏 */}
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md }}>
         <View style={[s.searchBar, { flex: 1 }]}>
@@ -291,8 +299,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
           showsVerticalScrollIndicator={false}
           ListHeaderComponent={
             <View style={s.actions}>
-              <Button title="▶ 全部播放" onPress={playAll} style={s.actionBtn} />
-              <Button title="🔀 随机播放" variant="secondary" onPress={shuffle} style={s.actionBtn} />
+              <Button title="全部播放" onPress={playAll} style={s.actionBtn} />
+              <Button title="随机播放" variant="secondary" onPress={shuffle} style={s.actionBtn} />
             </View>
           }
           renderItem={({ item, index }) => (
