@@ -90,13 +90,23 @@ export default function App() {
   }, [uid]);
 
   // 监听 hiddenFolderIds 变化，自动触发全局索引重新同步
+  // 引入 hasMountedRef 以区分首次挂载（状态恢复）和后续用户交互导致的变化
+  const hasMountedRef = useRef(false);
   useEffect(() => {
     if (!uid) return;
-    // 跳过首次渲染（由 uid effect 处理）
+    // 第一次渲染后（或状态恢复完成）时不触发清空全局索引
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      // 同步前一次的 hiddenFolderIds，以便后续比较
+      prevHiddenFolderIdsRef.current = hiddenFolderIds;
+      return;
+    }
+    // 跳过因相同引用导致的无效触发
     if (prevHiddenFolderIdsRef.current === hiddenFolderIds) {
       prevHiddenFolderIdsRef.current = hiddenFolderIds;
       return;
     }
+    // 更新记录
     prevHiddenFolderIdsRef.current = hiddenFolderIds;
 
     // 用户修改了可见收藏夹偏好，重新构建全局索引

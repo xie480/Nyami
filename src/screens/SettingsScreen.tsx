@@ -221,7 +221,7 @@ export const SettingsScreen = ({ navigation }: any) => {
                 />
               </View>
               <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: t.spacing.sm }}>
-                由于B站限流严重，该操作可能需要较长时间，请耐心等待
+                由于B站限流严重，该操作可能耗时较长，请耐心等待
               </Text>
             </View>
           )}
