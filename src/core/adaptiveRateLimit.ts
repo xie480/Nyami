@@ -12,12 +12,12 @@ export class AdaptiveRateLimiter {
   private waitQueue: Waiter[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   
-  private readonly minRate = 0.5;
-  private readonly maxRate = 10;
+  private readonly minRate = 0.1;
+  private readonly maxRate = 1;
   private successCount = 0;
-  private readonly successThreshold = 5; // 连续成功5次后提速
+  private readonly successThreshold = 10; // 连续成功10次后提速
 
-  constructor(initialRate = 2) {
+  constructor(initialRate = 0.5) {
     this.currentRate = initialRate;
     this.tokens = initialRate;
     this.lastRefill = Date.now();

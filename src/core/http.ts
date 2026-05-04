@@ -68,7 +68,7 @@ export async function biliGet<T>(
   retries = config.retry.maxAttempts
 ): Promise<T> {
   let lastError: any;
-  const absoluteTimeout = 30000; // 30 秒的绝对超时
+  const absoluteTimeout = 60000; // 60 秒的绝对超时（与 config.httpTimeout 对齐）
   for (let attempt = 0; attempt <= retries; attempt++) {
     // 为每次尝试创建独立的 AbortController，以实现绝对超时
     const abortController = new AbortController();

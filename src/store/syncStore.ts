@@ -22,16 +22,11 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   startSync: async (uid: string, hiddenFolderIds: number[] = [], force = false) => {
     if (get().syncStatus === 'syncing') return;
     
-    // Setup abort controller and global timeout (5 minutes)
+    // Setup abort controller (no hard timeout to allow long-running sync)
     syncAbortController = new AbortController();
     const abortSignal = syncAbortController.signal;
-    // 5 minutes timeout
-    syncTimeoutId = setTimeout(() => {
-      if (get().syncStatus === 'syncing') {
-        syncAbortController?.abort();
-        set({ syncStatus: 'error', syncError: '同步任务执行超时，已强制重置' });
-      }
-    }, 5 * 60 * 1000);
+    // Removed auto timeout; sync will run until completion or manual abort.
+    syncTimeoutId = null;
     
     set({ syncStatus: 'syncing', progressData: null, syncError: null });
     

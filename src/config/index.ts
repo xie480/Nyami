@@ -19,17 +19,17 @@
   },
 
   /** HTTP 请求超时 */
-  httpTimeout: 20000,
+  httpTimeout: 60000,
 
-  /** 速率限制：每秒最多 2 次请求 */
+  /** 速率限制：每秒最多 1 次请求 */
   rateLimit: {
-    perSecond: 2,
-    burstSize: 4,
+    perSecond: 1,
+    burstSize: 2,
   },
 
   /** 重试次数 */
   retry: {
-    maxAttempts: 3,
-    delayMs: 1200,
+    maxAttempts: 6,
+    delayMs: 2000,
   },
 };

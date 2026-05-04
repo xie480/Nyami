@@ -46,7 +46,7 @@ export const favoriteService = {
   async getVideos(
     mediaId: number,
     pn = 1,
-    ps = 20,
+    ps = 30,
     force = false,
     signal?: AbortSignal
   ): Promise<PageResult<FavoriteVideo>> {
@@ -121,7 +121,7 @@ export const favoriteService = {
     };
     
     // 带有指数退避的执行包装器
-    const executeWithBackoff = async <T>(task: () => Promise<T>, maxRetries = 4): Promise<T> => {
+    const executeWithBackoff = async <T>(task: () => Promise<T>, maxRetries = 6): Promise<T> => {
       for (let i = 0; i <= maxRetries; i++) {
         try {
           return await task();
@@ -249,8 +249,9 @@ export const favoriteService = {
           
           while (hasMore && !folderDone && !signal?.aborted) {
             try {
+              await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 3000) + 2000)); // 2-5 sec jitter
               const pageRes = await executeWithBackoff(() =>
-                this.getVideos(folder.id, page, 20, force, signal)
+                this.getVideos(folder.id, page, 30, force, signal)
               );
               
               // 增量模式：检查是否命中游标
@@ -298,8 +299,12 @@ export const favoriteService = {
                 err.message
               );
               if (err.name === 'RateLimitError' || err.message?.includes('412') || err.message?.includes('429')) {
-                throw err; // 抛出限流异常，中断整个同步流程
+                console.warn(`[favoriteService] 触发限流，暂停 5 分钟后重试文件夹 ${folder.id} 第 ${page} 页`);
+                await new Promise(r => setTimeout(r, 5 * 60 * 1000));
+                // 不递增 page，继续重试当前页
+                continue;
               }
+              // 其他错误，跳出当前文件夹
               break;
             }
           }
@@ -323,12 +328,11 @@ export const favoriteService = {
           }
         } catch (e: any) {
           failedFolders.add(folder.id);
-          console.warn(
-            `[favoriteService] 文件夹 ${folder.id} 同步失败:`,
-            e.message
-          );
+          console.warn(`[favoriteService] 文件夹 ${folder.id} 同步失败:`, e.message);
           if (e.name === 'RateLimitError' || e.message?.includes('412') || e.message?.includes('429')) {
-            throw e; // 抛出限流异常，中断整个同步流程
+            console.warn(`[favoriteService] 触发限流，暂停 5 分钟后继续下一个文件夹`);
+            await new Promise(r => setTimeout(r, 5 * 60 * 1000));
+            // skip aborting entire sync, continue to next folder
           }
         }
         
