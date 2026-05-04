@@ -9,6 +9,7 @@ import { IconButton } from './IconButton';
 import type { FavoriteVideo } from '../types/domain';
 import { formatDuration } from '../utils/format';
 import { playSpecificPart } from '../services/trackPlayer';
+import { useFolderDataStore } from '../store/folderDataStore';
 
 /**
  * 全局播放列表面板，支持当前播放高亮、自动定位。
@@ -18,26 +19,20 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const t = useTheme();
   const queue = usePlayerStore((s) => s.queue);
   const currentBvid = usePlayerStore((s) => s.currentBvid);
+  const playContext = usePlayerStore((s) => s.playContext);
+  const appendQueue = usePlayerStore((s) => s.appendQueue);
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
   const [expandedBvid, setExpandedBvid] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const listRef = useRef<any>(null);
 
-  // 自动定位：面板显示时滚动到当前播放项
-  useEffect(() => {
-    if (visible && currentBvid && queue.length > 0) {
-      const index = queue.findIndex(v => v.bvid === currentBvid);
-      if (index >= 0) {
-        const timer = setTimeout(() => {
-          listRef.current?.scrollToIndex({
-            index,
-            animated: true,
-            viewPosition: 0.5,
-          });
-        }, 350);
-        return () => clearTimeout(timer);
-      }
+  const initialIndex = React.useMemo(() => {
+    if (currentBvid && queue.length > 0) {
+      const idx = queue.findIndex(v => v.bvid === currentBvid);
+      return idx >= 0 ? idx : 0;
     }
-  }, [visible, currentBvid, queue]);
+    return 0;
+  }, [currentBvid, queue]);
 
   // 点击歌曲条目：立即跳转播放
   const handlePress = useCallback(async (bvid: string) => {
@@ -153,6 +148,31 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     }, 500);
   }, []);
 
+  const handleLoadMore = useCallback(async () => {
+    if (loadingMore) return;
+    if (!playContext || !playContext.folderId) return;
+    if (usePlayerStore.getState().playMode !== 'sequential') return;
+
+    const folderStore = useFolderDataStore.getState();
+    // 仅当当前播放的文件夹与全局 Store 的文件夹一致时才加载更多
+    if (folderStore.folderId !== playContext.folderId) return;
+    if (!folderStore.hasMore) return;
+
+    setLoadingMore(true);
+    try {
+      const beforeList = folderStore.getDisplayedList();
+      await folderStore.loadMore();
+      const afterList = folderStore.getDisplayedList();
+      
+      const newItems = afterList.slice(beforeList.length);
+      if (newItems.length > 0) {
+        await appendQueue(newItems);
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, playContext, appendQueue]);
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
@@ -161,19 +181,30 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
             <Text style={styles.headerTitle}>播放列表</Text>
             <IconButton name="close" size={24} color={t.colors.text} onPress={onClose} />
           </View>
-          <FlatList
-            ref={listRef}
-            data={queue}
-            keyExtractor={(item) => item.bvid}
-            renderItem={renderItem}
-            onScrollToIndexFailed={handleScrollToIndexFailed}
-            contentContainerStyle={styles.list}
-            initialNumToRender={5}
-            maxToRenderPerBatch={10}
-            windowSize={5}
-            removeClippedSubviews={true}
-            showsVerticalScrollIndicator={false}
-          />
+          {visible && (
+            <FlatList
+              key={`list-${visible}`}
+              ref={listRef}
+              data={queue}
+              keyExtractor={(item) => item.bvid}
+              renderItem={renderItem}
+              onScrollToIndexFailed={handleScrollToIndexFailed}
+              contentContainerStyle={styles.list}
+              initialScrollIndex={initialIndex}
+              getItemLayout={(data, index) => ({
+                length: 64,
+                offset: 64 * index,
+                index,
+              })}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              removeClippedSubviews={true}
+              showsVerticalScrollIndicator={false}
+              onEndReached={handleLoadMore}
+              onEndReachedThreshold={0.5}
+            />
+          )}
         </View>
       </View>
     </Modal>

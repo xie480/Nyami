@@ -31,114 +31,87 @@ import { useTheme } from '../theme';
 import { useSyncStore } from '../store/syncStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FavoriteVideo } from '../types/domain';
+import { useFolderDataStore, SortOption } from '../store/folderDataStore';
 
 export const VideosScreen = ({ route, navigation }: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const { mediaId, title } = route.params;
   const setQueue = usePlayerStore((s) => s.setQueue);
-  const insertNext = usePlayerStore((s) => s.insertNext);
-  // pagination refs
-  const pageRef = useRef(1);
-  const hasMoreRef = useRef(true);
-  const loadingRef = useRef(false);
-  const listRef = useRef<FavoriteVideo[]>([]);
+  const playMode = usePlayerStore((s) => s.playMode);
+  
+  const {
+    list,
+    hasMore,
+    loading,
+    error,
+    searchQuery,
+    sortOption,
+    initFolder,
+    loadMore,
+    setSearchQuery,
+    setSortOption,
+    getDisplayedList,
+  } = useFolderDataStore();
 
-  const [list, setList] = useState<FavoriteVideo[]>([]);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [loading, setLoading] = useState(false);
   const [initing, setIniting] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<FavoriteVideo | null>(null);
-
-  // 新增搜索和排序状态
-  const [searchQuery, setSearchQuery] = useState('');
-  // 定义排序枚举
-  enum SortOption {
-    TitleAsc = 'title_asc',
-    TitleDesc = 'title_desc',
-    DurationAsc = 'duration_asc',
-    DurationDesc = 'duration_desc',
-    FavoriteTimeAsc = 'favtime_asc',
-    FavoriteTimeDesc = 'favtime_desc',
-  }
-  const [sortOption, setSortOption] = useState<SortOption>(SortOption.FavoriteTimeDesc);
   const [sortModalVisible, setSortModalVisible] = useState(false);
+
   const syncStatus = useSyncStore((s) => s.syncStatus);
   const isSyncing = syncStatus === 'syncing';
   const globalIndex = favoriteService.getGlobalIndex();
   const isGlobalIndexEmpty = globalIndex.length === 0;
   const isSearchDisabled = isSyncing || isGlobalIndexEmpty;
 
-  const loadMore = useCallback(async () => {
-    if (loadingRef.current || !hasMoreRef.current) return;
-    loadingRef.current = true;
-    setLoading(true);
-    try {
-      const globalIndex = favoriteService.getGlobalIndex();
-      if (globalIndex.length > 0) {
-        const folderVideos = globalIndex.filter(v => v.folderIds?.includes(mediaId));
-        if (folderVideos.length > 0) {
-          if (pageRef.current === 1) {
-            setList(folderVideos);
-            listRef.current = folderVideos;
-            setHasMore(false);
-            hasMoreRef.current = false;
-          }
-          setError(null);
-          setLoading(false);
-          loadingRef.current = false;
-          setIniting(false);
-          return;
-        }
-      }
-
-      const r = await favoriteService.getVideos(mediaId, pageRef.current);
-      const newList = [...listRef.current, ...r.list];
-      setList(newList);
-      listRef.current = newList;
-      setHasMore(r.hasMore);
-      hasMoreRef.current = r.hasMore;
-      pageRef.current += 1;
-      setPage(pageRef.current);
-      setError(null);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-      loadingRef.current = false;
-      setIniting(false);
-    }
-  }, [mediaId]);
-
-  // Reset pagination when mediaId changes
   useEffect(() => {
-    setList([]);
-    setPage(1);
-    setHasMore(true);
-    setLoading(false);
     setIniting(true);
-    setError(null);
-    pageRef.current = 1;
-    hasMoreRef.current = true;
-    loadingRef.current = false;
-    listRef.current = [];
-    loadMore();
-  }, [mediaId]);
+    initFolder(mediaId);
+    // Give it a small delay to show loading state if needed, or just set false after init
+    setTimeout(() => setIniting(false), 100);
+  }, [mediaId, initFolder]);
 
   const ensureAllLoaded = async () => {
-    while (hasMoreRef.current) {
-      await loadMore();
+    let currentHasMore = useFolderDataStore.getState().hasMore;
+    while (currentHasMore) {
+      await useFolderDataStore.getState().loadMore();
+      currentHasMore = useFolderDataStore.getState().hasMore;
     }
   };
 
+  const displayedList = getDisplayedList();
+
   const playFrom = async (idx: number) => {
     try {
-      const target = list[idx];
-      setQueue(list, target.bvid);
-      await loadQueue(list, target.bvid);
+      const target = displayedList[idx];
+      const context = { folderId: mediaId, sortOption, searchQuery };
+      
+      if (playMode === 'shuffle') {
+        // 拦截手动点歌：在随机模式下重新洗牌并将点击歌曲置顶
+        if (hasMore) await ensureAllLoaded();
+        const fullList = useFolderDataStore.getState().getDisplayedList();
+        const targetIndex = fullList.findIndex(v => v.bvid === target.bvid);
+        
+        let shuffled = [...fullList];
+        if (targetIndex !== -1) {
+          shuffled.splice(targetIndex, 1);
+        }
+        
+        // Fisher-Yates shuffle
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        
+        shuffled.unshift(target);
+        setQueue(shuffled, target.bvid, context);
+        await loadQueue(shuffled, target.bvid);
+      } else {
+        setQueue(displayedList, target.bvid, context);
+        await loadQueue(displayedList, target.bvid);
+      }
+      
       await TrackPlayer.play();
       navigation.navigate('Player');
     } catch (e: any) {
@@ -153,7 +126,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
 
   const playAll = async () => {
     try {
-      if (hasMoreRef.current) await ensureAllLoaded();
+      if (hasMore) await ensureAllLoaded();
       await playFrom(0);
     } catch (e: any) {
       const msg = e.message || '播放全部失败';
@@ -167,16 +140,22 @@ export const VideosScreen = ({ route, navigation }: any) => {
 
   const shuffle = async () => {
     try {
-      if (hasMoreRef.current) await ensureAllLoaded();
-      // 创建列表副本并打乱，不影响原 list 状态
-      const shuffled = [...list].sort(() => Math.random() - 0.5);
+      if (hasMore) await ensureAllLoaded();
+      const fullList = useFolderDataStore.getState().getDisplayedList();
+      if (fullList.length === 0) return;
       
-      if (shuffled.length === 0) return;
+      const shuffled = [...fullList];
+      // Fisher-Yates shuffle
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
       
       const target = shuffled[0];
+      const context = { folderId: mediaId, sortOption, searchQuery };
       
-      // 直接将打乱后的列表注入到播放队列中，实现状态分离
-      setQueue(shuffled, target.bvid);
+      usePlayerStore.getState().setPlayMode('shuffle');
+      setQueue(shuffled, target.bvid, context);
       await loadQueue(shuffled, target.bvid);
       await TrackPlayer.play();
       navigation.navigate('Player');
@@ -189,26 +168,6 @@ export const VideosScreen = ({ route, navigation }: any) => {
       }
     }
   };
-
-  // Filtering and sorting for display
-  const filteredList = list.filter(v => v.title.toLowerCase().includes(searchQuery.toLowerCase()));
-  const displayedList = (() => {
-    switch (sortOption) {
-      case SortOption.TitleAsc:
-        return [...filteredList].sort((a, b) => a.title.localeCompare(b.title));
-      case SortOption.TitleDesc:
-        return [...filteredList].sort((a, b) => b.title.localeCompare(a.title));
-      case SortOption.DurationAsc:
-        return [...filteredList].sort((a, b) => a.duration - b.duration);
-      case SortOption.DurationDesc:
-        return [...filteredList].sort((a, b) => b.duration - a.duration);
-      case SortOption.FavoriteTimeAsc:
-        return [...filteredList].reverse(); // 逆序得到时间正序
-      case SortOption.FavoriteTimeDesc:
-      default:
-        return filteredList; // 原始顺序即收藏时间逆序
-    }
-  })();
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background },

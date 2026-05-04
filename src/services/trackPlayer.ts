@@ -1,6 +1,7 @@
-﻿import TrackPlayer, {
+import TrackPlayer, {
   AppKilledPlaybackBehavior, Capability, Event,
 } from 'react-native-track-player';
+import { AppState } from 'react-native';
 import { audioService } from './audioService';
 import { audioCache } from './audioCache';
 import { netStatus } from './netStatus';
@@ -10,6 +11,8 @@ import { usePlayerStore } from '../store/playerStore';
 import { performanceMonitor } from './performanceMonitor';
 import { State } from 'react-native-track-player';
 import type { FavoriteVideo } from '../types/domain';
+import { storage } from '../core/storage';
+
 // 用于防止同一索引的 lazyResolve 并发执行，避免重复替换
 const resolving = new Set<number>();
 
@@ -34,7 +37,57 @@ export async function setupPlayer() {
       ],
       progressUpdateEventInterval: 1,
     });
-  } catch {}
+
+    // 监听 AppState 变化，在应用进入后台时保存播放进度
+    AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        try {
+          const progress = await TrackPlayer.getProgress();
+          if (progress.position > 0) {
+            storage.setNumber('lastPlaybackPosition', progress.position);
+          }
+        } catch (e) {}
+      }
+    });
+
+    // 冷启动恢复逻辑
+    // 等待 Zustand store hydration 完成
+    if (!usePlayerStore.persist.hasHydrated()) {
+      await new Promise<void>((resolve) => {
+        const unsub = usePlayerStore.persist.onFinishHydration(() => {
+          unsub();
+          resolve();
+        });
+      });
+    }
+
+    const store = usePlayerStore.getState();
+    if (store.queue && store.queue.length > 0) {
+      const tracks = store.queue.map((v) => ({
+        id: v.bvid,
+        url: `placeholder://${v.bvid}`,
+        title: v.title,
+        artist: v.upper.name,
+        artwork: v.cover,
+        duration: v.duration,
+      }));
+      await TrackPlayer.add(tracks);
+      
+      const startIndex = Math.max(0, store.queue.findIndex((v) => v.bvid === store.currentBvid));
+      await TrackPlayer.skip(startIndex);
+      
+      const lastPosition = storage.getNumber('lastPlaybackPosition');
+      if (lastPosition && lastPosition > 0) {
+        await TrackPlayer.seekTo(lastPosition);
+      }
+      
+      // 触发当前轨道的解析，冷启动时不自动播放
+      lazyResolve(startIndex, false).catch(() => {});
+    }
+
+  } catch (e) {
+    console.error('[TrackPlayer] setupPlayer error:', e);
+  }
   _ready = true;
 }
 
@@ -59,7 +112,7 @@ export async function loadQueue(videos: FavoriteVideo[], startBvid?: string) {
   await lazyResolve(startIndex);
   // 预加载下一首（若存在），减少切歌时网络延迟
   if (videos.length > startIndex + 1) {
-    lazyResolve(startIndex + 1).catch(() => {});
+    lazyResolve(startIndex + 1, false).catch(() => {});
   }
 }
 
@@ -147,7 +200,7 @@ export async function appendQueue(videos: FavoriteVideo[], startBvid?: string): 
   cur.setQueue(combined, startBvid ?? cur.currentBvid ?? undefined);
 }
 
-async function lazyResolve(index: number) {
+async function lazyResolve(index: number, autoPlayActive: boolean = true) {
   // 防止同一索引并发解析导致重复替换
   if (resolving.has(index)) return;
   resolving.add(index);
@@ -239,7 +292,9 @@ async function lazyResolve(index: number) {
     const postAddActiveTrackIndex = await TrackPlayer.getActiveTrackIndex();
     if (postAddActiveTrackIndex !== undefined && postAddActiveTrackIndex === actualIndex) {
       await TrackPlayer.skip(actualIndex + 1);
-      await TrackPlayer.play(); // 确保播放恢复
+      if (autoPlayActive) {
+        await TrackPlayer.play(); // 确保播放恢复
+      }
     }
     await TrackPlayer.remove(actualIndex);
   } catch (error) {
@@ -294,6 +349,17 @@ export async function PlaybackService() {
   TrackPlayer.addEventListener(Event.PlaybackState, async (playbackState) => {
     // playbackState is of type PlaybackState, with .state property.
     const playerState = (playbackState as any).state;
+    
+    // 保存播放进度
+    if (playerState === State.Paused || playerState === State.Stopped) {
+      try {
+        const progress = await TrackPlayer.getProgress();
+        if (progress.position > 0) {
+          storage.setNumber('lastPlaybackPosition', progress.position);
+        }
+      } catch (e) {}
+    }
+
     const activeTrack = await TrackPlayer.getActiveTrack();
     if (!activeTrack?.id) return;
     const bvid = activeTrack.id as string;
@@ -309,7 +375,10 @@ export async function PlaybackService() {
     // Record start of track loading/playback
     const activeTrack = await TrackPlayer.getActiveTrack();
     if (activeTrack?.id) {
-      performanceMonitor.start(activeTrack.id as string);
+      const bvid = activeTrack.id as string;
+      performanceMonitor.start(bvid);
+      // 同步当前播放的 bvid 到 store，修复 UI 高亮不同步问题
+      usePlayerStore.getState().setCurrentBvid(bvid);
       // 提取当前播放轨道的 cid，更新到 store
       // 优先从 track 对象的 cid 属性读取（已解析的轨道在 lazyResolve 中设置）
       const trackCid = (activeTrack as any).cid;
@@ -339,7 +408,7 @@ export async function PlaybackService() {
       try {
         const queue = await TrackPlayer.getQueue();
         if (e.index + 1 < queue.length) {
-          lazyResolve(e.index + 1).catch(() => {});
+          lazyResolve(e.index + 1, false).catch(() => {});
         }
       } catch {}
     }

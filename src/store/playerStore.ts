@@ -12,18 +12,26 @@ const mmkvStorage = {
   removeItem: (name: string) => Promise.resolve(storage.delete(name)),
 };
 
+export interface PlayContext {
+  folderId?: number;
+  sortOption?: string;
+  searchQuery?: string;
+}
+
 interface PlayerState {
   queue: FavoriteVideo[];
   currentBvid: string | null;
   playbackError: string | null;
   playMode: 'sequential' | 'shuffle';
   originalQueue: FavoriteVideo[];
+  playContext: PlayContext | null;
   /** 当前正在播放的分P的 cid，null 表示未解析或单P视频 */
   currentCid: number | null;
-  setQueue: (q: FavoriteVideo[], bvid?: string) => void;
+  setQueue: (q: FavoriteVideo[], bvid?: string, context?: PlayContext) => void;
   setCurrentBvid: (bvid: string | null) => void;
   setPlaybackError: (msg: string | null) => void;
   setPlayMode: (mode: 'sequential' | 'shuffle') => void;
+  setPlayContext: (context: PlayContext | null) => void;
   /** 更新当前 cid */
   setCurrentCid: (cid: number | null) => void;
   togglePlayMode: () => void;
@@ -44,26 +52,57 @@ export const usePlayerStore = create<PlayerState>()(
       playbackError: null,
       playMode: 'sequential',
       originalQueue: [],
-      setQueue: (queue, bvid) =>
-        set({ queue, currentBvid: bvid ?? queue[0]?.bvid ?? null, originalQueue: queue, currentCid: null }),
+      playContext: null,
+      setQueue: (queue, bvid, context) =>
+        set(state => ({
+          queue,
+          currentBvid: bvid ?? queue[0]?.bvid ?? null,
+          originalQueue: queue,
+          currentCid: null,
+          playContext: context !== undefined ? context : state.playContext
+        })),
       setCurrentBvid: (bvid) => set({ currentBvid: bvid }),
       setCurrentCid: (cid) => set({ currentCid: cid }),
+      setPlayContext: (context) => set({ playContext: context }),
       updateVideoParts: (bvid, parts) => set(state => ({
         queue: state.queue.map(v => (v.bvid === bvid ? { ...v, parts } : v)),
         originalQueue: state.originalQueue.map(v => (v.bvid === bvid ? { ...v, parts } : v))
       })),
       setPlaybackError: (msg) => set({ playbackError: msg }),
       setPlayMode: (mode) => set({ playMode: mode }),
-      togglePlayMode: () => set(state => {
+      togglePlayMode: () => {
+        const state = get();
         if (state.playMode === 'sequential') {
           // Shuffle the queue while preserving original order
-          const shuffled = [...state.queue].sort(() => Math.random() - 0.5);
-          return { playMode: 'shuffle', queue: shuffled };
+          // Keep current track at the top
+          const currentBvid = state.currentBvid;
+          const currentTrackIndex = state.queue.findIndex(v => v.bvid === currentBvid);
+          
+          let shuffled = [...state.queue];
+          if (currentTrackIndex !== -1) {
+            const currentTrack = shuffled.splice(currentTrackIndex, 1)[0];
+            // Fisher-Yates shuffle for the rest
+            for (let i = shuffled.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+            shuffled.unshift(currentTrack);
+          } else {
+            for (let i = shuffled.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+          }
+          
+          set({ playMode: 'shuffle', queue: shuffled });
+          // Sync with TrackPlayer
+          tpReorderQueue(shuffled, currentBvid ?? undefined).catch(console.error);
         } else {
           // Restore original order
-          return { playMode: 'sequential', queue: state.originalQueue };
+          set({ playMode: 'sequential', queue: state.originalQueue });
+          tpReorderQueue(state.originalQueue, state.currentBvid ?? undefined).catch(console.error);
         }
-      }),
+      },
       // Insert a video to be played next after the current track
       insertNext: async (video) => {
         await tpInsertNext(video);
