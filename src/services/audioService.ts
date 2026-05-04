@@ -115,7 +115,7 @@ export const audioService = {
           const audio = pickAudio(audios, quality);
   
           // 构建分P信息（如果有的话）
-          const parts = (info as any).pages?.map(p => ({
+          const parts = (info as any).pages?.map((p: any) => ({
             cid: p.cid,
             page: p.page,
             title: p.part,

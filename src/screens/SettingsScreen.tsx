@@ -32,7 +32,8 @@ export const SettingsScreen = ({ navigation }: any) => {
   const insets = useSafeAreaInsets();
   const {
     quality, autoCacheOnWifi, wifiOnly, hiddenFolderIds,
-    setQuality, setAutoCacheOnWifi, setWifiOnly,
+    expandMultiPart, setQuality, setAutoCacheOnWifi,
+    setWifiOnly, setExpandMultiPart,
   } = useSettingsStore();
   // UID management moved to authStore (userId, userInfo)
 
@@ -173,6 +174,15 @@ export const SettingsScreen = ({ navigation }: any) => {
           <ListItem
             title="WiFi 下自动缓存已播放音频"
             right={<Switch value={autoCacheOnWifi} onValueChange={setAutoCacheOnWifi} />}
+          />
+        </View>
+
+        <Text style={s.section}>播放</Text>
+        <View style={s.group}>
+          <ListItem
+            title="将分P列表加入播放列表"
+            subtitle="开启后，点击下一首将播放当前视频的下一个分P；关闭则直接跳转到下一首"
+            right={<Switch value={expandMultiPart} onValueChange={setExpandMultiPart} />}
           />
         </View>
 

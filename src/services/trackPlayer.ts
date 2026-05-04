@@ -175,25 +175,28 @@ async function lazyResolve(index: number) {
       if (parts && parts.length > 1) {
         usePlayerStore.getState().updateVideoParts(bvid, parts);
         usePlayerStore.getState().setCurrentCid(parts[0].cid);
-        // 获取当前队列快照，找到根占位符的位置
-        const expandQueue = await TrackPlayer.getQueue();
-        const currentIdx = expandQueue.findIndex(
-          tr => tr.id === bvid && String(tr.url).startsWith('placeholder://')
-        );
-        if (currentIdx !== -1) {
-          // 将第2P及之后的分P作为占位符插入到当前轨道之后（倒序插入保持顺序）
-          const remainingParts = parts.slice(1);
-          for (let i = remainingParts.length - 1; i >= 0; i--) {
-            const part = remainingParts[i];
-            await TrackPlayer.add({
-              id: bvid,
-              url: `placeholder://${bvid}-${part.cid}`,
-              title: `${videoInfo.title} - ${part.title}`,
-              artist: videoInfo.author,
-              artwork: videoInfo.cover,
-              duration: part.duration,
-              cid: part.cid,
-            }, currentIdx + 1);
+        // 仅当用户开启"将分P列表加入播放列表"时才展开后续分P
+        if (useSettingsStore.getState().expandMultiPart) {
+          // 获取当前队列快照，找到根占位符的位置
+          const expandQueue = await TrackPlayer.getQueue();
+          const currentIdx = expandQueue.findIndex(
+            tr => tr.id === bvid && String(tr.url).startsWith('placeholder://')
+          );
+          if (currentIdx !== -1) {
+            // 将第2P及之后的分P作为占位符插入到当前轨道之后（倒序插入保持顺序）
+            const remainingParts = parts.slice(1);
+            for (let i = remainingParts.length - 1; i >= 0; i--) {
+              const part = remainingParts[i];
+              await TrackPlayer.add({
+                id: bvid,
+                url: `placeholder://${bvid}-${part.cid}`,
+                title: `${videoInfo.title} - ${part.title}`,
+                artist: videoInfo.author,
+                artwork: videoInfo.cover,
+                duration: part.duration,
+                cid: part.cid,
+              }, currentIdx + 1);
+            }
           }
         }
       }
@@ -207,11 +210,13 @@ async function lazyResolve(index: number) {
     }
 
     // 如果是多P视频的根占位符，替换为第一P的标题
+    let effectiveCid = cid;
     let title = t.title;
     if (!cid && videoInfo?.parts && videoInfo.parts.length > 0) {
+      effectiveCid = videoInfo.parts[0].cid;
       title = `${videoInfo.title} - ${videoInfo.parts[0].title}`;
     }
-    const newTrack: any = { ...t, url, title, userAgent: config.userAgent, headers, cid };
+    const newTrack: any = { ...t, url, title, userAgent: config.userAgent, headers, cid: effectiveCid };
     // 平滑替换策略：先在 actualIndex 后面插入新 track，跳过去，再删掉原来的 placeholder
     await TrackPlayer.add(newTrack, actualIndex + 1);
     const postAddActiveTrackIndex = await TrackPlayer.getActiveTrackIndex();
@@ -289,7 +294,12 @@ export async function PlaybackService() {
     if (activeTrack?.id) {
       performanceMonitor.start(activeTrack.id as string);
       // 提取当前播放轨道的 cid，更新到 store
-      if (activeTrack.url && typeof activeTrack.url === 'string') {
+      // 优先从 track 对象的 cid 属性读取（已解析的轨道在 lazyResolve 中设置）
+      const trackCid = (activeTrack as any).cid;
+      if (typeof trackCid === 'number') {
+        usePlayerStore.getState().setCurrentCid(trackCid);
+      } else if (activeTrack.url && typeof activeTrack.url === 'string') {
+        // 回退：从 placeholder URL 中解析 cid
         const urlStr = activeTrack.url;
         if (urlStr.startsWith('placeholder://')) {
           const rawId = urlStr.replace('placeholder://', '');
@@ -300,6 +310,9 @@ export async function PlaybackService() {
               usePlayerStore.getState().setCurrentCid(cid);
             }
           }
+        } else {
+          // 已解析但无 cid 的单P视频，清空 currentCid
+          usePlayerStore.getState().setCurrentCid(null);
         }
       }
     }
@@ -346,43 +359,84 @@ export async function PlaybackService() {
 }
 
 /**
- * 在播放列表中直接点击特定分P时，将其作为占位符插入队列并跳转播放
+ * 在播放列表中直接点击特定分P时：
+ * - 展开模式：查找队列中已存在的分P轨道（按 id + cid 匹配）并跳转；若无则插入
+ * - 不展开模式：替换当前播放轨道，保持队列结构不变
  */
 export async function playSpecificPart(bvid: string, cid: number, partTitle: string) {
-  // 检查队列中是否已存在该分P
+  const expandMultiPart = useSettingsStore.getState().expandMultiPart;
   const currentQueue = await TrackPlayer.getQueue();
   const placeholderUrl = `placeholder://${bvid}-${cid}`;
-  const existingIndex = currentQueue.findIndex(t => t.url === placeholderUrl);
+  const quality = useSettingsStore.getState().quality;
   
-  if (existingIndex !== -1) {
-    // 直接跳转到已存在的轨道
-    await TrackPlayer.skip(existingIndex);
+  if (expandMultiPart) {
+    // 展开模式：查找队列中已存在的分P轨道（按 id 和 cid 匹配）
+    // 兼容未解析的 placeholder 和已解析的 file:// 轨道
+    const existingIndex = currentQueue.findIndex(
+      t => t.id === bvid && ((t as any).cid === cid || t.url === placeholderUrl)
+    );
+    
+    if (existingIndex !== -1) {
+      await TrackPlayer.skip(existingIndex);
+      await TrackPlayer.play();
+      usePlayerStore.getState().setCurrentCid(cid);
+      return;
+    }
+    
+    // 队列中不存在该分P，在当前位置后插入
+    const rawIdx = await TrackPlayer.getActiveTrackIndex();
+    const idx = typeof rawIdx === 'number' ? rawIdx : -1;
+    const insertPos = idx >= 0 ? idx + 1 : 0;
+    
+    const info = await audioService.getInfo(bvid, quality, cid);
+    
+    await TrackPlayer.add({
+      id: bvid,
+      url: placeholderUrl,
+      title: `${info.title} - ${partTitle}`,
+      artist: info.author,
+      artwork: info.cover,
+      duration: info.parts?.find((p: any) => p.cid === cid)?.duration ?? info.duration,
+      cid,
+    }, insertPos);
+    
+    await TrackPlayer.skip(insertPos);
     await TrackPlayer.play();
     usePlayerStore.getState().setCurrentCid(cid);
-    return;
+  } else {
+    // 不展开模式：替换当前播放轨道
+    const rawIdx = await TrackPlayer.getActiveTrackIndex();
+    const idx = typeof rawIdx === 'number' ? rawIdx : -1;
+    if (idx === -1) {
+      // 没有当前轨道，直接插入
+      const info = await audioService.getInfo(bvid, quality, cid);
+      await TrackPlayer.add({
+        id: bvid,
+        url: placeholderUrl,
+        title: `${info.title} - ${partTitle}`,
+        artist: info.author,
+        artwork: info.cover,
+        duration: info.parts?.find((p: any) => p.cid === cid)?.duration ?? info.duration,
+        cid,
+      }, 0);
+      await TrackPlayer.skip(0);
+      await TrackPlayer.play();
+    } else {
+      // 在 idx + 1 处插入新分P，跳转后删除原 idx 处的轨道
+      const info = await audioService.getInfo(bvid, quality, cid);
+      await TrackPlayer.add({
+        id: bvid,
+        url: placeholderUrl,
+        title: `${info.title} - ${partTitle}`,
+        artist: info.author,
+        artwork: info.cover,
+        duration: info.parts?.find((p: any) => p.cid === cid)?.duration ?? info.duration,
+        cid,
+      }, idx + 1);
+      await TrackPlayer.skip(idx + 1);
+      await TrackPlayer.play();
+      await TrackPlayer.remove(idx);
+    }
+    usePlayerStore.getState().setCurrentCid(cid);
   }
-  
-  const rawIdx = await TrackPlayer.getActiveTrackIndex();
-  const idx = typeof rawIdx === 'number' ? rawIdx : -1;
-  const insertPos = idx >= 0 ? idx + 1 : 0;
-  
-  // 获取视频信息以构建 track
-  const quality = useSettingsStore.getState().quality;
-  const info = await audioService.getInfo(bvid, quality, cid);
-  
-  await TrackPlayer.add({
-    id: bvid,
-    url: placeholderUrl,
-    title: `${info.title} - ${partTitle}`,
-    artist: info.author,
-    artwork: info.cover,
-    duration: info.parts?.find((p: any) => p.cid === cid)?.duration ?? info.duration,
-  }, insertPos);
-  
-  // 跳转到新插入的轨道
-  await TrackPlayer.skip(insertPos);
-  await TrackPlayer.play();
-  
-  // 更新 store
-  usePlayerStore.getState().setCurrentCid(cid);
 }
