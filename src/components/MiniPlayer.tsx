@@ -6,9 +6,9 @@ import TrackPlayer, {
 } from 'react-native-track-player';
 import { useNavigation } from '@react-navigation/native';
 import { IconButton } from './IconButton';
+import { GlassView } from './GlassView';
 import { useTheme } from '../theme';
 import { useUIStore } from '../store/uiStore';
-// PlaylistPanel import removed to avoid duplicate modal rendering
 
 export const MiniPlayer: React.FC = () => {
   const t = useTheme();
@@ -16,7 +16,7 @@ export const MiniPlayer: React.FC = () => {
   const playback = usePlaybackState();
   const progress = useProgress();
   const nav = useNavigation<any>();
-  // Removed playlistVisible reference; will be handled globally
+  const isGlass = !!t.glass;
 
   if (!track) return null;
   const isPlaying = playback.state === State.Playing;
@@ -24,8 +24,7 @@ export const MiniPlayer: React.FC = () => {
 
   const s = StyleSheet.create({
     wrap: {
-      backgroundColor: t.colors.surface,
-      borderTopWidth: t.isDark ? 0 : 0.5,
+      borderTopWidth: isGlass ? 0 : (t.isDark ? 0 : 0.5),
       borderTopColor: t.colors.divider,
       shadowColor: '#000', shadowOpacity: 0.08,
       shadowRadius: 12, shadowOffset: { width: 0, height: -2 },
@@ -49,8 +48,8 @@ export const MiniPlayer: React.FC = () => {
     actions: { flexDirection: 'row', alignItems: 'center' },
   });
 
-  return (
-    <View style={s.wrap}>
+  const innerContent = (
+    <View>
       <View style={s.progress}>
         <View style={[s.progressFill, { width: `${p * 100}%` }]} />
       </View>
@@ -75,11 +74,20 @@ export const MiniPlayer: React.FC = () => {
           />
           <IconButton name="skip-next" size={26} color={t.colors.text}
                       onPress={() => TrackPlayer.skipToNext()} />
-          {/* Playlist button */}
           <IconButton name="playlist-music" size={24} color={t.colors.text}
                       onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
         </View>
       </View>
     </View>
   );
+
+  if (isGlass) {
+    return (
+      <GlassView style={s.wrap} borderRadius={0}>
+        {innerContent}
+      </GlassView>
+    );
+  }
+
+  return <View style={[s.wrap, { backgroundColor: t.colors.surface }]}>{innerContent}</View>;
 };

@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, 
 import TrackPlayer from 'react-native-track-player';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../theme';
+import { GlassView } from './GlassView';
 import { usePlayerStore } from '../store/playerStore';
 import { IconButton } from './IconButton';
 import type { FavoriteVideo } from '../types/domain';
@@ -173,39 +174,56 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     }
   }, [loadingMore, playContext, appendQueue]);
 
+  const isGlass = !!t.glass;
+
+  const playlistContent = (
+    <>
+      <View style={[styles.header, { borderBottomColor: t.colors.divider }]}>
+        <Text style={[styles.headerTitle, { color: t.colors.text }]}>播放列表</Text>
+        <IconButton name="close" size={24} color={t.colors.text} onPress={onClose} />
+      </View>
+      {visible && (
+        <FlatList
+          key={`list-${visible}`}
+          ref={listRef}
+          data={queue}
+          keyExtractor={(item) => item.bvid}
+          renderItem={renderItem}
+          onScrollToIndexFailed={handleScrollToIndexFailed}
+          contentContainerStyle={styles.list}
+          initialScrollIndex={initialIndex}
+          getItemLayout={(data, index) => ({
+            length: 64,
+            offset: 64 * index,
+            index,
+          })}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews={true}
+          showsVerticalScrollIndicator={false}
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.5}
+        />
+      )}
+    </>
+  );
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={[styles.container, { backgroundColor: t.colors.background }]}>
-          <View style={[styles.header, { borderBottomColor: t.colors.divider }]}>
-            <Text style={[styles.headerTitle, { color: t.colors.text }]}>播放列表</Text>
-            <IconButton name="close" size={24} color={t.colors.text} onPress={onClose} />
+        {isGlass ? (
+          <GlassView
+            style={{ maxHeight: '80%', borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingBottom: 20 }}
+            borderRadius={12}
+          >
+            {playlistContent}
+          </GlassView>
+        ) : (
+          <View style={[styles.container, { backgroundColor: t.colors.background }]}>
+            {playlistContent}
           </View>
-          {visible && (
-            <FlatList
-              key={`list-${visible}`}
-              ref={listRef}
-              data={queue}
-              keyExtractor={(item) => item.bvid}
-              renderItem={renderItem}
-              onScrollToIndexFailed={handleScrollToIndexFailed}
-              contentContainerStyle={styles.list}
-              initialScrollIndex={initialIndex}
-              getItemLayout={(data, index) => ({
-                length: 64,
-                offset: 64 * index,
-                index,
-              })}
-              initialNumToRender={10}
-              maxToRenderPerBatch={10}
-              windowSize={5}
-              removeClippedSubviews={true}
-              showsVerticalScrollIndicator={false}
-              onEndReached={handleLoadMore}
-              onEndReachedThreshold={0.5}
-            />
-          )}
-        </View>
+        )}
       </View>
     </Modal>
   );

@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { storage } from '../core/storage';
 import type { Quality } from '../types/domain';
 
-export type ThemeMode = 'system' | 'light' | 'dark';
+export type ThemeMode = 'system' | 'light' | 'dark' | 'glass-light' | 'glass-dark';
 
 // MMKV storage adapter for zustand persist
 const mmkvStorage = {
@@ -19,6 +19,8 @@ interface Settings {
   hiddenFolderIds: number[];
   expandMultiPart: boolean;
   themeMode: ThemeMode;
+  customBackgroundImage: string | null;
+  glassBlurAmount: number;
 }
 
 interface SettingsState extends Settings {
@@ -28,6 +30,8 @@ interface SettingsState extends Settings {
   setHiddenFolderIds: (ids: number[]) => void;
   setExpandMultiPart: (v: boolean) => void;
   setThemeMode: (mode: ThemeMode) => void;
+  setCustomBackgroundImage: (uri: string | null) => void;
+  setGlassBlurAmount: (v: number) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -39,12 +43,16 @@ export const useSettingsStore = create<SettingsState>()(
       hiddenFolderIds: [],
       expandMultiPart: true,
       themeMode: 'system',
+      customBackgroundImage: null,
+      glassBlurAmount: 28,
       setQuality: (q) => set({ quality: q }),
       setAutoCacheOnWifi: (v) => set({ autoCacheOnWifi: v }),
       setWifiOnly: (v) => set({ wifiOnly: v }),
       setHiddenFolderIds: (ids) => set({ hiddenFolderIds: ids }),
       setExpandMultiPart: (v) => set({ expandMultiPart: v }),
       setThemeMode: (mode) => set({ themeMode: mode }),
+      setCustomBackgroundImage: (uri) => set({ customBackgroundImage: uri }),
+      setGlassBlurAmount: (v) => set({ glassBlurAmount: v }),
     }),
     {
       name: 'settingsStore',

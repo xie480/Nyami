@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { IconButton } from './IconButton';
+import { GlassView } from './GlassView';
 import { useTheme } from '../theme';
 
 /**
@@ -16,19 +17,25 @@ interface Props {
   left?: React.ReactNode;
   /** 右侧额外内容 */
   right?: React.ReactNode;
+  /** 是否移除底部边框/阴影 */
+  noBorder?: boolean;
 }
 
-export const Header: React.FC<Props> = ({ title, showBack, left, right }) => {
+export const Header: React.FC<Props> = ({ title, showBack, left, right, noBorder }) => {
   const t = useTheme();
   const nav = useNavigation();
+  const isGlass = !!t.glass;
 
   const s = StyleSheet.create({
+    outer: {
+      borderBottomWidth: (isGlass || noBorder) ? 0 : 0.5,
+      borderBottomColor: t.colors.divider,
+      elevation: 0,
+      shadowOpacity: 0,
+    },
     container: {
       height: 48, flexDirection: 'row', alignItems: 'center',
       paddingHorizontal: t.spacing.sm,
-      backgroundColor: t.colors.background,
-      borderBottomWidth: 0.5,
-      borderBottomColor: t.colors.divider,
     },
     title: {
       flex: 1, fontSize: t.fontSize.lg, fontWeight: '600',
@@ -37,7 +44,7 @@ export const Header: React.FC<Props> = ({ title, showBack, left, right }) => {
     side: { width: 40, alignItems: 'center' },
   });
 
-  return (
+  const inner = (
     <View style={s.container}>
       {/* 左侧区域：优先渲染 left，自定义按钮；若未提供且 showBack 为 true，则渲染返回按钮 */}
       <View style={s.side}>
@@ -49,4 +56,14 @@ export const Header: React.FC<Props> = ({ title, showBack, left, right }) => {
       <View style={s.side}>{right}</View>
     </View>
   );
+
+  if (isGlass) {
+    return (
+      <GlassView style={s.outer} borderRadius={0} noShadow>
+        {inner}
+      </GlassView>
+    );
+  }
+
+  return <View style={[s.outer, { backgroundColor: t.colors.background }]}>{inner}</View>;
 };

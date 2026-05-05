@@ -12,6 +12,7 @@ import { useSettingsStore } from '../store/settingsStore';
 import type { ThemeMode } from '../store/settingsStore';
 // Removed useUserStore - authentication now handled by authStore
 import { useSyncStore } from '../store/syncStore';
+import { Slider } from '../components/Slider';
 import { audioCache } from '../services/audioCache';
 import { favoriteService, cookieService } from '../services';
 import { useAuthStore } from '../store/authStore';
@@ -21,6 +22,8 @@ import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Quality } from '../types/domain';
+import { launchImageLibrary } from 'react-native-image-picker';
+import RNFS from 'react-native-fs';
 
 const QUALITY_OPTIONS: Array<{ key: Quality; title: string; subtitle: string }> = [
   { key: 'low', title: '省流', subtitle: '64 kbps · 约 1.9MB / 4 分钟' },
@@ -32,6 +35,8 @@ const THEME_OPTIONS: Array<{ key: ThemeMode; title: string }> = [
   { key: 'system', title: '跟随系统' },
   { key: 'light', title: '明亮' },
   { key: 'dark', title: '暗黑' },
+  { key: 'glass-light', title: '磨砂玻璃（明亮）' },
+  { key: 'glass-dark', title: '磨砂玻璃（暗黑）' },
 ];
 
 export const SettingsScreen = ({ navigation }: any) => {
@@ -39,10 +44,14 @@ export const SettingsScreen = ({ navigation }: any) => {
   const insets = useSafeAreaInsets();
   const {
     quality, autoCacheOnWifi, wifiOnly, hiddenFolderIds,
-    expandMultiPart, themeMode, setQuality, setAutoCacheOnWifi,
+    expandMultiPart, themeMode, customBackgroundImage, glassBlurAmount,
+    setQuality, setAutoCacheOnWifi,
     setWifiOnly, setExpandMultiPart, setThemeMode,
+    setCustomBackgroundImage, setGlassBlurAmount,
   } = useSettingsStore();
   // UID management moved to authStore (userId, userInfo)
+
+  const isGlass = themeMode === 'glass-light' || themeMode === 'glass-dark';
 
   const [cacheSize, setCacheSize] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
@@ -83,6 +92,42 @@ export const SettingsScreen = ({ navigation }: any) => {
       setGlobalIndexCount(favoriteService.getGlobalIndex().length);
     }
   }, [syncStatus]);
+
+  const handlePickBackground = useCallback(() => {
+    launchImageLibrary(
+      {
+        mediaType: 'photo',
+        quality: 1,
+        selectionLimit: 1,
+      },
+      async (response) => {
+        if (response.didCancel || response.errorCode || !response.assets?.length) return;
+        const asset = response.assets[0];
+        if (!asset.uri) return;
+        try {
+          const destDir = `${RNFS.DocumentDirectoryPath}/backgrounds`;
+          const exists = await RNFS.exists(destDir);
+          if (!exists) await RNFS.mkdir(destDir);
+          const ext = asset.fileName?.split('.').pop() ?? 'jpg';
+          const destPath = `${destDir}/custom_bg.${ext}`;
+          await RNFS.copyFile(asset.uri, destPath);
+          setCustomBackgroundImage(`file://${destPath}`);
+        } catch (e) {
+          Alert.alert('错误', '背景图导入失败，请重试');
+        }
+      },
+    );
+  }, [setCustomBackgroundImage]);
+
+  const handleClearBackground = useCallback(() => {
+    Alert.alert('清除背景图', '确定要恢复默认背景吗？', [
+      { text: '取消' },
+      {
+        text: '清除', style: 'destructive',
+        onPress: () => setCustomBackgroundImage(null),
+      },
+    ]);
+  }, [setCustomBackgroundImage]);
 
   const onClear = () => {
     Alert.alert('确认清空', '将删除所有已缓存的音频文件', [
@@ -133,7 +178,7 @@ export const SettingsScreen = ({ navigation }: any) => {
   return (
     <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
-      <Header title="设置" showBack />
+      <Header title="设置" showBack noBorder />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
       <Text style={s.section}>登录</Text>
       <View style={[s.group, s.cookieBox]}>
@@ -153,6 +198,25 @@ export const SettingsScreen = ({ navigation }: any) => {
         )}
       </View>
         <Text style={s.section}>外观</Text>
+        {isGlass && (
+          <>
+            <View style={s.group}>
+              <ListItem
+                title="自定义背景图"
+                subtitle={customBackgroundImage ? '已设置 · 点击更换' : '导入个性化背景图片'}
+                onPress={handlePickBackground}
+                right={
+                  customBackgroundImage ? (
+                    <Text style={{ color: t.colors.primary, fontSize: t.fontSize.sm }} onPress={handleClearBackground}>清除</Text>
+                  ) : (
+                    <Text style={{ color: t.colors.primary, fontSize: 18 }}>+</Text>
+                  )
+                }
+              />
+            </View>
+            <View style={{ height: t.spacing.lg }} />
+          </>
+        )}
         <View style={s.group}>
           {THEME_OPTIONS.map((opt, i) => (
             <React.Fragment key={opt.key}>
@@ -169,6 +233,29 @@ export const SettingsScreen = ({ navigation }: any) => {
             </React.Fragment>
           ))}
         </View>
+
+        {isGlass && (
+          <>
+            <View style={{ height: t.spacing.lg }} />
+            <View style={s.group}>
+              <View style={{ padding: t.spacing.lg }}>
+                <Text style={{ fontSize: t.fontSize.sm, color: t.colors.text, marginBottom: t.spacing.sm }}>
+                  背景模糊度：{glassBlurAmount}
+                </Text>
+                <Slider
+                  value={glassBlurAmount}
+                  minimumValue={0}
+                  maximumValue={64}
+                  step={1}
+                  onValueChange={setGlassBlurAmount}
+                  minimumTrackColor={t.colors.primary}
+                  maximumTrackColor={t.colors.divider}
+                  thumbColor={t.colors.primary}
+                />
+              </View>
+            </View>
+          </>
+        )}
 
         <Text style={s.section}>音质</Text>
         <View style={s.group}>

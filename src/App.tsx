@@ -5,9 +5,9 @@ import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { useColorScheme, Alert, Platform, ToastAndroid, BackHandler } from 'react-native';
+import { View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { ThemeProvider } from './theme';
+import { ThemeProvider, useTheme } from './theme';
 import { setupPlayer } from './services/trackPlayer';
 import { netStatus } from './services/netStatus';
 import { HomeScreen } from './screens/HomeScreen';
@@ -22,8 +22,28 @@ import { useUIStore } from './store/uiStore';
 import { LoginModal } from './components/LoginModal';
 import { storage } from './core/storage';
 import { useSyncStore } from './store/syncStore';
+import { GlassBackground } from './components/GlassBackground';
 
 const Stack = createNativeStackNavigator();
+
+const withBackground = (Component: React.ComponentType<any>) => {
+  return function ScreenWithBackground(props: any) {
+    const { colors } = useTheme();
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <GlassBackground />
+        <Component {...props} />
+      </View>
+    );
+  };
+};
+
+const HomeScreenWithBg = withBackground(HomeScreen);
+const FoldersScreenWithBg = withBackground(FoldersScreen);
+const VideosScreenWithBg = withBackground(VideosScreen);
+const PlayerScreenWithBg = withBackground(PlayerScreen);
+const SettingsScreenWithBg = withBackground(SettingsScreen);
+const VisibleFoldersScreenWithBg = withBackground(VisibleFoldersScreen);
 
 export default function App() {
   const isDark = useColorScheme() === 'dark';
@@ -33,6 +53,13 @@ export default function App() {
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const playlistVisible = useUIStore(state => state.playlistVisible);
   const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
+  const navTheme = {
+    ...(isDark ? DarkTheme : DefaultTheme),
+    colors: {
+      ...(isDark ? DarkTheme.colors : DefaultTheme.colors),
+      background: isDark ? DarkTheme.colors.background : DefaultTheme.colors.background,
+    },
+  };
   const startSync = useSyncStore(state => state.startSync);
 
   // 记录上一次的 hiddenFolderIds，用于检测变化
@@ -118,23 +145,25 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <NavigationContainer ref={navigationRef} theme={isDark ? DarkTheme : DefaultTheme}>
-            <Stack.Navigator
-              initialRouteName={loggedIn ? 'Folders' : 'Home'}
-              screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
-            >
-              <Stack.Screen name="Home" component={HomeScreen} />
-              <Stack.Screen name="Folders" component={FoldersScreen} />
-              <Stack.Screen name="Videos" component={VideosScreen} />
-              <Stack.Screen
-                name="Player"
-                component={PlayerScreen}
-                options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
-              />
-              <Stack.Screen name="Settings" component={SettingsScreen} />
-              <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreen} />
-            </Stack.Navigator>
-          </NavigationContainer>
+          <View style={{ flex: 1 }}>
+            <NavigationContainer ref={navigationRef} theme={navTheme}>
+              <Stack.Navigator
+                initialRouteName={loggedIn ? 'Folders' : 'Home'}
+                screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
+              >
+                <Stack.Screen name="Home" component={HomeScreenWithBg} />
+                <Stack.Screen name="Folders" component={FoldersScreenWithBg} />
+                <Stack.Screen name="Videos" component={VideosScreenWithBg} />
+                <Stack.Screen
+                  name="Player"
+                  component={PlayerScreenWithBg}
+                  options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
+                />
+                <Stack.Screen name="Settings" component={SettingsScreenWithBg} />
+                <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreenWithBg} />
+              </Stack.Navigator>
+            </NavigationContainer>
+          </View>
           <PlaylistPanel visible={playlistVisible} onClose={() => setPlaylistVisible(false)} />
           <LoginModal />
         </ThemeProvider>

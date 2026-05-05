@@ -38,6 +38,7 @@ import { formatDuration } from '../utils/format';
 
 export const FoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
+  const isGlass = !!t.glass;
   const uid = useAuthStore((s) => s.userId);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const setQueue = usePlayerStore((s) => s.setQueue);
@@ -357,6 +358,7 @@ export const FoldersScreen = ({ navigation }: any) => {
           }
           renderItem={({ item }) => (
             <TouchableOpacity
+              activeOpacity={0.7}
               onPress={() => {
                 if (isMultiSelectMode) {
                   toggle(item.id);
@@ -373,6 +375,18 @@ export const FoldersScreen = ({ navigation }: any) => {
                 paddingVertical: t.spacing.md,
                 paddingHorizontal: t.spacing.lg,
                 backgroundColor: t.colors.surface,
+                borderRadius: t.radius.lg,
+                borderWidth: isGlass ? 0.5 : 0,
+                borderColor: isGlass ? (t.isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.6)') : 'transparent',
+                ...Platform.select({
+                  ios: {
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: isGlass ? 1 : 2 },
+                    shadowOpacity: isGlass ? 0.04 : 0.08,
+                    shadowRadius: isGlass ? 4 : 8,
+                  },
+                  android: { elevation: isGlass ? 0 : 3 },
+                }),
               }}
             >
               {isMultiSelectMode && (
@@ -382,24 +396,36 @@ export const FoldersScreen = ({ navigation }: any) => {
                   color={t.colors.text}
                 />
               )}
-              <View style={{ flex: 1, marginLeft: t.spacing.md }}>
-                <ListItem
-                  title={item.title}
-                  subtitle={`${item.mediaCount} 个视频`}
-                  icon="folder-music-outline"
-                  showArrow={!isMultiSelectMode}
-                  onPress={
-                    isMultiSelectMode
-                      ? undefined
-                      : () => {
-                          navigation.navigate('Videos', {
-                            mediaId: item.id,
-                            title: item.title,
-                          });
-                        }
-                  }
-                />
+              <View
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: t.radius.md,
+                  backgroundColor: t.colors.primaryLight,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginRight: t.spacing.md,
+                }}
+              >
+                <Icon name="folder-music-outline" size={22} color={t.colors.primary} />
               </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{ fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '500' }}
+                  numberOfLines={1}
+                >
+                  {item.title}
+                </Text>
+                <Text
+                  style={{ fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 2 }}
+                  numberOfLines={1}
+                >
+                  {item.mediaCount} 个视频
+                </Text>
+              </View>
+              {!isMultiSelectMode && (
+                <Icon name="chevron-right" size={22} color={t.colors.textHint} />
+              )}
             </TouchableOpacity>
           )}
         />
