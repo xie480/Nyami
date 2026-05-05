@@ -390,11 +390,13 @@ export const FoldersScreen = ({ navigation }: any) => {
               }}
             >
               {isMultiSelectMode && (
-                <IconButton
-                  name={selectedIds.has(item.id) ? 'checkbox-marked' : 'checkbox-blank-outline'}
-                  size={24}
-                  color={t.colors.text}
-                />
+                <View style={{ padding: 6 }}>
+                  <Icon
+                    name={selectedIds.has(item.id) ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                    size={24}
+                    color={t.colors.text}
+                  />
+                </View>
               )}
               <View
                 style={{

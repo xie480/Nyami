@@ -7,6 +7,7 @@ import TrackPlayer, {
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from '../components/IconButton';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useUIStore } from '../store/uiStore';
 // import { PlaylistPanel } from '../components/PlaylistPanel'; // removed to avoid duplicate modal rendering
 import { ProgressBar } from '../components/ProgressBar';
@@ -240,11 +241,7 @@ export const PlayerScreen = () => {
                 <Text style={s.partsHeaderText} numberOfLines={1}>
                   {currentPart ? `P${(currentVideo.parts!.findIndex(p => p.cid === currentCid) + 1)}/${currentVideo.parts!.length} ${currentPart.title}` : `选集 (${currentVideo.parts!.length})`}
                 </Text>
-                <IconButton
-                  name={isPartsExpanded ? 'chevron-up' : 'chevron-down'}
-                  size={20}
-                  color={textSecondary}
-                />
+                <Icon name={isPartsExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={textSecondary} />
               </TouchableOpacity>
               {isPartsExpanded && (
                 <ScrollView

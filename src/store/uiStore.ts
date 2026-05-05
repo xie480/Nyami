@@ -10,6 +10,10 @@ interface UIState {
   loginModalVisible: boolean;
   /** 设置登录弹窗可见性 */
   setLoginModalVisible: (visible: boolean) => void;
+  /** 玻璃主题背景过渡是否已完成（用于协调 ThemeProvider 延迟透明背景切换） */
+  glassTransitionComplete: boolean;
+  /** 设置玻璃主题背景过渡完成状态 */
+  setGlassTransitionComplete: (complete: boolean) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -17,4 +21,6 @@ export const useUIStore = create<UIState>((set) => ({
   setPlaylistVisible: (visible) => set({ playlistVisible: visible }),
   loginModalVisible: false,
   setLoginModalVisible: (visible) => set({ loginModalVisible: visible }),
+  glassTransitionComplete: true,
+  setGlassTransitionComplete: (complete) => set({ glassTransitionComplete: complete }),
 }));

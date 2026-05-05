@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { SafeAreaView, StatusBar, Image } from 'react-native';
+import { SafeAreaView, StatusBar, Image, Dimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, ScrollView, StyleSheet, Alert,
@@ -22,7 +22,7 @@ import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Quality } from '../types/domain';
-import { launchImageLibrary } from 'react-native-image-picker';
+import ImageCropPicker from 'react-native-image-crop-picker';
 import RNFS from 'react-native-fs';
 
 const QUALITY_OPTIONS: Array<{ key: Quality; title: string; subtitle: string }> = [
@@ -93,30 +93,41 @@ export const SettingsScreen = ({ navigation }: any) => {
     }
   }, [syncStatus]);
 
-  const handlePickBackground = useCallback(() => {
-    launchImageLibrary(
-      {
+  const handlePickBackground = useCallback(async () => {
+    try {
+      const { width, height } = Dimensions.get('window');
+      // 使用最大公约数简化宽高比，避免裁剪尺寸过大
+      const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+      const divisor = gcd(Math.round(width), Math.round(height));
+      const baseW = Math.round(width / divisor);
+      const baseH = Math.round(height / divisor);
+      // 放大 100 倍以确保精度，同时避免像素值过大
+      const cropWidth = baseW * 100;
+      const cropHeight = baseH * 100;
+      const image = await ImageCropPicker.openPicker({
         mediaType: 'photo',
-        quality: 1,
-        selectionLimit: 1,
-      },
-      async (response) => {
-        if (response.didCancel || response.errorCode || !response.assets?.length) return;
-        const asset = response.assets[0];
-        if (!asset.uri) return;
-        try {
-          const destDir = `${RNFS.DocumentDirectoryPath}/backgrounds`;
-          const exists = await RNFS.exists(destDir);
-          if (!exists) await RNFS.mkdir(destDir);
-          const ext = asset.fileName?.split('.').pop() ?? 'jpg';
-          const destPath = `${destDir}/custom_bg.${ext}`;
-          await RNFS.copyFile(asset.uri, destPath);
-          setCustomBackgroundImage(`file://${destPath}`);
-        } catch (e) {
-          Alert.alert('错误', '背景图导入失败，请重试');
-        }
-      },
-    );
+        cropping: true,
+        width: cropWidth,
+        height: cropHeight,
+        cropperCircleOverlay: false,
+        freeStyleCropEnabled: false,
+        compressImageQuality: 1,
+      });
+      if (!image.path) return;
+      const destDir = `${RNFS.DocumentDirectoryPath}/backgrounds`;
+      const exists = await RNFS.exists(destDir);
+      if (!exists) await RNFS.mkdir(destDir);
+      const ext = (image.path.split('.').pop() ?? 'jpg').toLowerCase();
+      const destPath = `${destDir}/custom_bg.${ext}`;
+      await RNFS.copyFile(image.path, destPath);
+      setCustomBackgroundImage(`file://${destPath}`);
+    } catch (e: any) {
+      if (e?.code === 'E_PICKER_CANCELLED' || e?.message === 'User cancelled image selection') {
+        // 用户取消，什么都不做
+      } else {
+        Alert.alert('错误', '背景图导入失败，请重试');
+      }
+    }
   }, [setCustomBackgroundImage]);
 
   const handleClearBackground = useCallback(() => {
@@ -203,7 +214,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             <View style={s.group}>
               <ListItem
                 title="自定义背景图"
-                subtitle={customBackgroundImage ? '已设置 · 点击更换' : '导入个性化背景图片'}
+                subtitle={customBackgroundImage ? '已设置 · 点击更换（自动适配屏幕）' : '导入个性化背景图片（自动适配屏幕）'}
                 onPress={handlePickBackground}
                 right={
                   customBackgroundImage ? (
@@ -245,7 +256,7 @@ export const SettingsScreen = ({ navigation }: any) => {
                 <Slider
                   value={glassBlurAmount}
                   minimumValue={0}
-                  maximumValue={64}
+                  maximumValue={100}
                   step={1}
                   onValueChange={setGlassBlurAmount}
                   minimumTrackColor={t.colors.primary}

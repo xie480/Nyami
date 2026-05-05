@@ -37,14 +37,19 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
   // - surface 使用玻璃的半透明背景色，使卡片/面板呈现毛玻璃质感
   // - surfaceHigh 保持可见但降低透明度，用于搜索栏等次级元素
   // - 保留 primary / text / onPrimary / divider 等关键色值
+  //
+  // GlassBackground 现在采用稳定基底层，始终全屏覆盖，因此 ThemeProvider
+  // 可以立即将 background 设为 transparent，不再需要等待过渡动画完成。
   const glassColors = isGlassLight ? GlassLightTheme.colors : GlassDarkTheme.colors;
   const baseColors = isDark ? darkColors : lightColors;
+
+  const effectiveBackground = isGlass ? 'transparent' : baseColors.background;
+
   const value: Theme = {
     colors: isGlass
       ? {
           ...baseColors,
-          // 核心：背景完全透明，让 GlassBackground 可见
-          background: 'transparent',
+          background: effectiveBackground,
           // surface 使用玻璃半透明背景
           surface: glassColors.glass.bg,
           // surfaceHigh 用于搜索栏等，使用稍不透明的玻璃色

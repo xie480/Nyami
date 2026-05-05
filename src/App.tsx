@@ -28,10 +28,10 @@ const Stack = createNativeStackNavigator();
 
 const withBackground = (Component: React.ComponentType<any>) => {
   return function ScreenWithBackground(props: any) {
-    const { colors } = useTheme();
+    const { colors, glass } = useTheme();
+    const bgColor = glass ? 'transparent' : colors.background;
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <GlassBackground />
+      <View style={{ flex: 1, backgroundColor: bgColor }}>
         <Component {...props} />
       </View>
     );
@@ -53,11 +53,13 @@ export default function App() {
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const playlistVisible = useUIStore(state => state.playlistVisible);
   const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const isGlassMode = themeMode === 'glass-light' || themeMode === 'glass-dark';
   const navTheme = {
     ...(isDark ? DarkTheme : DefaultTheme),
     colors: {
       ...(isDark ? DarkTheme.colors : DefaultTheme.colors),
-      background: isDark ? DarkTheme.colors.background : DefaultTheme.colors.background,
+      background: isGlassMode ? 'transparent' : (isDark ? DarkTheme.colors.background : DefaultTheme.colors.background),
     },
   };
   const startSync = useSyncStore(state => state.startSync);
@@ -146,6 +148,7 @@ export default function App() {
       <SafeAreaProvider>
         <ThemeProvider>
           <View style={{ flex: 1 }}>
+            <GlassBackground />
             <NavigationContainer ref={navigationRef} theme={navTheme}>
               <Stack.Navigator
                 initialRouteName={loggedIn ? 'Folders' : 'Home'}

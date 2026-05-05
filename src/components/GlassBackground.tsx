@@ -1,93 +1,157 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Image,
   StyleSheet,
+  Animated,
+  Platform,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import { BlurView } from '@react-native-community/blur';
 import { useTheme } from '../theme';
 import { useSettingsStore } from '../store/settingsStore';
+import { useUIStore } from '../store/uiStore';
+
+const TRANSITION_DURATION = 50;
 
 /**
  * Premium background engine with global custom background support.
  *
- * - When a custom background image is set via Settings, it renders the
- *   image full-screen on ALL themes.
- * - In glass themes, a tinted optical diffusion mask is overlaid
- *   for frosted-glass effect, plus a semi-transparent optical mask.
- * - In non-glass themes, a stronger opacity mask is applied to ensure
- *   text readability while the custom image bleeds through softly.
- * - Without a custom image, the component renders only in glass themes
- *   with the default linear-gradient background.
+ * Architecture: dual-layer
+ *   - Stable base layer: always rendered at full opacity, no animation.
+ *     Contains the background image / gradient + blur, ensuring there is
+ *     never a frame without background coverage during route transitions.
+ *   - Enhanced overlay layer: animated masks (diffusion, readability, strong)
+ *     that fade in/out to provide visual polish without affecting coverage.
+ *
+ * Transition coordination with ThemeProvider:
+ *   - When isGlass becomes true, glassTransitionComplete is set immediately,
+ *     so ThemeProvider switches background to transparent on the next frame.
+ *   - When leaving glass mode, the enhanced overlay fades out, then
+ *     glassTransitionComplete is set to false allowing baseColors.background back.
  */
 export const GlassBackground: React.FC = () => {
   const { glass, isDark } = useTheme();
   const customBackgroundImage = useSettingsStore((s) => s.customBackgroundImage);
+  const glassBlurAmount = useSettingsStore((s) => s.glassBlurAmount);
+  const setGlassTransitionComplete = useUIStore((s) => s.setGlassTransitionComplete);
 
   const hasCustomBg = !!customBackgroundImage;
+  const isGlass = !!glass;
 
-  // 没有自定义背景且非玻璃主题 → 不渲染
-  if (!hasCustomBg && !glass) return null;
+  // ── Opacity animation for the enhanced overlay ────────────────────────
+  const overlayAnim = useRef(new Animated.Value(isGlass ? 1 : 0)).current;
 
-  return (
-    <View style={[StyleSheet.absoluteFillObject, { zIndex: -1 }]} pointerEvents="none">
-      {/* Layer 0 — custom image or default gradient */}
+  useEffect(() => {
+    const toValue = isGlass ? 1 : 0;
+    // Immediately allow transparency when entering glass mode
+    if (isGlass) {
+      setGlassTransitionComplete(true);
+    }
+    Animated.timing(overlayAnim, {
+      toValue,
+      duration: isGlass ? TRANSITION_DURATION : 300,
+      useNativeDriver: true,
+    }).start(() => {
+      if (!isGlass) {
+        setGlassTransitionComplete(false);
+      }
+    });
+  }, [isGlass, overlayAnim, setGlassTransitionComplete]);
+
+  // ── Resolve blur radius ───────────────────────────────────────────
+  const rawBlur = isGlass ? (glassBlurAmount ?? glass!.material.blurRadius) : 0;
+  const effectiveBlur = Platform.OS === 'android' ? Math.min(rawBlur, 25) : rawBlur;
+
+  // ── Mask colours ──────────────────────────────────────────────────
+  const diffusionMask = isDark ? 'rgba(10, 10, 20, 0.45)' : 'rgba(240, 240, 248, 0.40)';
+  const readabilityMask = isDark ? 'rgba(10, 10, 20, 0.32)' : 'rgba(255, 255, 255, 0.28)';
+  const strongMask = isDark ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.65)';
+
+  // ── Stable base layer — always at full opacity, never animated ─────
+  const stableBase = (
+    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
       {hasCustomBg ? (
         <Image
           source={{ uri: customBackgroundImage! }}
           style={StyleSheet.absoluteFillObject}
           resizeMode="cover"
+          blurRadius={effectiveBlur}
         />
-      ) : (
-        // glass 存在时才渲染默认渐变（非玻璃且无自定义图已在上面 return）
-        <LinearGradient
-          colors={Array.isArray(glass!.colors.pageBg) ? glass!.colors.pageBg : [glass!.colors.pageBg, glass!.colors.pageBg]}
-          style={StyleSheet.absoluteFillObject}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        />
-      )}
+      ) : isGlass ? (
+        <View style={StyleSheet.absoluteFillObject}>
+          <LinearGradient
+            colors={
+              Array.isArray(glass!.colors.pageBg)
+                ? glass!.colors.pageBg
+                : [glass!.colors.pageBg, glass!.colors.pageBg]
+            }
+            style={StyleSheet.absoluteFillObject}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          />
+          {effectiveBlur > 0 && (
+            <BlurView
+              style={StyleSheet.absoluteFillObject}
+              blurType={isDark ? 'dark' : 'light'}
+              blurAmount={effectiveBlur}
+              reducedTransparencyFallbackColor={
+                isDark ? 'rgba(10,10,20,0.5)' : 'rgba(255,255,255,0.45)'
+              }
+            />
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
 
-      {/* Layer 1 — optical diffusion mask (replaces native BlurView to avoid zIndex bypass) */}
-      {hasCustomBg && glass && (
+  // Non-glass plain background to fill the space when not in glass mode
+  const nonGlassBase = !isGlass ? (
+    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+      <LinearGradient
+        colors={
+          hasCustomBg
+            ? ['transparent', 'transparent']
+            : isDark
+              ? ['#0F0F11', '#0F0F11']
+              : ['#FFFFFF', '#FFFFFF']
+        }
+        style={StyleSheet.absoluteFillObject}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      />
+      {hasCustomBg && (
         <View
-          style={[
-            StyleSheet.absoluteFillObject,
-            {
-              backgroundColor: isDark
-                ? 'rgba(10, 10, 20, 0.45)'
-                : 'rgba(240, 240, 248, 0.40)',
-            },
-          ]}
+          style={[StyleSheet.absoluteFillObject, { backgroundColor: strongMask }]}
         />
       )}
+    </View>
+  ) : null;
 
-      {/* Layer 2 — optical mask for readability */}
-      {hasCustomBg && !glass ? (
-        // 非玻璃主题：更强遮罩以保证文字可读性
+  // ── Enhanced overlay: masks that can animate ────────────────────────
+  const enhancedOverlay = (
+    <Animated.View
+      style={[StyleSheet.absoluteFillObject, { opacity: overlayAnim }]}
+      pointerEvents="none"
+    >
+      {hasCustomBg && isGlass && (
         <View
-          style={[
-            StyleSheet.absoluteFillObject,
-            {
-              backgroundColor: isDark
-                ? 'rgba(0, 0, 0, 0.55)'
-                : 'rgba(255, 255, 255, 0.65)',
-            },
-          ]}
-        />
-      ) : (
-        // 玻璃主题下的半透明光学遮罩（自定义背景或无自定义背景都适用）
-        <View
-          style={[
-            StyleSheet.absoluteFillObject,
-            {
-              backgroundColor: isDark
-                ? 'rgba(10, 10, 20, 0.32)'
-                : 'rgba(255, 255, 255, 0.28)',
-            },
-          ]}
+          style={[StyleSheet.absoluteFillObject, { backgroundColor: diffusionMask }]}
         />
       )}
+      {isGlass && (
+        <View
+          style={[StyleSheet.absoluteFillObject, { backgroundColor: readabilityMask }]}
+        />
+      )}
+    </Animated.View>
+  );
+
+  return (
+    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+      {nonGlassBase}
+      {stableBase}
+      {enhancedOverlay}
     </View>
   );
 };
