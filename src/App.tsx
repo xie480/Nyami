@@ -155,7 +155,11 @@ export default function App() {
             <NavigationContainer ref={navigationRef} theme={navTheme}>
               <Stack.Navigator
                 initialRouteName={loggedIn ? 'Folders' : 'Home'}
-                screenOptions={{ headerShown: false, cardStyle: { backgroundColor: 'transparent' } }}
+                screenOptions={{
+                  headerShown: false,
+                  cardStyle: { backgroundColor: 'transparent' },
+                  animation: isGlassMode ? 'none' : 'default'
+                }}
               >
                 <Stack.Screen name="Home" component={HomeScreenWithBg} />
                 <Stack.Screen name="Folders" component={FoldersScreenWithBg} />
