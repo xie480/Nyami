@@ -19,7 +19,7 @@ interface FavoriteListResp {
 }
 
 export const biliApi = {
-  /** 获取用户全部收藏夹 */
+  /** 获取用户全部收藏夹（后台静默请求，鉴权失败时不唤起 Webview 登录弹窗） */
   getFavoriteFolders(upMid: string, signal?: AbortSignal) {
     if (!upMid) {
       return Promise.reject(new Error('upMid 不能为空'));
@@ -27,10 +27,11 @@ export const biliApi = {
     return biliGet<FolderListResp>('/x/v3/fav/folder/created/list-all', {
       params: { up_mid: upMid },
       signal,
+      silent: true,
     });
   },
 
-  /** 获取收藏夹内视频（分页） */
+  /** 获取收藏夹内视频（分页，后台静默请求） */
   getFavoriteVideos(mediaId: string | number, pn = 1, ps = 20, signal?: AbortSignal) {
     if (!mediaId) {
       return Promise.reject(new Error('mediaId 不能为空'));
@@ -38,6 +39,7 @@ export const biliApi = {
     return biliGet<FavoriteListResp>('/x/v3/fav/resource/list', {
       params: { media_id: mediaId, pn, ps, platform: 'web', order: 'mtime' },
       signal,
+      silent: true,
     });
   },
 

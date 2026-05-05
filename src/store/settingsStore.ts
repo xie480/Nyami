@@ -1,15 +1,15 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 import { storage } from '../core/storage';
 import type { Quality } from '../types/domain';
 
 export type ThemeMode = 'system' | 'light' | 'dark' | 'glass-light' | 'glass-dark';
 
-// MMKV storage adapter for zustand persist
-const mmkvStorage = {
-  getItem: (name: string) => Promise.resolve(storage.getString(name) ?? null),
-  setItem: (name: string, value: string) => Promise.resolve(storage.setString(name, value)),
-  removeItem: (name: string) => Promise.resolve(storage.delete(name)),
+// 将 MMKV 存储适配器改为同步执行，彻底消除首次渲染时的状态闪烁
+const mmkvStorage: StateStorage = {
+  getItem: (name: string) => storage.getString(name) ?? null,
+  setItem: (name: string, value: string) => storage.setString(name, value),
+  removeItem: (name: string) => storage.delete(name),
 };
 
 interface Settings {
@@ -42,7 +42,7 @@ export const useSettingsStore = create<SettingsState>()(
       wifiOnly: false,
       hiddenFolderIds: [],
       expandMultiPart: true,
-      themeMode: 'system',
+      themeMode: 'glass-dark',
       customBackgroundImage: null,
       glassBlurAmount: 28,
       setQuality: (q) => set({ quality: q }),

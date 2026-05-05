@@ -61,10 +61,11 @@ function mapBusinessError(code: number, message: string): never {
 
 /**
  * 请求 B 站 API 并自动校验 code，附带重试
+ * 增加 silent 参数：若为 true，则遇到鉴权错误时静默抛出，不唤起 Webview 登录弹窗
  */
 export async function biliGet<T>(
   url: string,
-  options: AxiosRequestConfig = {},
+  options: AxiosRequestConfig & { silent?: boolean } = {},
   retries = config.retry.maxAttempts
 ): Promise<T> {
   let lastError: any;
@@ -98,7 +99,11 @@ export async function biliGet<T>(
       lastError = err;
       // 处理鉴权错误，其他业务错误直接抛出
       if (err instanceof AuthRequiredError) {
-        // 显示登录弹窗
+        // 静默模式：直接抛出异常，交由业务层（如 syncStore）捕获并展示 UI 状态
+        if (options.silent) {
+          throw err;
+        }
+        // 非静默模式：显示登录弹窗
         useUIStore.getState().setLoginModalVisible(true);
         // 返回一个 Promise，等待登录完成后重试一次
         return new Promise<T>((resolve, reject) => {

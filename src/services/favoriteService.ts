@@ -251,7 +251,7 @@ export const favoriteService = {
             try {
               await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 3000) + 2000)); // 2-5 sec jitter
               const pageRes = await executeWithBackoff(() =>
-                this.getVideos(folder.id, page, 30, force, signal)
+                this.getVideos(folder.id, page, 50, force, signal)
               );
               
               // 增量模式：检查是否命中游标
