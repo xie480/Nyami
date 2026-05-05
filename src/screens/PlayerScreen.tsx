@@ -280,16 +280,6 @@ export const PlayerScreen = () => {
             </View>
           )}
         </ScrollView>
-
-        <View style={s.statusBar}>
-          <View style={s.statusItem}>
-            <Text style={s.statusText}>音质 {qualityText}</Text>
-          </View>
-          <View style={s.statusItem}>
-            <Text style={s.statusText}>·    来源 {sourceText}</Text>
-          </View>
-          {/* Playlist Panel Modal removed; now rendered globally in App */}
-        </View>
       </View>
     </View>
   );

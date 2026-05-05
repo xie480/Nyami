@@ -5,7 +5,7 @@ import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler } from 'react-native';
+import { View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler, PermissionsAndroid } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, useTheme } from './theme';
 import { setupPlayer } from './services/trackPlayer';
@@ -69,6 +69,9 @@ export default function App() {
 
   // Initialize player, network status listener, and back handler
   useEffect(() => {
+    if (Platform.OS === 'android' && Platform.Version >= 33) {
+      PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    }
     initAuth();
     setupPlayer();
     netStatus.init();

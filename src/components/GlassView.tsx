@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet, ViewStyle, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, ViewStyle, Platform, InteractionManager } from 'react-native';
 import { BlurView } from '@react-native-community/blur';
 import { useTheme } from '../theme';
 import { useSettingsStore } from '../store/settingsStore';
@@ -57,6 +57,15 @@ export const GlassView: React.FC<GlassViewProps> = ({
 
   const blurType = t.isDark ? ('dark' as const) : ('light' as const);
 
+  const [isAnimating, setIsAnimating] = useState(true);
+
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setIsAnimating(false);
+    });
+    return () => task.cancel();
+  }, []);
+
   // ── Outer container: holds shadows + clips inner content ──────────
   const outerStyle: ViewStyle = {
     borderRadius: resolvedBorderRadius,
@@ -80,7 +89,7 @@ export const GlassView: React.FC<GlassViewProps> = ({
       {/* Inner clip region — overflow hidden lives here so outer shadow isn't clipped */}
       <View style={{ overflow: 'hidden', borderRadius: resolvedBorderRadius }}>
         {/* ── Backdrop blur layer ─────────────────────────────────── */}
-        {!noBlur && (
+        {!noBlur && !isAnimating && (
           <BlurView
             style={StyleSheet.absoluteFill}
             blurType={blurType}

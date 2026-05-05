@@ -116,9 +116,18 @@ export const SettingsScreen = ({ navigation }: any) => {
       if (!image.path) return;
       const destDir = `${RNFS.DocumentDirectoryPath}/backgrounds`;
       const exists = await RNFS.exists(destDir);
-      if (!exists) await RNFS.mkdir(destDir);
+      if (!exists) {
+        await RNFS.mkdir(destDir);
+      } else {
+        const files = await RNFS.readDir(destDir);
+        for (const file of files) {
+          if (file.name.startsWith('custom_bg_')) {
+            await RNFS.unlink(file.path).catch(() => {});
+          }
+        }
+      }
       const ext = (image.path.split('.').pop() ?? 'jpg').toLowerCase();
-      const destPath = `${destDir}/custom_bg.${ext}`;
+      const destPath = `${destDir}/custom_bg_${Date.now()}.${ext}`;
       await RNFS.copyFile(image.path, destPath);
       setCustomBackgroundImage(`file://${destPath}`);
     } catch (e: any) {

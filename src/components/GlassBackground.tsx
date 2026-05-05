@@ -11,6 +11,7 @@ import { BlurView } from '@react-native-community/blur';
 import { useTheme } from '../theme';
 import { useSettingsStore } from '../store/settingsStore';
 import { useUIStore } from '../store/uiStore';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const TRANSITION_DURATION = 50;
 
@@ -35,6 +36,7 @@ export const GlassBackground: React.FC = () => {
   const customBackgroundImage = useSettingsStore((s) => s.customBackgroundImage);
   const glassBlurAmount = useSettingsStore((s) => s.glassBlurAmount);
   const setGlassTransitionComplete = useUIStore((s) => s.setGlassTransitionComplete);
+  const insets = useSafeAreaInsets();
 
   const hasCustomBg = !!customBackgroundImage;
   const isGlass = !!glass;
@@ -90,16 +92,6 @@ export const GlassBackground: React.FC = () => {
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
           />
-          {effectiveBlur > 0 && (
-            <BlurView
-              style={StyleSheet.absoluteFillObject}
-              blurType={isDark ? 'dark' : 'light'}
-              blurAmount={effectiveBlur}
-              reducedTransparencyFallbackColor={
-                isDark ? 'rgba(10,10,20,0.5)' : 'rgba(255,255,255,0.45)'
-              }
-            />
-          )}
         </View>
       ) : null}
     </View>
@@ -148,7 +140,7 @@ export const GlassBackground: React.FC = () => {
   );
 
   return (
-    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFillObject, { top: insets.top, bottom: insets.bottom }]} pointerEvents="none">
       {nonGlassBase}
       {stableBase}
       {enhancedOverlay}

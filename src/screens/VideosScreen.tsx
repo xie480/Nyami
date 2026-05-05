@@ -24,7 +24,7 @@ import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
-import { loadQueue } from '../services/trackPlayer';
+import { loadQueue, insertNext } from '../services/trackPlayer';
 import { usePlayerStore } from '../store/playerStore';
 import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
@@ -295,6 +295,33 @@ export const VideosScreen = ({ route, navigation }: any) => {
         />
       )}
       {/* Bottom Action Modal */}
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.modalContent}>
+            <Text style={s.modalTitle} numberOfLines={1}>{selectedVideo?.title}</Text>
+            <Button
+              title="下一首播放"
+              variant="secondary"
+              onPress={() => {
+                if (selectedVideo) {
+                  insertNext(selectedVideo);
+                  if (Platform.OS === 'android') {
+                    ToastAndroid.show('已添加到下一首播放', ToastAndroid.SHORT);
+                  }
+                }
+                setModalVisible(false);
+              }}
+              style={{ marginBottom: t.spacing.sm, height: 36 }}
+            />
+            <Button title="取消" variant="secondary" onPress={() => setModalVisible(false)} />
+          </View>
+        </View>
+      </Modal>
       {/* 排序弹窗 */}
       <Modal
         visible={sortModalVisible}
