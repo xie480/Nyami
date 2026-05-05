@@ -51,7 +51,7 @@ echo $ANDROID_HOME   # 应有路径
 打包前**必须确保 debug 包能完整跑通**：
 
 ```bash
-cd BiliMusic
+cd NyaMi
 pnpm android
 ```
 

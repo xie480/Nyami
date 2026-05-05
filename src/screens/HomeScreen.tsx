@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import {
-  View, Text, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, StatusBar,
+  View, Text, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, StatusBar, Image
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Button } from '../components/Button';
@@ -56,10 +56,10 @@ export const HomeScreen = ({ navigation }: any) => {
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
       <View style={s.iconWrap}>
-        <Icon name="music" size={44} color={t.colors.primary} />
+        <Image source={require('../../resource/icon.png')} style={{ width: 100, height: 100 }} />
       </View>
-      <Text style={s.title}>BiliMusic</Text>
-      <Text style={s.subtitle}>听见的，不只是声音</Text>
+      <Text style={s.title}>Nyami</Text>
+      <Text style={s.subtitle}>猫在听，你也在听</Text>
       <Button title="立即登录" onPress={onLogin} style={s.enter} />
       <Text
         style={[s.settingsBtnText, s.settingsBtn]}

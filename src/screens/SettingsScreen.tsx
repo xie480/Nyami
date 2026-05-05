@@ -223,7 +223,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             <View style={s.group}>
               <ListItem
                 title="自定义背景图"
-                subtitle={customBackgroundImage ? '已设置 · 点击更换（自动适配屏幕）' : '导入个性化背景图片（自动适配屏幕）'}
+                subtitle={customBackgroundImage ? '已设置 · 点击更换' : '导入个性化背景图片'}
                 onPress={handlePickBackground}
                 right={
                   customBackgroundImage ? (

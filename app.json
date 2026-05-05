@@ -1,4 +1,5 @@
 {
-  "name": "BiliMusic",
-  "displayName": "BiliMusic"
+  "name": "Nyami",
+  "displayName": "Nyami",
+  "icon": "@/resource/icon.png"
 }
