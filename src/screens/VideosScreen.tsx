@@ -114,8 +114,10 @@ export const VideosScreen = ({ route, navigation }: any) => {
         setQueue(shuffled, target.bvid, context);
         await loadQueue(shuffled, target.bvid);
       } else {
-        setQueue(displayedList, target.bvid, context);
-        await loadQueue(displayedList, target.bvid);
+        if (hasMore) await ensureAllLoaded();
+        const fullList = useFolderDataStore.getState().getDisplayedList();
+        setQueue(fullList, target.bvid, context);
+        await loadQueue(fullList, target.bvid);
       }
       
       await TrackPlayer.play();
