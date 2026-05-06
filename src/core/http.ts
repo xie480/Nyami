@@ -26,11 +26,24 @@ function createInstance(): AxiosInstance {
     await adaptiveBucket.acquire();
     const cookie = await cookieService.get();
     if (cookie) {
-      if (typeof cfg.headers.set === 'function') {
-        cfg.headers.set('Cookie', cookie);
-      } else {
-        cfg.headers.Cookie = cookie;
+      // 统一使用字符串赋值，避免 axios headers.set 可能引入的编码问题
+      cfg.headers['Cookie'] = cookie;
+      // 调试日志：输出 Cookie 总长度、SESSDATA 字段长度及前 80 字符预览
+      if (__DEV__) {
+        const sessMatch = cookie.match(/SESSDATA=([^;]+)/);
+        const sessLen = sessMatch ? sessMatch[1].length : 0;
+        console.log(
+          '[http] Cookie len=' + cookie.length +
+          ', SESSDATA len=' + sessLen +
+          ', preview=' + cookie.substring(0, 80)
+        );
+        // 若 SESSDATA 异常短小（< 50 字符），直接输出完整 Cookie 以便排查截断
+        if (sessLen > 0 && sessLen < 50) {
+          console.warn('[http] SESSDATA 可能被截断！完整 Cookie:', cookie);
+        }
       }
+    } else if (__DEV__) {
+      console.warn('[http] 未检测到 Cookie，请求可能缺乏鉴权');
     }
     return cfg;
   });
@@ -74,9 +87,9 @@ export async function biliGet<T>(
     // 为每次尝试创建独立的 AbortController，以实现绝对超时
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), absoluteTimeout);
-    // 合并用户传入的 signal（若有）和内部的 abortController.signal
-    const combinedSignal = options.signal ?? abortController.signal;
-    // 若用户提供了 signal，我们在其 abort 时同步 abort 内部的 controller
+    // 始终使用内部 abortController.signal，确保 60 秒超时必定生效
+    const combinedSignal = abortController.signal;
+    // 若用户提供了外部 signal，在其 abort 时同步 abort 内部 controller，保证手动取消也能中断请求
     const onAbort = () => abortController.abort();
     if (options.signal) {
       // AbortSignal 在较新的 TS 类型中 addEventListener 可能标记为可选，使用 onabort 作为兼容方案

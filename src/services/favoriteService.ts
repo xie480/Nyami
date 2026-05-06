@@ -246,12 +246,15 @@ export const favoriteService = {
           let page = 1;
           let hasMore = true;
           let folderDone = false;
+          const maxPageRetries = 3;
+          const retryDelayMs = 30000; // 30 seconds
           
           while (hasMore && !folderDone && !signal?.aborted) {
+            let pageRetries = 0;
             try {
-              await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 3000) + 2000)); // 2-5 sec jitter
+              await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 3000))); // 2-5 sec jitter
               const pageRes = await executeWithBackoff(() =>
-                this.getVideos(folder.id, page, 50, force, signal)
+                this.getVideos(folder.id, page, 30, force, signal)
               );
               
               // 增量模式：检查是否命中游标
@@ -293,18 +296,37 @@ export const favoriteService = {
               storage.setFolderIndex(folder.id, Array.from(videoMap.values()));
               
             } catch (err: any) {
-              failedFolders.add(folder.id);
               console.warn(
                 `[favoriteService] 文件夹 ${folder.id} 第 ${page} 页拉取失败:`,
-                err.message
+                err.message,
+                `(name=${err.name}, code=${err.code})`
               );
+              if (__DEV__) {
+                console.warn(`[favoriteService] 详细错误:`, err);
+              }
               if (err.name === 'RateLimitError' || err.message?.includes('412') || err.message?.includes('429')) {
                 console.warn(`[favoriteService] 触发限流，暂停 5 分钟后重试文件夹 ${folder.id} 第 ${page} 页`);
                 await new Promise(r => setTimeout(r, 5 * 60 * 1000));
-                // 不递增 page，继续重试当前页
+                // 不递增 page，继续重试当前页，不消耗 pageRetries
                 continue;
               }
-              // 其他错误，跳出当前文件夹
+              // 对于其他可重试错误（网络错误、超时、取消等），给予有限次重试
+              pageRetries++;
+              if (pageRetries <= maxPageRetries) {
+                console.warn(
+                  `[favoriteService] 文件夹 ${folder.id} 第 ${page} 页请求失败，` +
+                  `${pageRetries}/${maxPageRetries} 次重试，等待 ${retryDelayMs / 1000}s 后重试...`
+                );
+                await new Promise(r => setTimeout(r, retryDelayMs));
+                // 检查用户是否取消
+                if (signal?.aborted) {
+                  console.warn(`[favoriteService] 同步已取消，停止重试文件夹 ${folder.id}`);
+                  failedFolders.add(folder.id);
+                  break;
+                }
+                continue;
+              }
+              failedFolders.add(folder.id);
               break;
             }
           }

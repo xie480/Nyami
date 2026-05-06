@@ -24,10 +24,21 @@ export const LoginModal = () => {
       // 停止继续加载
       webViewRef.current?.stopLoading();
       // 读取所有 Cookie（.bilibili.com 域）
-      const rawCookies = await CookieManager.get('https://.bilibili.com');
+      // 使用当前跳转完成的 URL 获取对应域下的完整 Cookie
+      const rawCookies = await CookieManager.get(url);
       const cookieStr = Object.entries(rawCookies)
         .map(([k, v]: any) => `${k}=${v.value}`)
         .join('; ');
+      // 保存完整 Cookie 字符串到安全存储，并输出调试日志
+      if (__DEV__) {
+        const sessMatch = cookieStr.match(/SESSDATA=([^;]+)/);
+        const sessLen = sessMatch ? sessMatch[1].length : 0;
+        console.log('[LoginModal] 获取到 Cookie 字段:', Object.keys(rawCookies).join(', '));
+        console.log('[LoginModal] Cookie 总长度:', cookieStr.length, ', SESSDATA 长度:', sessLen);
+        if (sessLen > 0 && sessLen < 50) {
+          console.warn('[LoginModal] SESSDATA 异常短小！完整 Cookie:', cookieStr);
+        }
+      }
       // 保存 Cookie 到安全存储
       await cookieService.set(cookieStr);
       // 提取 UID（DedeUserID）

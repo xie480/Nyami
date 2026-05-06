@@ -230,10 +230,21 @@ export const FoldersScreen = ({ navigation }: any) => {
                 backgroundColor: t.colors.surface,
               }}
               onPress={async () => {
-                const video = filteredVideos[index];
-                if (!video) return;
-                await setQueue(filteredVideos, video.bvid);
-                navigation.navigate('Player');
+                try {
+                  const video = filteredVideos[index];
+                  if (!video) return;
+                  await setQueue(filteredVideos, video.bvid);
+                  await loadQueue(filteredVideos, video.bvid);
+                  await TrackPlayer.play();
+                  navigation.navigate('Player');
+                } catch (e: any) {
+                  const msg = e.message || '播放失败';
+                  if (Platform.OS === 'android') {
+                    ToastAndroid.show(msg, ToastAndroid.SHORT);
+                  } else {
+                    Alert.alert('播放错误', msg);
+                  }
+                }
               }}
             >
               <View>

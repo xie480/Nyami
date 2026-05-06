@@ -87,7 +87,13 @@ export const VideosScreen = ({ route, navigation }: any) => {
       const target = displayedList[idx];
       const context = { folderId: mediaId, sortOption, searchQuery };
       
-      if (playMode === 'shuffle') {
+      // 搜索状态下：强制加载全部匹配数据，严格按照搜索结果从上到下顺序播放
+      if (searchQuery.trim().length > 0) {
+        if (hasMore) await ensureAllLoaded();
+        const fullList = useFolderDataStore.getState().getDisplayedList();
+        setQueue(fullList, target.bvid, context);
+        await loadQueue(fullList, target.bvid);
+      } else if (playMode === 'shuffle') {
         // 拦截手动点歌：在随机模式下重新洗牌并将点击歌曲置顶
         if (hasMore) await ensureAllLoaded();
         const fullList = useFolderDataStore.getState().getDisplayedList();
