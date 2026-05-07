@@ -1,0 +1,295 @@
+import { create } from 'zustand';
+import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
+import { storage } from '../core/storage';
+import { audioDSP } from '../native/AudioDSPModule';
+
+// 与 settingsStore 保持一致的 MMKV 同步存储适配器
+const mmkvStorage: StateStorage = {
+  getItem: (name: string) => storage.getString(name) ?? null,
+  setItem: (name: string, value: string) => storage.setString(name, value),
+  removeItem: (name: string) => storage.delete(name),
+};
+
+// ========== Types ==========
+
+/** 10-band Graphic EQ 频段增益（dB） */
+export type GraphicBands = [
+  number, number, number, number, number,
+  number, number, number, number, number,
+];
+
+/** 滤波器类型 */
+export type FilterType =
+  | 'Peak'
+  | 'LowShelf'
+  | 'HighShelf'
+  | 'LowPass'
+  | 'HighPass'
+  | 'Notch'
+  | 'BandPass';
+
+/** PEQ 单个滤波器参数 */
+export interface PEQFilter {
+  id: number;
+  type: FilterType;
+  frequency: number;   // Hz
+  gain: number;        // dB
+  q: number;           // Q 值（带宽）
+  enabled: boolean;
+}
+
+/** EQ 工作模式 */
+export type EQMode = 'graphic' | 'parametric';
+
+/** 情绪化预设 */
+export interface EQPreset {
+  id: string;
+  name: string;
+  description: string;
+  /** Graphic EQ 模式下 10 个频段的增益值 */
+  graphicBands?: GraphicBands;
+  /** PEQ 模式下 8 个滤波器的参数 */
+  peqFilters?: PEQFilter[];
+}
+
+// ========== Constants ==========
+
+/** 10-band 标准频段标签 */
+export const BAND_FREQUENCIES: string[] = [
+  '31', '62', '125', '250', '500',
+  '1k', '2k', '4k', '8k', '16k',
+];
+
+/** 默认 Graphic EQ 频段（平直曲线，所有频段 0dB） */
+const FLAT_BANDS: GraphicBands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+/** 8 个默认 PEQ Filter（平直） */
+const DEFAULT_PEQ_FILTERS: PEQFilter[] = Array.from({ length: 8 }, (_, i) => ({
+  id: i + 1,
+  type: 'Peak' as FilterType,
+  frequency: 1000,
+  gain: 0,
+  q: 1.0,
+  enabled: false,
+}));
+
+/** 默认 PEQ：给每个滤波器一个不同的默认频率 */
+const DEFAULT_PEQ_FILTERS_PRESET: PEQFilter[] = [
+  { id: 1, type: 'Peak', frequency: 31,   gain: 0, q: 1.0, enabled: false },
+  { id: 2, type: 'Peak', frequency: 62,   gain: 0, q: 1.0, enabled: false },
+  { id: 3, type: 'Peak', frequency: 125,  gain: 0, q: 1.0, enabled: false },
+  { id: 4, type: 'Peak', frequency: 250,  gain: 0, q: 1.0, enabled: false },
+  { id: 5, type: 'Peak', frequency: 500,  gain: 0, q: 1.0, enabled: false },
+  { id: 6, type: 'Peak', frequency: 1000, gain: 0, q: 1.0, enabled: false },
+  { id: 7, type: 'Peak', frequency: 2000, gain: 0, q: 1.0, enabled: false },
+  { id: 8, type: 'Peak', frequency: 4000, gain: 0, q: 1.0, enabled: false },
+];
+
+/**
+ * 「情绪化预设」系统
+ * 每个预设包含 Graphic EQ 的 10-band 增益和推荐 PEQ 参数
+ */
+export const EMOTION_PRESETS: EQPreset[] = [
+  {
+    id: 'flat',
+    name: '平直',
+    description: '无任何增益修饰',
+    graphicBands: FLAT_BANDS,
+  },
+  {
+    id: 'cat_bass',
+    name: '猫耳低音',
+    description: '超低频增强',
+    graphicBands: [6, 5, 4, 2, 0, -1, -1, 0, 0, 0],
+  },
+  {
+    id: 'midnight_radio',
+    name: '深夜电台',
+    description: '高频柔化，温暖氛围',
+    graphicBands: [3, 3, 2, 1, 0, -1, -2, -3, -4, -4],
+  },
+  {
+    id: 'tokyo_rain',
+    name: '东京雨夜',
+    description: '空间感增强，空灵',
+    graphicBands: [2, 1, 0, -1, -1, 0, 1, 2, 3, 4],
+  },
+  {
+    id: 'girl_band',
+    name: '少女乐队',
+    description: '女声增强，清亮',
+    graphicBands: [0, 0, 0, 1, 2, 3, 4, 3, 2, 1],
+  },
+  {
+    id: 'vaporwave',
+    name: 'Vaporwave',
+    description: '中低频氛围感',
+    graphicBands: [4, 4, 3, 2, 1, 0, -1, -2, -2, -1],
+  },
+  {
+    id: 'cyberpunk',
+    name: 'Cyberpunk',
+    description: '高频电子感，凌厉',
+    graphicBands: [-1, 0, 1, 2, 1, 2, 3, 4, 5, 6],
+  },
+  {
+    id: 'cyber_bass',
+    name: '赛博低频',
+    description: 'Sub Bass 强力增强',
+    graphicBands: [8, 6, 4, 2, 0, -1, -2, -1, 0, 1],
+  },
+  {
+    id: 'live',
+    name: 'Live 现场',
+    description: '混响感增强，氛围',
+    graphicBands: [2, 2, 1, 1, 0, 0, 1, 2, 3, 4],
+  },
+];
+
+// ========== Store Interface ==========
+
+interface EQState {
+  /** 当前 EQ 模式 */
+  mode: EQMode;
+  /** Graphic EQ 10 个频段的增益值 */
+  graphicBands: GraphicBands;
+  /** PEQ 8 个滤波器的参数 */
+  peqFilters: PEQFilter[];
+  /** 当前选中的预设 ID（null 表示手动调节） */
+  activePresetId: string | null;
+  /** EQ 总开关 */
+  enabled: boolean;
+  /** PEQ 编辑器中正在编辑的 filter id */
+  editingFilterId: number | null;
+
+  // Actions
+  setMode: (mode: EQMode) => void;
+  setEnabled: (enabled: boolean) => void;
+  setGraphicBand: (index: number, value: number) => void;
+  setGraphicBands: (bands: GraphicBands) => void;
+  addFilter: () => void;
+  removeFilter: (id: number) => void;
+  updatePEQFilter: (id: number, params: Partial<PEQFilter>) => void;
+  setEditingFilterId: (id: number | null) => void;
+  applyPreset: (presetId: string) => void;
+  resetToFlat: () => void;
+}
+
+// ========== Store ==========
+
+export const useEQStore = create<EQState>()(
+  persist(
+    (set, get) => ({
+      mode: 'graphic',
+      graphicBands: [...FLAT_BANDS] as GraphicBands,
+      peqFilters: DEFAULT_PEQ_FILTERS_PRESET.map(f => ({ ...f })),
+      activePresetId: 'flat',
+      enabled: true,
+      editingFilterId: null,
+
+      setMode: (mode) => {
+        set({ mode });
+        try { audioDSP.setMode(mode === 'graphic' ? 0 : 1); } catch {}
+      },
+
+      setEnabled: (enabled) => {
+        set({ enabled });
+        try { audioDSP.setEnabled(enabled); } catch {}
+      },
+
+      setGraphicBand: (index, value) => {
+        const bands = [...get().graphicBands] as GraphicBands;
+        bands[index] = Math.max(-12, Math.min(12, value));
+        set({ graphicBands: bands, activePresetId: null });
+        try { audioDSP.updateGraphicEQ(bands); } catch {}
+      },
+
+      setGraphicBands: (bands) => {
+        set({ graphicBands: bands });
+        try { audioDSP.updateGraphicEQ(bands); } catch {}
+      },
+
+      addFilter: () => {
+        const filters = get().peqFilters;
+        const maxId = filters.reduce((max, f) => Math.max(max, f.id), 0);
+        const newFilter: PEQFilter = {
+          id: maxId + 1,
+          type: 'Peak',
+          frequency: 1000,
+          gain: 0,
+          q: 1.0,
+          enabled: true,
+        };
+        set({ peqFilters: [...filters, newFilter], activePresetId: null });
+      },
+
+      removeFilter: (id) => {
+        const filters = get().peqFilters.filter(f => f.id !== id);
+        set({ peqFilters: filters, activePresetId: null });
+      },
+
+      updatePEQFilter: (id, params) => {
+        const filters = get().peqFilters.map(f =>
+          f.id === id ? { ...f, ...params } : f,
+        );
+        set({ peqFilters: filters, activePresetId: null });
+        // 同步到原生 DSP
+        const filter = filters.find(f => f.id === id);
+        if (filter && filter.enabled) {
+          const typeMap: Record<string, number> = {
+            Peak: 0, LowShelf: 1, HighShelf: 2,
+            LowPass: 3, HighPass: 4, Notch: 5, BandPass: 6,
+          };
+          try {
+            audioDSP.updatePEQFilter(
+              filter.id - 1,
+              typeMap[filter.type] ?? 0,
+              filter.frequency,
+              filter.gain,
+              filter.q,
+            );
+          } catch {}
+        }
+      },
+
+      setEditingFilterId: (id) => set({ editingFilterId: id }),
+
+      applyPreset: (presetId) => {
+        const preset = EMOTION_PRESETS.find(p => p.id === presetId);
+        if (!preset) return;
+
+        const updates: Partial<EQState> = {
+          activePresetId: presetId,
+        };
+
+        if (preset.graphicBands) {
+          updates.graphicBands = [...preset.graphicBands] as GraphicBands;
+        }
+
+        if (preset.peqFilters) {
+          updates.peqFilters = preset.peqFilters.map(f => ({ ...f }));
+        }
+
+        set(updates);
+
+        // 同步到原生 DSP
+        if (preset.graphicBands) {
+          try { audioDSP.applyPreset(preset.graphicBands); } catch {}
+        }
+      },
+
+      resetToFlat: () => {
+        set({
+          graphicBands: [...FLAT_BANDS] as GraphicBands,
+          activePresetId: 'flat',
+          peqFilters: DEFAULT_PEQ_FILTERS_PRESET.map(f => ({ ...f })),
+        });
+        try { audioDSP.reset(); } catch {}
+      },
+    }),
+    {
+      name: 'eqStore',
+      storage: createJSONStorage(() => mmkvStorage),
+    },
+  ),
+);

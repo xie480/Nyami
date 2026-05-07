@@ -15,6 +15,7 @@ import { FoldersScreen } from './screens/FoldersScreen';
 import { VideosScreen } from './screens/VideosScreen';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { SoundLabScreen } from './screens/SoundLabScreen';
 import { VisibleFoldersScreen } from './screens/VisibleFoldersScreen';
 import { SplashScreen } from './screens/SplashScreen';
 import { SyncDetailsScreen } from './screens/SyncDetailsScreen';
@@ -46,6 +47,7 @@ const FoldersScreenWithBg = withBackground(FoldersScreen);
 const VideosScreenWithBg = withBackground(VideosScreen);
 const PlayerScreenWithBg = withBackground(PlayerScreen);
 const SettingsScreenWithBg = withBackground(SettingsScreen);
+const SoundLabScreenWithBg = withBackground(SoundLabScreen);
 const VisibleFoldersScreenWithBg = withBackground(VisibleFoldersScreen);
 const SplashScreenWithBg = withBackground(SplashScreen);
 const SyncDetailsScreenWithBg = withBackground(SyncDetailsScreen);
@@ -192,6 +194,7 @@ export default function App() {
                   options={{ presentation: 'modal' }}
                 />
                 <Stack.Screen name="Settings" component={SettingsScreenWithBg} />
+                <Stack.Screen name="SoundLab" component={SoundLabScreenWithBg} />
                 <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreenWithBg} />
                 <Stack.Screen name="SyncDetails" component={SyncDetailsScreenWithBg} />
               </Stack.Navigator>

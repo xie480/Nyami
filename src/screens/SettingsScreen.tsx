@@ -278,6 +278,16 @@ export const SettingsScreen = ({ navigation }: any) => {
           </>
         )}
 
+        <Text style={s.section}>音效</Text>
+        <View style={s.group}>
+          <ListItem
+            title="声音实验室"
+            subtitle="双层 EQ 与动态频谱"
+            onPress={() => navigation.navigate('SoundLab')}
+            showArrow
+          />
+        </View>
+
         <Text style={s.section}>音质</Text>
         <View style={s.group}>
           {QUALITY_OPTIONS.map((opt, i) => (
