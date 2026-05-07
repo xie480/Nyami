@@ -16,7 +16,7 @@ import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import TrackPlayer from 'react-native-track-player';
 import { IconButton } from '../components/IconButton';
-import { SafeAreaView, StatusBar } from 'react-native';
+import { StatusBar } from 'react-native';
 import { Header } from '../components/Header';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
@@ -232,7 +232,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
   // No longer using cycleSort, sorting handled via modal
 
   return (
-    <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
+    <View style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title={`${title}`} showBack />
       {/* 搜索 + 排序栏 */}
@@ -348,6 +348,6 @@ export const VideosScreen = ({ route, navigation }: any) => {
         </View>
       </Modal>
       <MiniPlayer />
-    </SafeAreaView>
+    </View>
   );
 };

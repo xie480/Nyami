@@ -1,12 +1,13 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   StatusBar,
+  Animated,
+  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Header } from '../components/Header';
@@ -51,8 +52,8 @@ export const SoundLabScreen = () => {
   const totalEnergy = graphicBands.reduce((sum, v) => sum + Math.abs(v), 0);
   const energyLevel = totalEnergy > 20 ? '高' : totalEnergy > 5 ? '中' : '低';
 
-  // FFT 频谱数据轮询（仅页面可见时启用）
-  const { spectrum, catEarLeft, catEarRight } = useSpectrumPoller(mode === 'graphic');
+  // FFT 频谱数据轮询（EQ 启用时持续轮询，覆盖所有模式）
+  const { spectrum, catEarLeft, catEarRight } = useSpectrumPoller(enabled);
 
   // 当前选中的 PEQ 滤波器
   const selectedFilter = selectedFilterId
@@ -60,7 +61,7 @@ export const SoundLabScreen = () => {
     : null;
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: t.colors.background }]}>
+    <View style={[styles.safeArea, { backgroundColor: t.colors.background }]}>
       <StatusBar
         barStyle={t.isDark ? 'light-content' : 'dark-content'}
         translucent
@@ -68,156 +69,12 @@ export const SoundLabScreen = () => {
       />
       <Header title="声音实验室" showBack noBorder />
 
+      {/* ---- 上部可滚动内容区 ---- */}
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ===== 磨砂玻璃控制台 ===== */}
-        <View style={[styles.consoleCard, { backgroundColor: t.colors.surface }]}>
-          {/* EQ 开关 + 模式切换 */}
-          <View style={styles.controlBar}>
-            <View style={styles.switchRow}>
-              <Text style={[styles.switchLabel, { color: t.colors.text }]}>
-                EQ 均衡器
-              </Text>
-              <Switch value={enabled} onValueChange={setEnabled} />
-            </View>
-          </View>
-
-          {/* 模式选择器 */}
-          <View style={styles.modeRow}>
-            {MODE_OPTIONS.map(opt => {
-              const isActive = mode === opt.key;
-              return (
-                <TouchableOpacity
-                  key={opt.key}
-                  activeOpacity={0.7}
-                  onPress={() => setMode(opt.key)}
-                  style={[
-                    styles.modeBtn,
-                    isActive
-                      ? { backgroundColor: t.colors.primary + '25', borderColor: t.colors.primary, borderWidth: 1.5 }
-                      : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'transparent', borderWidth: 1 },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.modeBtnText,
-                      { color: isActive ? t.colors.primary : t.colors.textSub },
-                    ]}
-                  >
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {/* 当前预设标签 */}
-          {activePreset && (
-            <View style={styles.presetIndicator}>
-              <Text style={[styles.presetLabel, { color: t.colors.textHint }]}>
-                预设：<Text style={{ color: t.colors.primary }}>{activePreset.name}</Text>
-                {'  ·  '}能量：{energyLevel}
-              </Text>
-            </View>
-          )}
-
-          {/* 分隔线 */}
-          <View style={[styles.divider, { backgroundColor: t.colors.divider }]} />
-
-          {/* ===== Graphic EQ 区域 ===== */}
-          {mode === 'graphic' && (
-            <View style={{ opacity: enabled ? 1 : 0.35 }}>
-              <GraphicEQ />
-            </View>
-          )}
-
-          {/* ===== PEQ 区域 ===== */}
-          {mode === 'parametric' && (
-            <View style={{ opacity: enabled ? 1 : 0.35 }}>
-              {/* 频率响应曲线 + 可拖动节点 */}
-              <ParametricEQ
-                filters={peqFilters}
-                onSelectFilter={setSelectedFilterId}
-                selectedFilterId={selectedFilterId}
-              />
-
-              {/* 滤波器列表 + 添加按钮 */}
-              <View style={styles.peqFilterList}>
-                {peqFilters.map(filter => (
-                  <TouchableOpacity
-                    key={filter.id}
-                    activeOpacity={0.7}
-                    onPress={() => setSelectedFilterId(
-                      selectedFilterId === filter.id ? null : filter.id,
-                    )}
-                    style={[
-                      styles.peqFilterChip,
-                      {
-                        backgroundColor: filter.enabled
-                          ? t.colors.primary + '18'
-                          : 'rgba(255,255,255,0.05)',
-                        borderColor: selectedFilterId === filter.id
-                          ? t.colors.primary
-                          : 'transparent',
-                        borderWidth: selectedFilterId === filter.id ? 1.5 : 0,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.peqFilterChipText,
-                        {
-                          color: filter.enabled ? t.colors.primary : t.colors.textSub,
-                          opacity: filter.enabled ? 1 : 0.5,
-                        },
-                      ]}
-                    >
-                      #{filter.id} {filter.type}
-                    </Text>
-                    <Text style={[styles.peqFilterChipSub, { color: t.colors.textHint }]}>
-                      {filter.frequency >= 1000
-                        ? `${(filter.frequency / 1000).toFixed(1)}k`
-                        : `${filter.frequency}`}
-                      Hz · {filter.gain > 0 ? '+' : ''}{filter.gain}dB
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* 添加滤波器按钮 */}
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => {
-                  addFilter();
-                  // 自动选中新添加的滤波器（最后一个）
-                  setSelectedFilterId(
-                    peqFilters.length > 0 ? Math.max(...peqFilters.map(f => f.id)) + 1 : 1,
-                  );
-                }}
-                style={[
-                  styles.addFilterBtn,
-                  { borderColor: t.colors.primary + '40', backgroundColor: t.colors.primary + '0A' },
-                ]}
-              >
-                <Text style={[styles.addFilterBtnText, { color: t.colors.primary }]}>
-                  + 添加滤波器
-                </Text>
-              </TouchableOpacity>
-
-              {/* 选中滤波器的编辑面板 */}
-              {selectedFilter && (
-                <PEQFilterEditor
-                  filter={selectedFilter}
-                  onClose={() => setSelectedFilterId(null)}
-                />
-              )}
-            </View>
-          )}
-        </View>
-
         {/* ===== 预设选择器 ===== */}
         <View style={styles.presetSection}>
           <View style={styles.sectionTitleRow}>
@@ -295,7 +152,174 @@ export const SoundLabScreen = () => {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+
+      {/* ---- 底部固定 EQ 控制台 ---- */}
+      <View
+        style={[
+          styles.bottomConsole,
+          {
+            backgroundColor: t.colors.surface,
+            borderTopColor: t.colors.divider,
+            zIndex: 100,
+          },
+        ]}
+      >
+        {/* EQ 开关 + 模式切换 */}
+        <View style={styles.controlBar}>
+          <View style={styles.switchRow}>
+            <Text style={[styles.switchLabel, { color: t.colors.text }]}>
+              EQ 均衡器
+            </Text>
+            <Switch value={enabled} onValueChange={setEnabled} />
+          </View>
+          {/* 当前预设标签 */}
+          {activePreset && (
+            <Text style={[styles.presetLabel, { color: t.colors.textHint }]}>
+              预设：<Text style={{ color: t.colors.primary }}>{activePreset.name}</Text>
+              {'  ·  '}能量：{energyLevel}
+            </Text>
+          )}
+        </View>
+
+        {/* 模式选择器 */}
+        <View style={styles.modeRow}>
+          {MODE_OPTIONS.map(opt => {
+            const isActive = mode === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                activeOpacity={0.7}
+                onPress={() => setMode(opt.key)}
+                style={[
+                  styles.modeBtn,
+                  isActive
+                    ? { backgroundColor: t.colors.primary + '25', borderColor: t.colors.primary, borderWidth: 1.5 }
+                    : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'transparent', borderWidth: 1 },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modeBtnText,
+                    { color: isActive ? t.colors.primary : t.colors.textSub },
+                  ]}
+                >
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* ===== Graphic EQ 区域 ===== */}
+        {mode === 'graphic' && (
+          <View style={[styles.eqScrollArea, { opacity: enabled ? 1 : 0.35 }]}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              bounces={false}
+              nestedScrollEnabled
+            >
+              <GraphicEQ />
+            </ScrollView>
+          </View>
+        )}
+
+        {/* ===== PEQ 区域 ===== */}
+        {mode === 'parametric' && (
+          <View style={[styles.eqScrollArea, { opacity: enabled ? 1 : 0.35 }]}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              bounces={false}
+              nestedScrollEnabled
+            >
+              <View style={styles.peqCompact}>
+                {/* 频率响应曲线 + 可拖动节点 */}
+                <ParametricEQ
+                  filters={peqFilters}
+                  onSelectFilter={setSelectedFilterId}
+                  selectedFilterId={selectedFilterId}
+                />
+              </View>
+            </ScrollView>
+
+            {/* 紧凑型滤波器列表 + 添加按钮 */}
+            <View style={styles.peqFilterRow}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.peqFilterScroll}
+              >
+                {peqFilters.map(filter => (
+                  <TouchableOpacity
+                    key={filter.id}
+                    activeOpacity={0.7}
+                    onPress={() => setSelectedFilterId(
+                      selectedFilterId === filter.id ? null : filter.id,
+                    )}
+                    style={[
+                      styles.peqFilterChip,
+                      {
+                        backgroundColor: filter.enabled
+                          ? t.colors.primary + '18'
+                          : 'rgba(255,255,255,0.05)',
+                        borderColor: selectedFilterId === filter.id
+                          ? t.colors.primary
+                          : 'transparent',
+                        borderWidth: selectedFilterId === filter.id ? 1.5 : 0,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.peqFilterChipText,
+                        {
+                          color: filter.enabled ? t.colors.primary : t.colors.textSub,
+                          opacity: filter.enabled ? 1 : 0.5,
+                        },
+                      ]}
+                    >
+                      #{filter.id} {filter.type}
+                    </Text>
+                    <Text style={[styles.peqFilterChipSub, { color: t.colors.textHint }]}>
+                      {filter.frequency >= 1000
+                        ? `${(filter.frequency / 1000).toFixed(1)}k`
+                        : `${filter.frequency}`}
+                      Hz · {filter.gain > 0 ? '+' : ''}{filter.gain}dB
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => {
+                  addFilter();
+                  setSelectedFilterId(
+                    peqFilters.length > 0 ? Math.max(...peqFilters.map(f => f.id)) + 1 : 1,
+                  );
+                }}
+                style={[
+                  styles.addFilterBtnSmall,
+                  { borderColor: t.colors.primary + '40', backgroundColor: t.colors.primary + '0A' },
+                ]}
+              >
+                <Text style={[styles.addFilterBtnText, { color: t.colors.primary }]}>+</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* 选中滤波器的编辑面板（在底部弹出） */}
+            {selectedFilter && (
+              <View style={styles.peqEditorContainer}>
+                <PEQFilterEditor
+                  filter={selectedFilter}
+                  onClose={() => setSelectedFilterId(null)}
+                />
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    </View>
   );
 };
 
@@ -307,22 +331,31 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 16,
   },
 
-  // 磨砂玻璃控制台
-  consoleCard: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 16,
-    overflow: 'hidden',
-    padding: 16,
+  // 底部固定 EQ 控制台
+  bottomConsole: {
+    borderTopWidth: 1,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    // 底部安全区域已被 SafeAreaWrapper 处理
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 16,
   },
+
+  // EQ 控制栏
   controlBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   switchRow: {
     flexDirection: 'row',
@@ -338,11 +371,11 @@ const styles = StyleSheet.create({
   modeRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   modeBtn: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderRadius: 10,
   },
   modeBtnText: {
@@ -351,61 +384,75 @@ const styles = StyleSheet.create({
   },
 
   // 预设指示
-  presetIndicator: {
-    marginBottom: 8,
-  },
   presetLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
   },
 
-  divider: {
-    height: 1,
-    marginVertical: 12,
+  // EQ 区域可滚动容器
+  eqScrollArea: {
+    marginTop: 4,
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
   },
 
-  // PEQ 滤波器列表
-  peqFilterList: {
+  // PEQ 紧凑布局
+  peqCompact: {
+    minWidth: 300,
+  },
+
+  // PEQ 滤波器行
+  peqFilterRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 12,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  peqFilterScroll: {
+    flex: 1,
   },
   peqFilterChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 8,
     borderWidth: 0,
-    minWidth: 80,
+    minWidth: 70,
+    marginRight: 4,
   },
   peqFilterChipText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
   },
   peqFilterChipSub: {
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '400',
-    marginTop: 2,
+    marginTop: 1,
   },
 
-  // 添加滤波器按钮
-  addFilterBtn: {
-    marginTop: 8,
-    paddingVertical: 8,
-    borderRadius: 8,
+  // 添加滤波器小按钮
+  addFilterBtnSmall: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     borderWidth: 1,
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
+    marginLeft: 4,
   },
   addFilterBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+
+  // PEQ 编辑器容器（无高度限制，自适应内容）
+  peqEditorContainer: {
+    marginTop: 4,
   },
 
   // 预设区域
   presetSection: {
-    marginTop: 16,
+    marginTop: 12,
     marginHorizontal: 16,
   },
   sectionTitleRow: {
@@ -451,6 +498,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 8,
+    alignItems: 'center'
   },
   bandItem: {
     alignItems: 'center',

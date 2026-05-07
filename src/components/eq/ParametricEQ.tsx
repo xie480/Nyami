@@ -10,22 +10,22 @@
  * 使用 react-native-gesture-handler 的 PanResponder 实现拖动，
  * 无需额外 native 依赖。
  */
-import React, { useRef, useMemo, useCallback } from 'react';
+import React, { useRef, useMemo, useCallback, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   PanResponder,
-  Dimensions,
   TouchableOpacity,
+  useWindowDimensions,
+  LayoutChangeEvent,
 } from 'react-native';
 import { useTheme } from '../../theme';
 import { useEQStore, PEQFilter, FilterType } from '../../store/eqStore';
 
-/** 曲线绘图区域尺寸 */
-const GRAPH_WIDTH = Dimensions.get('window').width - 64; // 32px padding each side
+/** 曲线绘图区域尺寸（基线，运行时动态计算宽度） */
 const GRAPH_HEIGHT = 180;
-const GRAPH_PAD = { top: 16, bottom: 16, left: 32, right: 16 };
+const GRAPH_PAD = { top: 16, bottom: 16, left: 32, right: 28 };
 
 /** 频率范围（对数刻度） */
 const FREQ_MIN = 20;
@@ -45,41 +45,35 @@ const FILTER_COLORS: Record<FilterType, string> = {
 };
 
 /**
- * 频率 → x 坐标（对数映射）
+ * 创建基于当前容器宽度的坐标转换函数
  */
-const freqToX = (freq: number): number => {
+const makeFreqToX = (width: number) => (freq: number): number => {
   const logMin = Math.log10(FREQ_MIN);
   const logMax = Math.log10(FREQ_MAX);
   const logFreq = Math.log10(Math.max(FREQ_MIN, Math.min(FREQ_MAX, freq)));
   const fraction = (logFreq - logMin) / (logMax - logMin);
-  return GRAPH_PAD.left + fraction * (GRAPH_WIDTH - GRAPH_PAD.left - GRAPH_PAD.right);
+  return GRAPH_PAD.left + fraction * (width - GRAPH_PAD.left - GRAPH_PAD.right);
 };
 
-/**
- * x 坐标 → 频率
- */
-const xToFreq = (x: number): number => {
+const makeXToFreq = (width: number) => (x: number): number => {
   const logMin = Math.log10(FREQ_MIN);
   const logMax = Math.log10(FREQ_MAX);
-  const availWidth = GRAPH_WIDTH - GRAPH_PAD.left - GRAPH_PAD.right;
+  const availWidth = width - GRAPH_PAD.left - GRAPH_PAD.right;
   const fraction = (x - GRAPH_PAD.left) / availWidth;
   const logFreq = logMin + fraction * (logMax - logMin);
   return Math.round(Math.pow(10, logFreq));
 };
 
 /**
- * 增益 → y 坐标（顶部 = +12dB）
+ * 创建基于当前容器高度的坐标转换函数
  */
-const gainToY = (gain: number): number => {
+const makeGainToY = (height: number) => (gain: number): number => {
   const fraction = (gain - GAIN_MIN) / (GAIN_MAX - GAIN_MIN);
-  return GRAPH_PAD.top + (1 - fraction) * (GRAPH_HEIGHT - GRAPH_PAD.top - GRAPH_PAD.bottom);
+  return GRAPH_PAD.top + (1 - fraction) * (height - GRAPH_PAD.top - GRAPH_PAD.bottom);
 };
 
-/**
- * y 坐标 → 增益
- */
-const yToGain = (y: number): number => {
-  const availHeight = GRAPH_HEIGHT - GRAPH_PAD.top - GRAPH_PAD.bottom;
+const makeYToGain = (height: number) => (y: number): number => {
+  const availHeight = height - GRAPH_PAD.top - GRAPH_PAD.bottom;
   const fraction = 1 - (y - GRAPH_PAD.top) / availHeight;
   return Math.round((GAIN_MIN + fraction * (GAIN_MAX - GAIN_MIN)) * 2) / 2;
 };
@@ -101,6 +95,18 @@ export const ParametricEQ: React.FC<ParametricEQProps> = ({
 }) => {
   const t = useTheme();
   const updatePEQFilter = useEQStore(s => s.updatePEQFilter);
+  const { width: windowWidth } = useWindowDimensions();
+
+  // 动态计算容器宽度
+  const containerWidth = windowWidth - 64;
+  const graphWidth = Math.max(200, containerWidth);
+  const plotWidth = graphWidth - GRAPH_PAD.left - GRAPH_PAD.right;
+
+  // 坐标转换函数（基于动态宽高）
+  const freqToX = useMemo(() => makeFreqToX(graphWidth), [graphWidth]);
+  const xToFreq = useMemo(() => makeXToFreq(graphWidth), [graphWidth]);
+  const gainToY = useMemo(() => makeGainToY(GRAPH_HEIGHT), []);
+  const yToGain = useMemo(() => makeYToGain(GRAPH_HEIGHT), []);
 
   /** 计算该频点下所有滤波器的复合增益 */
   const computeCombinedResponse = useCallback(
@@ -132,7 +138,7 @@ export const ParametricEQ: React.FC<ParametricEQProps> = ({
       });
     }
     return points;
-  }, [computeCombinedResponse]);
+  }, [computeCombinedResponse, freqToX, gainToY]);
 
   return (
     <View style={styles.container}>
@@ -144,7 +150,18 @@ export const ParametricEQ: React.FC<ParametricEQProps> = ({
       </View>
 
       {/* 曲线绘图区域 */}
-      <View style={[styles.graphArea, { backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 8 }]}>
+      <View
+        style={[
+          styles.graphArea,
+          {
+            width: graphWidth,
+            height: GRAPH_HEIGHT,
+            backgroundColor: 'rgba(0,0,0,0.15)',
+            borderRadius: 8,
+            overflow: 'visible',
+          },
+        ]}
+      >
         {/* 网格线 */}
         {[-6, 0, 6].map(dB => (
           <View
@@ -216,19 +233,26 @@ export const ParametricEQ: React.FC<ParametricEQProps> = ({
                 updatePEQFilter(filter.id, { frequency: freq, gain });
               }}
               onPress={() => onSelectFilter(filter.id)}
+              freqToX={freqToX}
+              xToFreq={xToFreq}
+              gainToY={gainToY}
+              yToGain={yToGain}
             />
           ))}
       </View>
 
       {/* 频率刻度标签 */}
-      <View style={styles.freqLabels}>
+      <View style={[styles.freqLabels, { marginLeft: GRAPH_PAD.left }]}>
         {[20, 100, 1000, 10000, 20000].map(freq => (
           <Text
             key={freq}
             style={[
               styles.freqLabel,
               { color: t.colors.textHint },
-              { position: 'absolute', left: freqToX(freq) - 16 },
+              {
+                position: 'absolute',
+                left: (freqToX(freq) - GRAPH_PAD.left) - (plotWidth / 5) / 2 + 2,
+              },
             ]}
           >
             {freq >= 1000 ? `${freq / 1000}k` : `${freq}`}
@@ -247,6 +271,10 @@ interface DraggableNodeProps {
   isSelected: boolean;
   onDrag: (freq: number, gain: number) => void;
   onPress: () => void;
+  freqToX: (freq: number) => number;
+  xToFreq: (x: number) => number;
+  gainToY: (gain: number) => number;
+  yToGain: (y: number) => number;
 }
 
 const NODE_SIZE = 24;
@@ -257,6 +285,10 @@ const DraggableNode: React.FC<DraggableNodeProps> = ({
   isSelected,
   onDrag,
   onPress,
+  freqToX,
+  xToFreq,
+  gainToY,
+  yToGain,
 }) => {
   const startPos = useRef({ x: 0, y: 0 });
   const currentX = useRef(freqToX(filter.frequency));
@@ -355,8 +387,6 @@ function filterResponseAt(filter: PEQFilter, freq: number): number {
   switch (type) {
     case 'Peak': {
       // 钟形响应：G * (f0/Q)² / sqrt((f² - f0²)² + (f*f0/Q)²) — 近似
-      const A = Math.pow(10, gain / 40);
-      const absGain = Math.abs(gain);
       const numerator = ratio * q;
       const denominator = Math.sqrt((ratio * ratio - 1) * (ratio * ratio - 1) + (ratio / q) * (ratio / q));
       const response = numerator / (denominator + 0.001);
@@ -382,7 +412,6 @@ function filterResponseAt(filter: PEQFilter, freq: number): number {
     }
     case 'Notch': {
       // 反向钟形
-      const A2 = Math.pow(10, Math.abs(gain) / 40);
       const notch = 1 - 1 / (1 + (ratio - 1 / ratio) * (ratio - 1 / ratio) * q * q);
       return -Math.abs(gain) * notch;
     }
@@ -417,11 +446,9 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   graphArea: {
-    width: GRAPH_WIDTH,
-    height: GRAPH_HEIGHT,
     marginLeft: 32,
     position: 'relative',
-    overflow: 'hidden',
+    overflow: 'visible',
   },
   gridLine: {
     position: 'absolute',
@@ -462,7 +489,6 @@ const styles = StyleSheet.create({
   },
   freqLabels: {
     flexDirection: 'row',
-    marginLeft: 32,
     marginTop: 4,
     height: 16,
     position: 'relative',

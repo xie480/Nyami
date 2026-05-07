@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, FlatList, RefreshControl, StyleSheet, TouchableOpacity, Text, SafeAreaView, StatusBar, Alert,
+  View, FlatList, RefreshControl, StyleSheet, TouchableOpacity, Text, StatusBar, Alert,
 } from 'react-native';
 import { Header } from '../components/Header';
 import { ListItem } from '../components/ListItem';
@@ -94,7 +94,7 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
   });
 
   return (
-    <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
+    <View style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header
         title="可见收藏夹偏好"
@@ -164,6 +164,6 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
           />
         </>
       )}
-    </SafeAreaView>
+    </View>
   );
 };

@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Header } from '../components/Header';
 import { useTheme } from '../theme';
 import { favoriteService } from '../services/favoriteService';
@@ -175,7 +174,7 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
   });
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <View style={styles.container}>
       <Header
         title="同步详情"
         showBack
@@ -218,6 +217,6 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
           )}
         </>
       )}
-    </SafeAreaView>
+    </View>
   );
 };

@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { SafeAreaView, StatusBar, Image, Dimensions } from 'react-native';
+import { View, StatusBar, Image, Dimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  View, Text, ScrollView, StyleSheet, Alert,
+  Text, ScrollView, StyleSheet, Alert,
 } from 'react-native';
 import { Header } from '../components/Header';
 import { ListItem } from '../components/ListItem';
@@ -197,7 +197,7 @@ export const SettingsScreen = ({ navigation }: any) => {
   });
 
   return (
-    <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
+    <View style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title="设置" showBack noBorder />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
@@ -407,6 +407,6 @@ export const SettingsScreen = ({ navigation }: any) => {
           <ListItem title="开源协议" subtitle="本应用仅供个人学习使用" />
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };

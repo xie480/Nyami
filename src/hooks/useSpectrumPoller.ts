@@ -23,6 +23,9 @@ const POLL_INTERVAL_MS = 80; // ~12.5 fps，平衡性能与流畅度
 /** 指数移动平均平滑因子 (0=不平滑, 0.9=强平滑) */
 const SMOOTHING_FACTOR = 0.75;
 
+/** 调试模式：打印频谱数据长度（仅在开发环境生效） */
+const DEBUG = __DEV__;
+
 export interface SpectrumData {
   /** 128-bin 频谱幅度 (0~1) */
   spectrum: number[];
@@ -96,9 +99,20 @@ export function useSpectrumPoller(enabled: boolean = true): SpectrumData {
           catEarLeft: smoothedLeft,
           catEarRight: smoothedRight,
         });
+
+        if (DEBUG) {
+          console.log(
+            `[useSpectrumPoller] spectrum=${smoothedSpectrum.length} bins, ` +
+            `left=${smoothedLeft.length} bins, right=${smoothedRight.length} bins`,
+          );
+        }
+      } else if (DEBUG) {
+        console.warn('[useSpectrumPoller] Native getSpectrumData() returned empty data');
       }
-    } catch {
-      // Native 模块不可用时静默忽略
+    } catch (e) {
+      if (DEBUG) {
+        console.warn('[useSpectrumPoller] Native module error:', e);
+      }
     }
   }, []);
 

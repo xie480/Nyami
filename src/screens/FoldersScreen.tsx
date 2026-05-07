@@ -10,7 +10,6 @@ import {
   ToastAndroid,
   Text,
   TextInput,
-  SafeAreaView,
   StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -138,7 +137,7 @@ export const FoldersScreen = ({ navigation }: any) => {
   };
 
   return (
-    <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
+    <View style={s.container}>
       <StatusBar
         barStyle={t.isDark ? 'light-content' : 'dark-content'}
         translucent
@@ -502,6 +501,6 @@ export const FoldersScreen = ({ navigation }: any) => {
         </View>
       )}
       <MiniPlayer />
-    </SafeAreaView>
+    </View>
   );
 };

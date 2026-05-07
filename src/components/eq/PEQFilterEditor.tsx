@@ -9,7 +9,7 @@
  * - 启用/禁用切换
  * - 删除滤波器
  */
-import React, { useRef } from 'react';
+import React, { useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -74,8 +74,8 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
       style={[
         styles.container,
         {
-          backgroundColor: t.colors.surface,
-          borderColor: t.colors.divider,
+          backgroundColor: 'transparent',
+          borderColor: 'transparent',
           transform: [{
             translateY: slideAnim.interpolate({
               inputRange: [0, 1],
@@ -232,7 +232,7 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
   );
 };
 
-// ========== 可拖动滑块组件 ==========
+// ========== 高性能可拖动滑块组件 ==========
 
 interface DragSliderProps {
   value: number;
@@ -244,6 +244,15 @@ interface DragSliderProps {
   color?: string;
 }
 
+/**
+ * 高性能 DragSlider - 使用 ref + requestAnimationFrame 节流模式
+ *
+ * 性能优化策略（参考 EQSlider.tsx）：
+ * 1. 所有热路径参数通过 ref 持有，避免闭包过期
+ * 2. PanResponder 移动时仅更新 ref，不直接触发 React state 更新
+ * 3. requestAnimationFrame 批量提交值变化
+ * 4. 节流阈值避免微振动导致的频繁渲染
+ */
 const DragSlider: React.FC<DragSliderProps> = ({
   value,
   min,
@@ -254,50 +263,120 @@ const DragSlider: React.FC<DragSliderProps> = ({
   color = '#00D2FF',
 }) => {
   const t = useTheme();
-  const trackWidth = useRef(0);
-  const startValue = useRef(value);
+
+  // ========== Refs（不触发渲染的热路径） ==========
+  const trackWidthRef = useRef(0);
+  const startValueRef = useRef(value);
+  const pendingValueRef = useRef(value);
+  const lastCommittedValueRef = useRef(value);
+  const isDraggingRef = useRef(false);
+  const rafRef = useRef<number | null>(null);
+
+  // 参数 ref（确保 PanResponder 闭包始终获取最新参数）
+  const minRef = useRef(min);
+  const maxRef = useRef(max);
+  const stepRef = useRef(step);
+  const onChangeRef = useRef(onChange);
+
+  // 同步外部 prop 到 ref
+  minRef.current = min;
+  maxRef.current = max;
+  stepRef.current = step;
+  onChangeRef.current = onChange;
+
+  /** 节流阈值：值变化超过此值才触发更新 */
+  const THROTTLE_THRESHOLD = 0.3;
 
   /** 数值 → 百分比（0~1） */
   const valueToFraction = (v: number): number => {
-    return (v - min) / (max - min);
+    return (v - minRef.current) / (maxRef.current - minRef.current);
   };
 
   /** 百分比 → 数值（带 step 取整） */
   const fractionToValue = (frac: number): number => {
-    const raw = min + frac * (max - min);
-    if (step > 0) {
-      const steps = Math.round((raw - min) / step);
-      return min + steps * step;
+    const m = minRef.current;
+    const M = maxRef.current;
+    const s = stepRef.current;
+    const raw = m + frac * (M - m);
+    if (s > 0) {
+      const steps = Math.round((raw - m) / s);
+      return m + steps * s;
     }
     return raw;
   };
 
   const fraction = valueToFraction(value);
 
+  // ========== 值提交（带节流） ==========
+  const commitValue = useCallback(() => {
+    const pending = pendingValueRef.current;
+    const lastCommitted = lastCommittedValueRef.current;
+    if (Math.abs(pending - lastCommitted) >= THROTTLE_THRESHOLD || !isDraggingRef.current) {
+      lastCommittedValueRef.current = pending;
+      onChangeRef.current(pending);
+    }
+  }, []);
+
+  // ========== rAF 调度循环 ==========
+  const scheduleFrame = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      commitValue();
+      if (isDraggingRef.current) {
+        scheduleFrame();
+      }
+    });
+  }, [commitValue]);
+
+  const cancelFrame = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+
+  // ========== PanResponder ==========
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
-        startValue.current = value;
+        isDraggingRef.current = true;
+        startValueRef.current = value;
+        pendingValueRef.current = value;
+        scheduleFrame();
       },
       onPanResponderMove: (_, gesture) => {
-        if (trackWidth.current <= 0) return;
-        const dxFraction = gesture.dx / trackWidth.current;
-        const newFraction = Math.max(0, Math.min(1, valueToFraction(startValue.current) + dxFraction));
-        const newValue = fractionToValue(newFraction);
-        onChange(newValue);
+        if (trackWidthRef.current <= 0) return;
+        const dxFraction = gesture.dx / trackWidthRef.current;
+        const startFrac = valueToFraction(startValueRef.current);
+        const newFraction = Math.max(0, Math.min(1, startFrac + dxFraction));
+        pendingValueRef.current = fractionToValue(newFraction);
+        // 不直接调用 onChange，由 rAF 循环批量提交
+      },
+      onPanResponderRelease: () => {
+        isDraggingRef.current = false;
+        commitValue();
+        cancelFrame();
+      },
+      onPanResponderTerminate: () => {
+        isDraggingRef.current = false;
+        commitValue();
+        cancelFrame();
       },
     }),
   ).current;
 
   const onLayout = (e: LayoutChangeEvent) => {
-    trackWidth.current = e.nativeEvent.layout.width;
+    trackWidthRef.current = e.nativeEvent.layout.width;
   };
 
   return (
     <View style={styles.sliderRow}>
-      <Text style={[styles.sliderBound, { color: t.colors.textHint }]}>{formatMinValue(min, max, formatValue)}</Text>
+      <Text style={[styles.sliderBound, { color: t.colors.textHint }]}>
+        {formatMinValue(min, max, formatValue)}
+      </Text>
       <View
         style={styles.sliderTrackContainer}
         onLayout={onLayout}
@@ -305,7 +384,7 @@ const DragSlider: React.FC<DragSliderProps> = ({
       >
         {/* 轨道背景 */}
         <View style={[styles.sliderTrack, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-          {/*填充条 */}
+          {/* 填充条 */}
           <View
             style={[
               styles.sliderFill,
@@ -328,7 +407,9 @@ const DragSlider: React.FC<DragSliderProps> = ({
           ]}
         />
       </View>
-      <Text style={[styles.sliderBound, { color: t.colors.textHint }]}>{formatMaxValue(min, max, formatValue)}</Text>
+      <Text style={[styles.sliderBound, { color: t.colors.textHint }]}>
+        {formatMaxValue(min, max, formatValue)}
+      </Text>
     </View>
   );
 };

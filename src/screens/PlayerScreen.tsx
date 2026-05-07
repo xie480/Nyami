@@ -77,7 +77,7 @@ export const PlayerScreen = () => {
   const playTextColor = isGlass ? g!.colors.button.playText : '#fff';
 
   const s = StyleSheet.create({
-    container: { flex: 1, backgroundColor: t.colors.background, paddingTop: insets.top },
+    container: { flex: 1, backgroundColor: t.colors.background },
     header: {
       height: 64,
       flexDirection: 'row',
