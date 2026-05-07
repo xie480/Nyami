@@ -99,19 +99,23 @@ export const VideosScreen = ({ route, navigation }: any) => {
         const fullList = useFolderDataStore.getState().getDisplayedList();
         const targetIndex = fullList.findIndex(v => v.bvid === target.bvid);
         
+        // 【修复 originalQueue 被覆盖】
+        // 1. 先用完整列表调用 setQueue → 正确初始化 originalQueue = fullList
+        setQueue(fullList, target.bvid, context);
+        
+        // 2. 对完整列表进行 Fisher-Yates 洗牌
         let shuffled = [...fullList];
         if (targetIndex !== -1) {
           shuffled.splice(targetIndex, 1);
         }
-        
-        // Fisher-Yates shuffle
         for (let i = shuffled.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
-        
         shuffled.unshift(target);
-        setQueue(shuffled, target.bvid, context);
+        
+        // 3. 仅更新 queue 字段，保留 originalQueue 不变
+        usePlayerStore.setState({ queue: shuffled });
         await loadQueue(shuffled, target.bvid);
       } else {
         if (hasMore) await ensureAllLoaded();

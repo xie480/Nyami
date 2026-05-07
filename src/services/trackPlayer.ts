@@ -169,6 +169,16 @@ export async function removeFromQueue(bvid: string): Promise<void> {
  * 性能优化：使用 reset() + 批量 add() 替代逐个 move() 调用，
  * 将 Bridge 调用次数从 O(N) 降至 O(1)，避免长列表卡顿。
  */
+/**
+ * Flicker-Free Reorder: 以局部替换代替全量 reset + add，避免 PlayerScreen 卸载重建。
+ *
+ * 核心策略：
+ * 1. 从原生队列中移除【除当前播放轨道外】的所有轨道 → 当前轨道保持播放，其索引变为 0
+ * 2. 将新队列中位于当前轨道之前的歌曲插入到队首（索引 0 处）
+ * 3. 将新队列中位于当前轨道之后的歌曲追加到队尾
+ *
+ * 效果：useActiveTrack() 始终返回有效值，PlayerScreen 不发生任何卸载/重挂载，零闪烁。
+ */
 export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string): Promise<void> {
   if (videos.length === 0) return;
 
@@ -191,7 +201,7 @@ export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string):
     };
   });
 
-  // 3. 保存当前播放状态
+  // 3. 获取当前播放状态
   const activeIndex = await TrackPlayer.getActiveTrackIndex();
   const playbackState = await TrackPlayer.getPlaybackState();
   const wasPlaying = playbackState.state === State.Playing;
@@ -199,19 +209,53 @@ export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string):
     ? nativeQueue[activeIndex].id as string
     : (startBvid ?? undefined);
 
-  // 4. O(1)：reset 清空 + 批量添加全部轨道
-  await TrackPlayer.reset();
-  await TrackPlayer.add(tracks);
+  // 4. 后备方案：无有效当前轨道时回退到安全路径
+  if (!currentBvid) {
+    await TrackPlayer.reset();
+    await TrackPlayer.add(tracks);
+    return;
+  }
 
-  // 5. 恢复播放位置
-  if (currentBvid) {
-    const skipIdx = tracks.findIndex(t => t.id === currentBvid);
-    if (skipIdx >= 0) {
-      await TrackPlayer.skip(skipIdx);
-      if (wasPlaying) {
-        await TrackPlayer.play();
-      }
+  // 5. Flicker-Free: 保留当前播放轨道，移除其余所有轨道
+  //    收集非当前轨道索引，通过批量 remove(indexes[]) 一次性移除。
+  //    【性能】O(N) 次桥接调用 → O(1) 次，消除卡顿
+  //    【安全】原子操作避免逐条删除时索引偏移导致的 IndexOutOfBounds 异常
+  const indicesToRemove: number[] = [];
+  nativeQueue.forEach((t, idx) => {
+    if (t.id !== currentBvid) {
+      indicesToRemove.push(idx);
     }
+  });
+  if (indicesToRemove.length > 0) {
+    await TrackPlayer.remove(indicesToRemove);
+  }
+  // 此时队列中只剩当前轨道，其索引为 0
+
+  // 6. 在新队列中定位当前轨道
+  const currentInNewTracks = tracks.findIndex(t => t.id === currentBvid);
+  if (currentInNewTracks === -1) {
+    // 当前轨道不在新队列中 → 回退到传统路径
+    await TrackPlayer.reset();
+    await TrackPlayer.add(tracks);
+    return;
+  }
+
+  // 7. 分段：当前轨道之前的部分 + 之后的部分
+  const beforeTracks = tracks.slice(0, currentInNewTracks);
+  const afterTracks = tracks.slice(currentInNewTracks + 1);
+
+  // 8. 局部插入：将 beforeTracks 插入到队首（当前轨道之前），之后的部分追加到队尾
+  if (beforeTracks.length > 0) {
+    await TrackPlayer.add(beforeTracks, 0);
+  }
+  if (afterTracks.length > 0) {
+    await TrackPlayer.add(afterTracks);
+  }
+
+  // 9. 恢复播放状态（TrackPlayer.remove 对非当前轨道不影响播放状态，
+  //    但 add 操作后显式调用 play 确保一致性）
+  if (wasPlaying) {
+    await TrackPlayer.play();
   }
 }
 
