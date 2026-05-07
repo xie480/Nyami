@@ -15,6 +15,7 @@ import {
   updateSyncMeta,
   clearAllIndexes,
   removeFolderIdFromAllVideos,
+  deleteSyncMeta,
 } from '../db/operations';
 import { Mutex } from '../utils/mutex';
 import { AuthRequiredError } from '../core/errors';
@@ -266,7 +267,7 @@ export const favoriteService = {
               // 2秒抖动，降低限流概率
               await new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000)));
               const pageRes = await executeWithBackoff(() =>
-                this.getVideos(folder.id, page, 20, force, signal),
+                this.getVideos(folder.id, page, 30, force, signal),
               );
 
               // 记录首页第一条 bvid（用于全量后更新 latestBvid）
@@ -325,8 +326,9 @@ export const favoriteService = {
             }
           }
 
-          if (!failedFolders.has(folder.id)) {
-            // 同步完成后更新同步元数据
+          // 根据是否发生中止或错误决定是否更新同步元数据
+          if (!failedFolders.has(folder.id) && !signal?.aborted) {
+            // 同步成功完成，更新同步元数据为最新状态
             syncMetaMap[folder.id] = {
               folderId: folder.id,
               lastSyncTime: now,
@@ -337,6 +339,15 @@ export const favoriteService = {
             };
             await updateSyncMeta(syncMetaMap[folder.id]);
             syncedFolders.add(folder.id);
+          } else if (signal?.aborted) {
+            // 同步被用户中止：若是全量模式，需要在下次同步时强制全量拉取
+            if (mode === 'full') {
+              syncMetaMap[folder.id] = {
+                ...syncMetaMap[folder.id],
+                needsFullSync: true,
+              };
+              await updateSyncMeta(syncMetaMap[folder.id]);
+            }
           }
         } catch (e: any) {
           console.warn(`[favoriteService] 文件夹 ${folder.id} 同步异常:`, e.message);
@@ -368,5 +379,14 @@ export const favoriteService = {
   async clearGlobalIndex() {
     await clearAllIndexes();
     globalIndexCache = [];
+  },
+
+  /**
+   * 删除指定收藏夹的索引数据
+   */
+  async deleteFolderIndex(folderId: number) {
+    await removeFolderIdFromAllVideos(folderId);
+    await deleteSyncMeta(folderId);
+    await loadGlobalIndexCache();
   },
 };

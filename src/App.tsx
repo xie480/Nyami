@@ -17,6 +17,7 @@ import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { VisibleFoldersScreen } from './screens/VisibleFoldersScreen';
 import { SplashScreen } from './screens/SplashScreen';
+import { SyncDetailsScreen } from './screens/SyncDetailsScreen';
 import { favoriteService, loadGlobalIndexCache } from './services/favoriteService';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { useUIStore } from './store/uiStore';
@@ -46,6 +47,7 @@ const PlayerScreenWithBg = withBackground(PlayerScreen);
 const SettingsScreenWithBg = withBackground(SettingsScreen);
 const VisibleFoldersScreenWithBg = withBackground(VisibleFoldersScreen);
 const SplashScreenWithBg = withBackground(SplashScreen);
+const SyncDetailsScreenWithBg = withBackground(SyncDetailsScreen);
 
 export default function App() {
   const systemScheme = useColorScheme();
@@ -187,6 +189,7 @@ export default function App() {
                 />
                 <Stack.Screen name="Settings" component={SettingsScreenWithBg} />
                 <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreenWithBg} />
+                <Stack.Screen name="SyncDetails" component={SyncDetailsScreenWithBg} />
               </Stack.Navigator>
             </NavigationContainer>
           </View>

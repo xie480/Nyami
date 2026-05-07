@@ -261,3 +261,21 @@ export async function clearAllIndexes(): Promise<void> {
     await syncMetaCollection.query().markAllAsDeleted();
   });
 }
+
+/**
+ * 删除指定收藏夹的同步元数据。
+ */
+export async function deleteSyncMeta(folderId: number): Promise<void> {
+  await database.write(async writer => {
+    const records = await syncMetaCollection.query(
+      Q.where('folder_id', folderId),
+    ).fetch();
+    for (const r of records) {
+      if ((r as any).destroyPermanently) {
+        await (r as any).destroyPermanently();
+      } else {
+        await r.markAsDeleted();
+      }
+    }
+  });
+}

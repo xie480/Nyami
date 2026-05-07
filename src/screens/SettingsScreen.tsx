@@ -342,13 +342,16 @@ export const SettingsScreen = ({ navigation }: any) => {
             }
             onPress={syncStatus === 'syncing' ? undefined : onSyncGlobalIndex}
             right={
-              syncStatus === 'syncing' ? (
-                <Button title="取消" variant="text" onPress={abortSync} />
-              ) : syncStatus === 'error' ? (
-                <Text style={{ color: t.colors.error, fontSize: t.fontSize.base }}>重试</Text>
-              ) : (
-                <Text style={{ color: t.colors.primary, fontSize: t.fontSize.base }}>开始同步</Text>
-              )
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Button title="查看" variant="text" onPress={() => navigation.navigate('SyncDetails')} />
+                {syncStatus === 'syncing' ? (
+                  <Button title="取消" variant="text" onPress={abortSync} />
+                ) : syncStatus === 'error' ? (
+                  <Text style={{ color: t.colors.error, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>重试</Text>
+                ) : (
+                  <Text style={{ color: t.colors.primary, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>开始同步</Text>
+                )}
+              </View>
             }
           />
           {syncStatus === 'syncing' && (
