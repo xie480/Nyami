@@ -17,9 +17,8 @@ import android.util.AttributeSet
  */
 class SpectrumGLSurfaceView @JvmOverloads constructor(
     context: Context,
-    attrs: AttributeSet? = null,
-    defStyleAttr: Int = 0
-) : GLSurfaceView(context, attrs, defStyleAttr) {
+    attrs: AttributeSet? = null
+) : GLSurfaceView(context, attrs) {
 
     val renderer: SpectrumRenderer
 
@@ -27,12 +26,12 @@ class SpectrumGLSurfaceView @JvmOverloads constructor(
         // 设置 OpenGL ES 2.0
         setEGLContextClientVersion(2)
 
-        // 保持渲染持续更新（后续可切换为按需更新以省电）
-        renderMode = RENDERMODE_CONTINUOUSLY
-
         // 设置渲染器
         renderer = SpectrumRenderer()
         setRenderer(renderer)
+
+        // 保持渲染持续更新（后续可切换为按需更新以省电）
+        renderMode = RENDERMODE_CONTINUOUSLY
 
         // 在 UI 线程直接设置渲染模式
         queueEvent {

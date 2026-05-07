@@ -1,3 +1,5 @@
+package com.bilimusic.module
+
 import com.bilimusic.module.AudioDSPModule
 import com.bilimusic.module.SpectrumViewManager
 import com.facebook.react.ReactPackage

@@ -1,6 +1,7 @@
 package com.bilimusic
 
 import android.app.Application
+import com.bilimusic.module.DSPPackage
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost

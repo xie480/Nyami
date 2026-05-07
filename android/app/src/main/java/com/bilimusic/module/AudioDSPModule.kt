@@ -47,14 +47,14 @@ class AudioDSPModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun setEnabled(enabled: Boolean) {
-        dspProcessor.enabled = enabled
+        dspProcessor.setEnabled(enabled)
         Log.d(TAG, "EQ enabled: $enabled")
     }
 
     @ReactMethod
     fun setMode(mode: Int) {
         val eqMode = if (mode == 0) DSPAudioProcessor.EQMode.GRAPHIC else DSPAudioProcessor.EQMode.PARAMETRIC
-        dspProcessor.mode = eqMode
+        dspProcessor.setMode(eqMode)
         Log.d(TAG, "EQ mode: $eqMode")
     }
 
