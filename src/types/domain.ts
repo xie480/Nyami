@@ -55,6 +55,8 @@ export interface AudioInfo {
 export interface PageResult<T> {
   list: T[];
   hasMore: boolean;
+  /** 原始返回的记录数（在过滤失效视频前） */
+  rawCount: number;
 }
 
 /** 收藏夹同步元数据 - 用于增量同步的状态追踪 */

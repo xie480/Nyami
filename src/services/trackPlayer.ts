@@ -82,7 +82,9 @@ export async function setupPlayer() {
       
       const lastPosition = storage.getNumber('lastPlaybackPosition');
       if (lastPosition && lastPosition > 0) {
+        // 恢复上一次播放进度后保持暂停，防止自动播放
         await TrackPlayer.seekTo(lastPosition);
+        await TrackPlayer.pause();
       }
       
       // 触发当前轨道的解析，冷启动时不自动播放
@@ -416,7 +418,7 @@ export async function PlaybackService() {
       }
     }
     if (e.index !== undefined) {
-      await lazyResolve(e.index);
+      await lazyResolve(e.index, false);
       // prefetch next track if exists for seamless playback
       try {
         const queue = await TrackPlayer.getQueue();

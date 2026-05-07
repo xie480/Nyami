@@ -36,11 +36,21 @@ export const biliApi = {
     if (!mediaId) {
       return Promise.reject(new Error('mediaId 不能为空'));
     }
-    return biliGet<FavoriteListResp>('/x/v3/fav/resource/list', {
-      params: { media_id: mediaId, pn, ps, platform: 'web', order: 'mtime' },
-      signal,
-      silent: true,
-    });
+    // B 站收藏夹资源列表需要 WBI 签名 (wts + w_rid)
+    // 使用最新的 WBI 密钥对请求参数进行签名后拼接到 URL，避免 axios 再次编码 params
+    return (async () => {
+      const { imgKey, subKey } = await getWbiKeys();
+      const signedQuery = encWbi(
+        { media_id: mediaId, pn, ps, platform: 'web', order: 'mtime' },
+        imgKey,
+        subKey,
+      );
+      // 将签名后的查询字符串直接拼接到路径上
+      return biliGet<FavoriteListResp>(`/x/v3/fav/resource/list?${signedQuery}`, {
+        signal,
+        silent: true,
+      });
+    })();
   },
 
   /** 获取视频元信息（含 cid） */

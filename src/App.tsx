@@ -55,7 +55,7 @@ export default function App() {
   
   const [isOnline, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
-  const { loggedIn, userId: uid, initAuth } = useAuthStore();
+  const { loggedIn, userId: uid, initAuth, authReady } = useAuthStore();
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const playlistVisible = useUIStore(state => state.playlistVisible);
   const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
@@ -110,18 +110,20 @@ export default function App() {
   // Rebuild global index on startup or when uid changes
   useEffect(() => {
     const init = async () => {
+      if (!authReady) return;
       if (uid) {
         const lastUid = storage.getString('lastUid');
+        
+        // 先加载缓存，确保 globalIndex 有数据
+        await loadGlobalIndexCache();
         const globalIndex = favoriteService.getGlobalIndex();
         
-        // 仅在切换账号或本地索引为空时清理旧索引，用户需在设置页面手动同步
-        if (lastUid !== uid || globalIndex.length === 0) {
+        // 仅在切换账号时清理旧索引，用户需在设置页面手动同步
+        if (lastUid !== uid) {
           // 仅清理旧数据，等待用户手动同步
           await favoriteService.clearGlobalIndex();
           storage.setString('lastUid', uid);
         }
-        // 加载缓存
-        await loadGlobalIndexCache();
       } else {
         // 用户登出时清理数据
         await favoriteService.clearGlobalIndex();
@@ -129,7 +131,7 @@ export default function App() {
       }
     };
     init();
-  }, [uid]);
+  }, [uid, authReady]);
 
   // 监听 hiddenFolderIds 变化，自动触发全局索引重新同步
   // 引入 hasMountedRef 以区分首次挂载（状态恢复）和后续用户交互导致的变化

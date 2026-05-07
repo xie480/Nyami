@@ -54,13 +54,24 @@ export async function upsertGlobalVideo(video: FavoriteVideo): Promise<void> {
  * 批量插入或更新全局视频记录（事务性）。
  */
 export async function batchUpsertGlobalVideos(videos: FavoriteVideo[]): Promise<void> {
+  if (videos.length === 0) return;
+
   await database.write(async writer => {
+    const bvids = videos.map(v => v.bvid);
+    const existingRecords = await globalVideoCollection.query(
+      Q.where('bvid', Q.oneOf(bvids))
+    ).fetch();
+
+    const existingMap = new Map<string, GlobalVideo>();
+    for (const record of existingRecords) {
+      existingMap.set(record.bvid, record);
+    }
+
+    const batchOperations: any[] = [];
+
     for (const video of videos) {
-      const existing = await globalVideoCollection.query(
-        Q.where('bvid', video.bvid),
-      ).fetch();
-      if (existing.length > 0) {
-        const record = existing[0];
+      const record = existingMap.get(video.bvid);
+      if (record) {
         // Merge existing folderIds with incoming ones
         const existingFolderIds: number[] = (() => {
           try { return JSON.parse(record.folderIds || '[]'); } catch { return []; }
@@ -68,34 +79,40 @@ export async function batchUpsertGlobalVideos(videos: FavoriteVideo[]): Promise<
         const incomingFolderIds: number[] = video.folderIds || [];
         const mergedFolderIds = [...new Set([...existingFolderIds, ...incomingFolderIds])];
         
-        await record.update(r => {
-          r.title = video.title;
-          r.cover = video.cover;
-          r.duration = video.duration;
-          r.page = video.page;
-          r.pubtime = video.pubtime;
-          r.upperMid = video.upper.mid;
-          r.upperName = video.upper.name;
-          r.attr = video.attr;
-          r.folderIds = JSON.stringify(mergedFolderIds);
-          r.parts = JSON.stringify(video.parts || []);
-        });
+        batchOperations.push(
+          record.prepareUpdate(r => {
+            r.title = video.title;
+            r.cover = video.cover;
+            r.duration = video.duration;
+            r.page = video.page;
+            r.pubtime = video.pubtime;
+            r.upperMid = video.upper.mid;
+            r.upperName = video.upper.name;
+            r.attr = video.attr;
+            r.folderIds = JSON.stringify(mergedFolderIds);
+            r.parts = JSON.stringify(video.parts || []);
+          })
+        );
       } else {
-        await globalVideoCollection.create(r => {
-          r.bvid = video.bvid;
-          r.title = video.title;
-          r.cover = video.cover;
-          r.duration = video.duration;
-          r.page = video.page;
-          r.pubtime = video.pubtime;
-          r.upperMid = video.upper.mid;
-          r.upperName = video.upper.name;
-          r.attr = video.attr;
-          r.folderIds = JSON.stringify(video.folderIds || []);
-          r.parts = JSON.stringify(video.parts || []);
-        });
+        batchOperations.push(
+          globalVideoCollection.prepareCreate(r => {
+            r.bvid = video.bvid;
+            r.title = video.title;
+            r.cover = video.cover;
+            r.duration = video.duration;
+            r.page = video.page;
+            r.pubtime = video.pubtime;
+            r.upperMid = video.upper.mid;
+            r.upperName = video.upper.name;
+            r.attr = video.attr;
+            r.folderIds = JSON.stringify(video.folderIds || []);
+            r.parts = JSON.stringify(video.parts || []);
+          })
+        );
       }
     }
+
+    await writer.batch(...batchOperations);
   });
 }
 
@@ -138,12 +155,10 @@ export async function getSyncMeta(folderId: number): Promise<FolderSyncMeta | nu
   const meta = results[0];
   return {
     folderId: meta.folderId,
-    lastSyncTime: meta.lastSyncTime instanceof Date
-      ? meta.lastSyncTime.getTime()
-      : meta.lastSyncTime as number,
+    lastSyncTime: meta.lastSyncTime ? meta.lastSyncTime.getTime() : 0,
     latestBvid: meta.latestBvid,
     mediaCount: meta.mediaCount,
-    needsFullSync: meta.needsFullSync,
+    needsFullSync: !!meta.needsFullSync,
     lastSyncedPage: meta.lastSyncedPage,
   };
 }
@@ -156,9 +171,12 @@ export async function updateSyncMeta(meta: FolderSyncMeta): Promise<void> {
     const results = await syncMetaCollection.query(
       Q.where('folder_id', meta.folderId),
     ).fetch();
+    
+    const syncTime = new Date(meta.lastSyncTime);
+    
     if (results.length > 0) {
       await results[0].update(r => {
-        r.lastSyncTime = meta.lastSyncTime;
+        r.lastSyncTime = syncTime;
         r.latestBvid = meta.latestBvid;
         r.mediaCount = meta.mediaCount;
         r.needsFullSync = meta.needsFullSync || false;
@@ -167,7 +185,7 @@ export async function updateSyncMeta(meta: FolderSyncMeta): Promise<void> {
     } else {
       await syncMetaCollection.create(r => {
         r.folderId = meta.folderId;
-        r.lastSyncTime = meta.lastSyncTime;
+        r.lastSyncTime = syncTime;
         r.latestBvid = meta.latestBvid;
         r.mediaCount = meta.mediaCount;
         r.needsFullSync = meta.needsFullSync || false;
@@ -186,12 +204,10 @@ export async function getAllSyncMetaMap(): Promise<Record<number, FolderSyncMeta
   for (const r of records) {
     map[r.folderId] = {
       folderId: r.folderId,
-      lastSyncTime: r.lastSyncTime instanceof Date
-        ? r.lastSyncTime.getTime()
-        : r.lastSyncTime as number,
+      lastSyncTime: r.lastSyncTime ? r.lastSyncTime.getTime() : 0,
       latestBvid: r.latestBvid,
       mediaCount: r.mediaCount,
-      needsFullSync: r.needsFullSync,
+      needsFullSync: !!r.needsFullSync,
       lastSyncedPage: r.lastSyncedPage,
     };
   }
@@ -206,30 +222,33 @@ export async function getAllSyncMetaMap(): Promise<Record<number, FolderSyncMeta
 export async function removeFolderIdFromAllVideos(folderId: number): Promise<void> {
   // 先读取所有包含该 folderId 的视频（在写事务外读取）
   const allVideos = await getGlobalIndex();
-  const affected = allVideos.filter(v => v.folderIds?.includes(folderId));
+  const affectedBvids = allVideos.filter(v => v.folderIds?.includes(folderId)).map(v => v.bvid);
 
-  if (affected.length === 0) return;
+  if (affectedBvids.length === 0) return;
 
   await database.write(async writer => {
-    for (const video of affected) {
-      const records = await globalVideoCollection.query(
-        Q.where('bvid', video.bvid),
-      ).fetch();
-      if (records.length > 0) {
-        const record = records[0];
-        const currentFolderIds: number[] = (() => {
-          try { return JSON.parse(record.folderIds || '[]'); } catch { return []; }
-        })();
-        const newFolderIds = currentFolderIds.filter(id => id !== folderId);
-        if (newFolderIds.length === 0) {
-          await record.markAsDeleted();
-        } else {
-          await record.update(r => {
+    const records = await globalVideoCollection.query(
+      Q.where('bvid', Q.oneOf(affectedBvids))
+    ).fetch();
+
+    const batchOperations: any[] = [];
+    
+    for (const record of records) {
+      const currentFolderIds: number[] = (() => {
+        try { return JSON.parse(record.folderIds || '[]'); } catch { return []; }
+      })();
+      const newFolderIds = currentFolderIds.filter(id => id !== folderId);
+      if (newFolderIds.length === 0) {
+        batchOperations.push(record.prepareMarkAsDeleted());
+      } else {
+        batchOperations.push(
+          record.prepareUpdate(r => {
             r.folderIds = JSON.stringify(newFolderIds);
-          });
-        }
+          })
+        );
       }
     }
+    await writer.batch(...batchOperations);
   });
 }
 

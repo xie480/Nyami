@@ -165,7 +165,8 @@ export const SettingsScreen = ({ navigation }: any) => {
       return;
     }
     // 传入 hiddenFolderIds，仅同步用户选中的收藏夹
-    startSync(userId, hiddenFolderIds, true);
+    // 默认进行增量同步，除非需要强制全量同步，传入 force 参数为 true
+    startSync(userId, hiddenFolderIds);
   };
 
   const s = StyleSheet.create({
@@ -200,7 +201,7 @@ export const SettingsScreen = ({ navigation }: any) => {
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title="设置" showBack noBorder />
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-      <Text style={s.section}>登录</Text>
+      <Text style={s.section}>账户</Text>
       <View style={[s.group, s.cookieBox]}>
         {loggedIn && userInfo ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -217,7 +218,7 @@ export const SettingsScreen = ({ navigation }: any) => {
           <Text style={s.saveText} onPress={triggerLogin}>点击登录</Text>
         )}
       </View>
-        <Text style={s.section}>外观</Text>
+        <Text style={s.section}>UI</Text>
         {isGlass && (
           <>
             <View style={s.group}>
@@ -322,7 +323,6 @@ export const SettingsScreen = ({ navigation }: any) => {
         <View style={s.group}>
           <ListItem
             title="可见收藏夹偏好"
-            subtitle={`已选 ${(favoriteService.getGlobalIndex().length > 0 ? globalIndexCount : '...')} 个视频参与索引`}
             onPress={() => navigation.navigate('VisibleFolders')}
             showArrow
           />
@@ -337,7 +337,7 @@ export const SettingsScreen = ({ navigation }: any) => {
                 : syncStatus === 'error'
                 ? `同步失败: ${syncError}`
                 : syncStatus === 'done'
-                ? '同步完成'
+                ? `同步完成 (${globalIndexCount}/${progressData?.totalVideos ?? globalIndexCount} 视频)`
                 : `当前已索引 ${globalIndexCount} 个视频`
             }
             onPress={syncStatus === 'syncing' ? undefined : onSyncGlobalIndex}
@@ -358,7 +358,7 @@ export const SettingsScreen = ({ navigation }: any) => {
                   style={{
                     height: '100%',
                     backgroundColor: t.colors.primary,
-                    width: progressData ? `${(progressData.completedTasks / Math.max(1, progressData.totalTasks)) * 100}%` : '0%',
+                    width: progressData ? `${(progressData.processedVideos / Math.max(1, progressData.totalVideos)) * 100}%` : '0%',
                   }}
                 />
               </View>

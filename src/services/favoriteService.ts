@@ -17,6 +17,7 @@ import {
   removeFolderIdFromAllVideos,
 } from '../db/operations';
 import { Mutex } from '../utils/mutex';
+import { AuthRequiredError } from '../core/errors';
 
 export interface SyncProgressEvent {
   completedTasks: number;
@@ -72,7 +73,7 @@ export const favoriteService = {
   async getVideos(
     mediaId: number,
     pn = 1,
-    ps = 30,
+    ps = 20,
     force = false,
     signal?: AbortSignal,
   ): Promise<PageResult<FavoriteVideo>> {
@@ -91,6 +92,8 @@ export const favoriteService = {
             .filter(m => m.attr === 0)
             .map(trimFavoriteVideo),
           hasMore: data.has_more || false,
+          // rawCount 为 API 原始返回的记录数（在过滤失效视频前），用于分页判断
+          rawCount: (data.medias || []).length,
         };
       },
       true,
@@ -134,6 +137,9 @@ export const favoriteService = {
       let folders = await this.getFolders(uid, force, signal);
       folders = folders.filter(f => !hiddenFolderIds.includes(f.id));
 
+      // 确保内存缓存与数据库一致，避免 storedCount 计算偏差导致误触发全量同步
+      await loadGlobalIndexCache();
+
       // 从 WatermelonDB 加载同步元数据
       const syncMetaMap = await getAllSyncMetaMap();
       const now = Date.now();
@@ -145,6 +151,10 @@ export const favoriteService = {
       let totalTasks = 0;
       let processedVideos = 0;
       let totalVideos = 0;
+      // Compute total expected video count based on all visible folders
+      totalVideos = folders.reduce((sum, f) => sum + f.mediaCount, 0);
+      // Initialize processed video count with already indexed videos
+      processedVideos = globalIndexCache.length;
 
       const reportProgress = () => {
         if (onProgress) {
@@ -205,35 +215,29 @@ export const favoriteService = {
         } else if (folder.mediaCount === meta.mediaCount) {
           plans.push({ folder, mode: 'skip', cursorBvid: null });
         } else if (folder.mediaCount > meta.mediaCount) {
-          plans.push({
-            folder,
-            mode: 'incremental',
-            cursorBvid: meta.latestBvid || null,
-          });
+          // Determine if incremental sync is safe. If local cache is missing a significant number of videos,
+          // fall back to full sync to avoid losing data (e.g., after a previous incomplete sync).
+          const localCount = globalIndexCache.filter(v => v.folderIds?.includes(folder.id)).length;
+          const missingCount = folder.mediaCount - localCount;
+          if (missingCount > 20) { // threshold: more than one page of videos missing
+            console.log(`[favoriteService] 文件夹 ${folder.id} 本地数据缺失 (${localCount}/${folder.mediaCount})，使用全量同步`);
+            plans.push({ folder, mode: 'full', cursorBvid: null });
+          } else {
+            plans.push({
+              folder,
+              mode: 'incremental',
+              cursorBvid: meta.latestBvid || null,
+            });
+          }
         } else {
           // mediaCount 减少 → 标记需要全量校准，本次跳过
           dirtyCount++;
           syncMetaMap[folder.id] = { ...meta, needsFullSync: true };
           await updateSyncMeta(syncMetaMap[folder.id]);
-          console.log(
-            `[favoriteService] 文件夹 ${folder.id} 的 mediaCount 从 ` +
-              `${meta.mediaCount} 减少到 ${folder.mediaCount}，标记为 needsFullSync`,
-          );
-          plans.push({ folder, mode: 'skip', cursorBvid: null });
         }
-      }
+     }
 
-      // 估算总需拉取视频数（用于进度条）
-      for (const p of plans) {
-        if (p.mode === 'full') {
-          totalVideos += p.folder.mediaCount;
-        } else if (p.mode === 'incremental') {
-          const meta = syncMetaMap[p.folder.id];
-          if (meta) {
-            totalVideos += p.folder.mediaCount - meta.mediaCount;
-          }
-        }
-      }
+      // totalVideos already calculated based on all visible folders above; no additional accumulation needed.
 
       const activePlans = plans.filter(p => p.mode !== 'skip');
       totalTasks = activePlans.length;
@@ -248,6 +252,11 @@ export const favoriteService = {
         try {
           // 全量模式：先清除该文件夹的旧数据
           if (mode === 'full') {
+            // 计算即将被删除的旧视频数量，并从已处理计数中扣除
+            const removedCount = globalIndexCache.filter(v => v.folderIds?.includes(folder.id)).length;
+            processedVideos = Math.max(0, processedVideos - removedCount);
+            // 报告进度更新（已处理视频数已调整）
+            reportProgress();
             await removeFolderIdFromAllVideos(folder.id);
           }
 
@@ -261,10 +270,10 @@ export const favoriteService = {
           while (hasMore && !folderDone && !signal?.aborted) {
             let pageRetries = 0;
             try {
-              // 2-5 秒随机抖动，降低限流概率
-              await new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 2000));
+              // 2秒抖动，降低限流概率
+              await new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000)));
               const pageRes = await executeWithBackoff(() =>
-                this.getVideos(folder.id, page, 30, force, signal),
+                this.getVideos(folder.id, page, 20, force, signal),
               );
 
               // 记录首页第一条 bvid（用于全量后更新 latestBvid）
@@ -297,10 +306,16 @@ export const favoriteService = {
               processedVideos += pageRes.list.length;
               reportProgress();
 
-              hasMore = pageRes.hasMore;
+              // Continue fetching if API indicates more pages, or if we received a full page (fallback for APIs that may omit hasMore when exactly pageSize items returned)
+              // 优先使用 API 的 hasMore；若未提供，用原始记录数判断是否可能还有下一页
+              hasMore = pageRes.hasMore || pageRes.rawCount === 20;
               page++;
             } catch (err: any) {
               console.warn(`[favoriteService] 文件夹 ${folder.id} 第 ${page} 页拉取失败:`, err.message);
+              if (err instanceof AuthRequiredError) {
+                console.warn(`[favoriteService] 鉴权错误，终止同步`);
+                throw err;
+              }
               if (err.name === 'RateLimitError' || err.message?.includes('412') || err.message?.includes('429')) {
                 console.warn(`[favoriteService] 触发限流，暂停 5 分钟后重试`);
                 await new Promise(r => setTimeout(r, 5 * 60 * 1000));
@@ -319,12 +334,10 @@ export const favoriteService = {
 
           if (!failedFolders.has(folder.id)) {
             // 同步完成后更新同步元数据
-            const finalVideos = await this.getVideos(folder.id, 1, 1000, true);
-            const all = finalVideos.list;
             syncMetaMap[folder.id] = {
               folderId: folder.id,
               lastSyncTime: now,
-              latestBvid: firstPageFirstBvid || (all.length > 0 ? all[0].bvid : null),
+              latestBvid: firstPageFirstBvid || cursorBvid || null,
               mediaCount: folder.mediaCount,
               needsFullSync: false,
               lastSyncedPage: page - 1,
@@ -334,6 +347,9 @@ export const favoriteService = {
           }
         } catch (e: any) {
           console.warn(`[favoriteService] 文件夹 ${folder.id} 同步异常:`, e.message);
+          if (e instanceof AuthRequiredError) {
+            throw e;
+          }
           failedFolders.add(folder.id);
         }
         completedTasks++;
