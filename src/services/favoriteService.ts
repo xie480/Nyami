@@ -116,7 +116,9 @@ export const favoriteService = {
    *
    * 同步策略：
    * - 新收藏夹 / force 模式 / needsFullSync 标记 → 全量拉取
-   * - mediaCount 增加 → 增量拉取（游标 bvid 之后的新视频）
+   * - mediaCount 增加 → 始终执行增量拉取（游标 bvid 之后的新视频）。
+   *   注：已移除基于未同步数量阈值自动回退全量同步的机制，以保证增量同步的纯粹性。
+   *   如需全量同步（例如本地数据损坏或缺失），请通过 UI 手动触发强制全量同步（force=true）。
    * - mediaCount 减少 → 标记 needsFullSync，本次跳过
    * - mediaCount 不变 → 跳过
    *
@@ -215,20 +217,11 @@ export const favoriteService = {
         } else if (folder.mediaCount === meta.mediaCount) {
           plans.push({ folder, mode: 'skip', cursorBvid: null });
         } else if (folder.mediaCount > meta.mediaCount) {
-          // Determine if incremental sync is safe. If local cache is missing a significant number of videos,
-          // fall back to full sync to avoid losing data (e.g., after a previous incomplete sync).
-          const localCount = globalIndexCache.filter(v => v.folderIds?.includes(folder.id)).length;
-          const missingCount = folder.mediaCount - localCount;
-          if (missingCount > 20) { // threshold: more than one page of videos missing
-            console.log(`[favoriteService] 文件夹 ${folder.id} 本地数据缺失 (${localCount}/${folder.mediaCount})，使用全量同步`);
-            plans.push({ folder, mode: 'full', cursorBvid: null });
-          } else {
-            plans.push({
-              folder,
-              mode: 'incremental',
-              cursorBvid: meta.latestBvid || null,
-            });
-          }
+          plans.push({
+            folder,
+            mode: 'incremental',
+            cursorBvid: meta.latestBvid || null,
+          });
         } else {
           // mediaCount 减少 → 标记需要全量校准，本次跳过
           dirtyCount++;

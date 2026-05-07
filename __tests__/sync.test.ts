@@ -1,6 +1,6 @@
 import { favoriteService } from '../src/services/favoriteService';
-import { storage } from '../src/core/storage';
 import { biliApi } from '../src/services/biliApi';
+import * as dbOperations from '../src/db/operations';
 
 // Mock dependencies
 jest.mock('../src/services/biliApi', () => ({
@@ -18,48 +18,26 @@ jest.mock('../src/core/cache', () => ({
   }
 }));
 
-/** Mock storage implementation that tracks folder shards and rebuilds a global index. */
-jest.mock('../src/core/storage', () => {
-  // In‑memory storage for folder shards
-  const folderShards: Record<number, any[]> = {};
+jest.mock('../src/db/operations', () => {
+  let globalVideos: any[] = [];
+  const syncMetaMap: Record<number, any> = {};
 
-  const storage = {
-    setJSON: jest.fn(),
-    getJSON: jest.fn(),
-    delete: jest.fn(),
-    getSyncMetaMap: jest.fn(() => ({})),
-    setSyncMetaMap: jest.fn(),
-    updateSyncMeta: jest.fn(),
-    // Store a folder's shard
-    setFolderIndex: (folderId: number, videos: any[]) => {
-      folderShards[folderId] = videos;
-    },
-    // Retrieve a folder's shard
-    getFolderIndex: (folderId: number) => folderShards[folderId] || [],
-    // Rebuild global index by merging all stored shards and deduplicating by bvid
-    rebuildGlobalCache: () => {
-      const videoMap = new Map<string, any>();
-      Object.values(folderShards).forEach((videos) => {
-        videos.forEach((v) => {
-          if (!videoMap.has(v.bvid)) {
-            videoMap.set(v.bvid, { ...v });
-          } else {
-            const existing = videoMap.get(v.bvid);
-            // Merge simple fields (for the test only deduplication matters)
-            existing.title = v.title;
-            existing.cover = v.cover;
-            existing.duration = v.duration;
-            existing.pubtime = v.pubtime;
-            existing.upper = v.upper;
-            existing.attr = v.attr;
-          }
-        });
-      });
-      storage.setJSON('globalIndex', Array.from(videoMap.values()));
-    },
+  return {
+    batchUpsertGlobalVideos: jest.fn(async (videos) => {
+      globalVideos.push(...videos);
+    }),
+    getGlobalIndex: jest.fn(async () => globalVideos),
+    getAllSyncMetaMap: jest.fn(async () => syncMetaMap),
+    updateSyncMeta: jest.fn(async (meta) => {
+      syncMetaMap[meta.folderId] = meta;
+    }),
+    clearAllIndexes: jest.fn(async () => {
+      globalVideos = [];
+    }),
+    removeFolderIdFromAllVideos: jest.fn(async (folderId) => {
+      globalVideos = globalVideos.filter(v => !v.folderIds?.includes(folderId));
+    }),
   };
-
-  return { storage };
 });
 
 describe('syncGlobalIndex', () => {
@@ -104,14 +82,54 @@ describe('syncGlobalIndex', () => {
       progressEvents.push(event);
     });
     
-    expect(storage.setJSON).toHaveBeenCalledWith('globalIndex', expect.any(Array));
-    const savedVideos = (storage.setJSON as jest.Mock).mock.calls[0][1];
-    expect(savedVideos.length).toBe(30); // 25 + 5
+    expect(dbOperations.batchUpsertGlobalVideos).toHaveBeenCalled();
+    // 25 + 5 = 30 videos should be upserted in total
+    const upsertCalls = (dbOperations.batchUpsertGlobalVideos as jest.Mock).mock.calls;
+    const totalUpserted = upsertCalls.reduce((sum, call) => sum + call[0].length, 0);
+    expect(totalUpserted).toBe(30);
     
     expect(progressEvents.length).toBeGreaterThan(0);
     const lastEvent = progressEvents[progressEvents.length - 1];
     expect(lastEvent.completedTasks).toBe(lastEvent.totalTasks);
     expect(lastEvent.processedVideos).toBe(30);
     expect(lastEvent.totalVideos).toBe(30);
+  });
+
+  it('should always use incremental sync when mediaCount increases, regardless of missing count', async () => {
+    // Setup mock data
+    (biliApi.getFavoriteFolders as jest.Mock).mockResolvedValue({
+      list: [
+        { id: 333, title: 'Folder 3', media_count: 100 }
+      ]
+    });
+
+    // Mock sync meta to simulate an existing folder with fewer videos
+    (dbOperations.getAllSyncMetaMap as jest.Mock).mockResolvedValueOnce({
+      333: {
+        folderId: 333,
+        mediaCount: 50, // 50 videos missing (100 - 50 = 50 > 20 threshold)
+        latestBvid: 'BV_OLD',
+        needsFullSync: false
+      }
+    });
+
+    (biliApi.getFavoriteVideos as jest.Mock).mockImplementation(async (mediaId, pn) => {
+      if (pn === 1) {
+        return {
+          has_more: true,
+          medias: Array.from({ length: 20 }).map((_, i) => ({ id: i, bvid: i === 19 ? 'BV_OLD' : `BV_NEW_${i}`, title: `New Video ${i}`, attr: 0 }))
+        };
+      }
+      return { has_more: false, medias: [] };
+    });
+
+    await favoriteService.syncGlobalIndex('test_uid', [], false);
+
+    // Should not call removeFolderIdFromAllVideos (which is called in full sync)
+    expect(dbOperations.removeFolderIdFromAllVideos).not.toHaveBeenCalled();
+    
+    // Should only fetch the first page because it hits the cursor 'BV_OLD'
+    expect(biliApi.getFavoriteVideos).toHaveBeenCalledTimes(1);
+    expect(biliApi.getFavoriteVideos).toHaveBeenCalledWith(333, 1, 20, undefined);
   });
 });
