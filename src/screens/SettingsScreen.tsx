@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, StatusBar, Image, Dimensions } from 'react-native';
+import { View, StatusBar, Image, Dimensions, Linking } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   Text, ScrollView, StyleSheet, Alert,
@@ -34,9 +34,9 @@ const QUALITY_OPTIONS: Array<{
 }> = [
   { key: 'hires', title: 'HI-FES 无损', subtitle: '无损音频 · 最高音质', requiresVip: true },
   { key: 'dolby', title: '杜比全景声', subtitle: '沉浸式环绕声体验', requiresVip: true },
-  { key: 'high', title: '高音质', subtitle: '192 kbps · 约 5.5MB / 4 分钟' },
-  { key: 'medium', title: '标准', subtitle: '132 kbps · 约 3.8MB / 4 分钟' },
-  { key: 'low', title: '省流', subtitle: '64 kbps · 约 1.9MB / 4 分钟' },
+  { key: 'high', title: '高音质', subtitle: '192 kbps' },
+  { key: 'medium', title: '标准', subtitle: '132 kbps' },
+  { key: 'low', title: '省流', subtitle: '64 kbps' },
 ];
 
 const THEME_OPTIONS: Array<{ key: ThemeMode; title: string }> = [
@@ -434,6 +434,13 @@ export const SettingsScreen = ({ navigation }: any) => {
           <ListItem title="版本号" right={<Text style={{ color: t.colors.textSub }}>v1.0.0</Text>} />
           <View style={s.sep} />
           <ListItem title="开源协议" subtitle="本应用仅供个人学习使用" />
+          <View style={s.sep} />
+          <ListItem
+            title="项目 Github 地址"
+            subtitle="如果觉得好用的话，请给个Star好吗~"
+            onPress={() => Linking.openURL('https://github.com/xie480/Nyami.git')}
+            showArrow
+          />
         </View>
       </ScrollView>
     </View>

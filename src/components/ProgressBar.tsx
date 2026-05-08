@@ -10,10 +10,11 @@ const AnimatedLinearGradient = Animated.createAnimatedComponent(LinearGradient);
 interface Props {
   progress: number;        // 0~1
   onSeekStart?: () => void;
+  onSeekUpdate?: (p: number) => void;
   onSeekEnd?: (p: number) => void;
 }
 
-export const ProgressBar: React.FC<Props> = ({ progress, onSeekStart, onSeekEnd }) => {
+export const ProgressBar: React.FC<Props> = ({ progress, onSeekStart, onSeekUpdate, onSeekEnd }) => {
   const t = useTheme();
   const [width, setWidth] = useState(0);
 
@@ -31,6 +32,7 @@ export const ProgressBar: React.FC<Props> = ({ progress, onSeekStart, onSeekEnd 
     .onUpdate((e) => {
       if (width === 0) return;
       dragProgress.value = Math.max(0, Math.min(1, e.x / width));
+      if (onSeekUpdate) runOnJS(onSeekUpdate)(dragProgress.value);
     })
     .onEnd(() => {
       isDragging.value = false;

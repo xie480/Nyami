@@ -1,4 +1,4 @@
-import { schemaMigrations, createTable } from '@nozbe/watermelondb/Schema/migrations';
+import { schemaMigrations, createTable, addColumns } from '@nozbe/watermelondb/Schema/migrations';
 
 export default schemaMigrations({
   migrations: [
@@ -32,6 +32,7 @@ export default schemaMigrations({
             { name: 'cover', type: 'string', isOptional: true },
             { name: 'duration', type: 'number', isOptional: true },
             { name: 'publish_time', type: 'number', isOptional: true, isIndexed: true },
+            { name: 'fav_time', type: 'number', isOptional: true, isIndexed: true },
             { name: 'random_weight', type: 'number', isOptional: true, isIndexed: true },
             { name: 'is_cached', type: 'boolean' },
             { name: 'is_deleted', type: 'boolean', isIndexed: true },
@@ -53,6 +54,17 @@ export default schemaMigrations({
             { name: 'failed_reason', type: 'string', isOptional: true },
             { name: 'started_at', type: 'number' },
             { name: 'finished_at', type: 'number', isOptional: true },
+          ],
+        }),
+      ],
+    },
+    {
+      toVersion: 3,
+      steps: [
+        addColumns({
+          table: 'video_meta',
+          columns: [
+            { name: 'fav_time', type: 'number', isOptional: true, isIndexed: true },
           ],
         }),
       ],

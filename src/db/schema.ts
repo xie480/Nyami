@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 2,
+  version: 3,
   tables: [
     tableSchema({
       name: 'playlist_meta',
@@ -30,6 +30,7 @@ export const schema = appSchema({
         { name: 'cover', type: 'string', isOptional: true },
         { name: 'duration', type: 'number', isOptional: true },
         { name: 'publish_time', type: 'number', isOptional: true, isIndexed: true },
+        { name: 'fav_time', type: 'number', isOptional: true, isIndexed: true },
         { name: 'random_weight', type: 'number', isOptional: true, isIndexed: true },
         { name: 'is_cached', type: 'boolean' },
         { name: 'is_deleted', type: 'boolean', isIndexed: true },

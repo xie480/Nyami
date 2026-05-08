@@ -1,5 +1,5 @@
 // src/components/PlaylistPanel.tsx (refactored)
-import React, { useCallback, memo, useState, useRef } from 'react';
+import React, { useCallback, memo, useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo } from 'react-native';
 import TrackPlayer from 'react-native-track-player';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -136,6 +136,23 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     ),
     [t.colors, expandedBvid, handlePress, handlePartPress, currentBvid]
   );
+
+  // 当播放模式切换（队列重排）或当前歌曲变化时，自动平滑滚动到当前播放歌曲位置
+  useEffect(() => {
+    if (visible && currentBvid && queue.length > 0) {
+      const idx = queue.findIndex(v => v.bvid === currentBvid);
+      if (idx >= 0) {
+        const timer = setTimeout(() => {
+          listRef.current?.scrollToIndex({
+            index: idx,
+            animated: true,
+            viewPosition: 0.5,
+          });
+        }, 350);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [queue, currentBvid, visible]);
 
   const handleScrollToIndexFailed = useCallback((info: any) => {
     const timer = setTimeout(() => {

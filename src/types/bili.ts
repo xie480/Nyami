@@ -20,6 +20,7 @@ export interface BiliFavoriteVideoMedia {
   duration: number;
   page: number;
   pubtime: number;
+  fav_time: number;
   attr: number; // 0 为正常，其他值为失效
   upper: { mid: number; name: string };
 }

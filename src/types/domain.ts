@@ -26,6 +26,7 @@ export interface FavoriteVideo {
   duration: number;
   page: number;
   pubtime: number;
+  favTime: number;
   upper: { mid: number; name: string };
   attr: number;
   folderIds?: number[];

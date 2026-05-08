@@ -49,6 +49,7 @@ function mapVideoMetaToFavoriteVideo(v: VideoMeta): FavoriteVideo {
     duration: v.duration || 0,
     page: 1,
     pubtime: v.publishTime || 0,
+    favTime: v.favTime || 0,
     upper: { mid: 0, name: v.author || '' },
     attr: 0,
     folderIds: [parseInt(v.playlistId, 10)],

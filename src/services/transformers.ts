@@ -23,6 +23,7 @@ export function trimFavoriteVideo(m: BiliFavoriteVideoMedia): FavoriteVideo {
     duration: m.duration,
     page: m.page,
     pubtime: m.pubtime,
+    favTime: m.fav_time,
     upper: {
       mid: m.upper?.mid ?? 0,
       name: m.upper?.name ?? '未知UP主',

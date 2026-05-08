@@ -11,6 +11,7 @@ export class VideoMeta extends Model {
   @field('cover') cover!: string | null;
   @field('duration') duration!: number | null;
   @field('publish_time') publishTime!: number | null;
+  @field('fav_time') favTime!: number | null;
   @field('random_weight') randomWeight!: number | null;
   @field('is_cached') isCached!: boolean;
   @field('is_deleted') isDeleted!: boolean;

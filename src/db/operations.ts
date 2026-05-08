@@ -32,6 +32,7 @@ export async function upsertVideosBatch(playlistId: string, videos: FavoriteVide
             v.author = video.upper?.name || null;
             v.duration = video.duration;
             v.publishTime = video.pubtime;
+            v.favTime = video.favTime;
             v.isDeleted = false; // 恢复软删除
             v.extraJson = JSON.stringify(video.parts || []);
           })
@@ -46,6 +47,7 @@ export async function upsertVideosBatch(playlistId: string, videos: FavoriteVide
             v.cover = video.cover;
             v.duration = video.duration;
             v.publishTime = video.pubtime;
+            v.favTime = video.favTime;
             v.randomWeight = Math.random(); // 预生成随机权重
             v.isCached = false;
             v.isDeleted = false;
@@ -263,7 +265,7 @@ export async function softDeleteMissingVideos(playlistId: string, remoteVideoIds
 export async function getAllValidVideos() {
   return await videoMetaCollection.query(
     Q.where('is_deleted', false),
-    Q.sortBy('publish_time', Q.desc)
+    Q.sortBy('fav_time', Q.desc)
   ).fetch();
 }
 
@@ -274,7 +276,7 @@ export async function getVideosByPlaylistId(playlistId: string) {
   return await videoMetaCollection.query(
     Q.where('playlist_id', playlistId),
     Q.where('is_deleted', false),
-    Q.sortBy('publish_time', Q.desc)
+    Q.sortBy('fav_time', Q.desc)
   ).fetch();
 }
 
