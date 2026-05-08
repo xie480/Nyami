@@ -5,13 +5,13 @@ import {
   StyleSheet,
   Animated,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { BlurView } from '@react-native-community/blur';
 import { useTheme } from '../theme';
 import { useSettingsStore } from '../store/settingsStore';
 import { useUIStore } from '../store/uiStore';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const TRANSITION_DURATION = 50;
 
@@ -36,7 +36,7 @@ export const GlassBackground: React.FC = () => {
   const customBackgroundImage = useSettingsStore((s) => s.customBackgroundImage);
   const glassBlurAmount = useSettingsStore((s) => s.glassBlurAmount);
   const setGlassTransitionComplete = useUIStore((s) => s.setGlassTransitionComplete);
-  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
 
   const isGlass = !!glass;
 
@@ -80,14 +80,14 @@ export const GlassBackground: React.FC = () => {
       {hasCustomBg ? (
         <Image
           source={{ uri: activeBg! }}
-          style={StyleSheet.absoluteFillObject}
+          style={[StyleSheet.absoluteFillObject, { width, height }]}
           resizeMode="cover"
           blurRadius={effectiveBlur}
         />
       ) : isGlass ? (
         <Image
           source={isDark ? require('../../resource/dark.jpg') : require('../../resource/light.jpg')}
-          style={StyleSheet.absoluteFillObject}
+          style={[StyleSheet.absoluteFillObject, { width, height }]}
           resizeMode="cover"
           blurRadius={effectiveBlur}
         />
@@ -131,7 +131,7 @@ export const GlassBackground: React.FC = () => {
   );
 
   return (
-    <View style={[StyleSheet.absoluteFillObject, { top: insets.top, bottom: insets.bottom }]} pointerEvents="none">
+    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
       {nonGlassBase}
       {stableBase}
       {enhancedOverlay}
