@@ -12,14 +12,34 @@
  * - 释放时一次性提交最终频率和增益值
  * - curvePoints 使用 useMemo 在 filters 变化时重新计算
  */
-import React, { useRef, useMemo, useCallback } from 'react';
+import React, { useRef, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   PanResponder,
   LayoutChangeEvent,
+  Animated,
 } from 'react-native';
+
+// ========== 轻量级 throttle 实现 ==========
+function throttle<T extends (...args: any[]) => void>(fn: T, delay: number): T {
+  let lastTime = 0;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  return ((...args: any[]) => {
+    const now = Date.now();
+    if (now - lastTime >= delay) {
+      lastTime = now;
+      fn(...args);
+    } else if (!timeoutId) {
+      timeoutId = setTimeout(() => {
+        lastTime = Date.now();
+        timeoutId = null;
+        fn(...args);
+      }, delay - (now - lastTime));
+    }
+  }) as T;
+}
 import { useTheme } from '../../theme';
 import { useEQStore, PEQFilter, FilterType } from '../../store/eqStore';
 
@@ -307,19 +327,38 @@ const DraggableNode: React.FC<DraggableNodeProps> = ({
   // 是否正在拖动
   const isDragging = useRef(false);
 
+  // 动画值
+  const animX = useRef(new Animated.Value(freqToX(filter.frequency))).current;
+  const animY = useRef(new Animated.Value(gainToY(filter.gain))).current;
+
   // 存储回调引用以避免闭包过期
   const onCommitRef = useRef(onCommit);
   const onPressRef = useRef(onPress);
   onCommitRef.current = onCommit;
   onPressRef.current = onPress;
 
-  // 同步 prop 变化到 ref（当外部 filter 变化时）
-  if (!isDragging.current) {
-    currentX.current = freqToX(filter.frequency);
-    currentY.current = gainToY(filter.gain);
-    lastCommittedFreq.current = filter.frequency;
-    lastCommittedGain.current = filter.gain;
-  }
+  const throttledCommit = useRef(
+    throttle((freq: number, gain: number) => {
+      onCommitRef.current(freq, gain);
+    }, 50)
+  ).current;
+
+  // 同步 prop 变化到 ref 和动画值（当外部 filter 变化时）
+  useEffect(() => {
+    if (!isDragging.current) {
+      const newX = freqToX(filter.frequency);
+      const newY = gainToY(filter.gain);
+      currentX.current = newX;
+      currentY.current = newY;
+      lastCommittedFreq.current = filter.frequency;
+      lastCommittedGain.current = filter.gain;
+      
+      Animated.parallel([
+        Animated.spring(animX, { toValue: newX, useNativeDriver: false, friction: 8, tension: 100 }),
+        Animated.spring(animY, { toValue: newY, useNativeDriver: false, friction: 8, tension: 100 }),
+      ]).start();
+    }
+  }, [filter.frequency, filter.gain, freqToX, gainToY, animX, animY]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -330,17 +369,23 @@ const DraggableNode: React.FC<DraggableNodeProps> = ({
         startPos.current = { x: currentX.current, y: currentY.current };
       },
       onPanResponderMove: (_, gesture) => {
-        // 拖动中仅更新本地 ref，不触发任何状态更新
+        // 拖动中更新本地 ref 和动画值
         const newX = startPos.current.x + gesture.dx;
         const newY = startPos.current.y + gesture.dy;
-        currentX.current = Math.max(
-          freqToX(FREQ_MIN),
-          Math.min(freqToX(FREQ_MAX), newX),
-        );
-        currentY.current = Math.max(
-          gainToY(GAIN_MAX),
-          Math.min(gainToY(GAIN_MIN), newY),
-        );
+        
+        const clampedX = Math.max(freqToX(FREQ_MIN), Math.min(freqToX(FREQ_MAX), newX));
+        const clampedY = Math.max(gainToY(GAIN_MAX), Math.min(gainToY(GAIN_MIN), newY));
+        
+        currentX.current = clampedX;
+        currentY.current = clampedY;
+        
+        animX.setValue(clampedX);
+        animY.setValue(clampedY);
+
+        // 节流更新 DSP
+        const freq = xToFreq(clampedX);
+        const gain = yToGain(clampedY);
+        throttledCommit(freq, gain);
       },
       onPanResponderRelease: () => {
         isDragging.current = false;
@@ -368,12 +413,12 @@ const DraggableNode: React.FC<DraggableNodeProps> = ({
   ).current;
 
   return (
-    <View
+    <Animated.View
       style={[
         styles.nodeContainer,
         {
-          left: currentX.current - NODE_SIZE / 2,
-          top: currentY.current - NODE_SIZE / 2,
+          left: Animated.subtract(animX, NODE_SIZE / 2),
+          top: Animated.subtract(animY, NODE_SIZE / 2),
         },
       ]}
       {...panResponder.panHandlers}
@@ -397,7 +442,7 @@ const DraggableNode: React.FC<DraggableNodeProps> = ({
           { backgroundColor: color },
         ]}
       />
-    </View>
+    </Animated.View>
   );
 };
 

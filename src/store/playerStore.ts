@@ -79,34 +79,45 @@ export const usePlayerStore = create<PlayerState>()(
       togglePlayMode: () => {
         const state = get();
         if (state.playMode === 'sequential') {
-          // Shuffle the queue while preserving original order
-          // Keep current track at the top
-          const currentBvid = state.currentBvid;
-          const currentTrackIndex = state.queue.findIndex(v => v.bvid === currentBvid);
+          // 立即更新 UI 状态
+          set({ playMode: 'shuffle' });
           
-          let shuffled = [...state.queue];
-          if (currentTrackIndex !== -1) {
-            const currentTrack = shuffled.splice(currentTrackIndex, 1)[0];
-            // Fisher-Yates shuffle for the rest
-            for (let i = shuffled.length - 1; i > 0; i--) {
-              const j = Math.floor(Math.random() * (i + 1));
-              [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+          // 延迟执行耗时的洗牌和 TrackPlayer 同步操作
+          setTimeout(() => {
+            const currentState = get();
+            const currentBvid = currentState.currentBvid;
+            const currentTrackIndex = currentState.queue.findIndex(v => v.bvid === currentBvid);
+            
+            let shuffled = [...currentState.queue];
+            if (currentTrackIndex !== -1) {
+              const currentTrack = shuffled.splice(currentTrackIndex, 1)[0];
+              // Fisher-Yates shuffle for the rest
+              for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+              }
+              shuffled.unshift(currentTrack);
+            } else {
+              for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+              }
             }
-            shuffled.unshift(currentTrack);
-          } else {
-            for (let i = shuffled.length - 1; i > 0; i--) {
-              const j = Math.floor(Math.random() * (i + 1));
-              [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-            }
-          }
-          
-          set({ playMode: 'shuffle', queue: shuffled });
-          // Sync with TrackPlayer
-          tpReorderQueue(shuffled, currentBvid ?? undefined).catch(console.error);
+            
+            set({ queue: shuffled });
+            // Sync with TrackPlayer
+            tpReorderQueue(shuffled, currentBvid ?? undefined).catch(console.error);
+          }, 0);
         } else {
-          // Restore original order
-          set({ playMode: 'sequential', queue: state.originalQueue });
-          tpReorderQueue(state.originalQueue, state.currentBvid ?? undefined).catch(console.error);
+          // 立即更新 UI 状态
+          set({ playMode: 'sequential' });
+          
+          // 延迟执行耗时的恢复和 TrackPlayer 同步操作
+          setTimeout(() => {
+            const currentState = get();
+            set({ queue: currentState.originalQueue });
+            tpReorderQueue(currentState.originalQueue, currentState.currentBvid ?? undefined).catch(console.error);
+          }, 0);
         }
       },
       // Insert a video to be played next after the current track

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import TrackPlayer, { useActiveTrack, usePlaybackState, State } from 'react-native-track-player';
 import { useNavigation } from '@react-navigation/native';
@@ -39,7 +39,7 @@ export const PlayerScreen = () => {
   const playMode = usePlayerStore((s) => s.playMode);
   const togglePlayMode = usePlayerStore((s) => s.togglePlayMode);
   const syncStatus = useSyncStore((s) => s.syncStatus);
-  const [isPartsExpanded, setIsPartsExpanded] = useState(false);
+  const [isPartsModalVisible, setIsPartsModalVisible] = useState(false);
 
   const isPlaying = playback.state === State.Playing;
   const isBuffering = playback.state === State.Buffering || playback.state === State.Loading;
@@ -115,6 +115,14 @@ export const PlayerScreen = () => {
     partItemText: { fontSize: t.fontSize.sm, color: textPrimary, flex: 1, marginRight: 8 },
     partItemTextActive: { color: accentPrimary, fontWeight: '600' },
     playingIndicator: { fontSize: t.fontSize.xs, color: accentPrimary },
+    modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+    modalBackground: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+    modalContent: { backgroundColor: surfaceBg, borderTopLeftRadius: t.radius.xl, borderTopRightRadius: t.radius.xl, maxHeight: '60%', paddingBottom: insets.bottom },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: t.spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: dividerColor },
+    modalTitle: { fontSize: t.fontSize.lg, fontWeight: 'bold', color: textPrimary },
+    modalScroll: { paddingHorizontal: t.spacing.md },
+    modalPartItem: { paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: dividerColor },
+    modalPartItemActive: { backgroundColor: accentPrimary + '20', borderRadius: t.radius.md },
     blurBackground: { ...StyleSheet.absoluteFillObject, zIndex: 0 },
     blurOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: isGlass ? g!.colors.glass.bg : 'transparent', zIndex: 1 },
     contentLayer: { flex: 1, zIndex: 2 },
@@ -143,7 +151,7 @@ export const PlayerScreen = () => {
           </View>
           <IconButton name="chevron-down" size={28} color={isGlass ? textPrimary : t.colors.text} onPress={() => nav.goBack()} />
         </View>
-        <ScrollView style={s.body} contentContainerStyle={{ alignItems: 'center', paddingHorizontal: t.spacing.xl }} showsVerticalScrollIndicator={false}>
+        <View style={[s.body, { alignItems: 'center', paddingHorizontal: t.spacing.xl }]}>
           <FastImage source={{ uri: track.artwork as string }} style={s.cover} />
           <View style={s.progressBox}>
             <ProgressBar progress={progress.duration > 0 ? progress.position / progress.duration : 0} onSeekEnd={onSeekEnd} />
@@ -155,7 +163,11 @@ export const PlayerScreen = () => {
           <View style={s.controls}>
             <IconButton name="skip-previous" size={36} color={isGlass ? textPrimary : t.colors.text} onPress={() => TrackPlayer.skipToPrevious()} />
             <View style={s.playBtn}>
-              <IconButton name={isPlaying ? 'pause' : 'play'} size={32} color={playTextColor} onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())} />
+              {(isBuffering || isResolving) ? (
+                <ActivityIndicator size="large" color={playTextColor} />
+              ) : (
+                <IconButton name={isPlaying ? 'pause' : 'play'} size={32} color={playTextColor} onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())} />
+              )}
             </View>
             <IconButton name="skip-next" size={36} color={isGlass ? textPrimary : t.colors.text} onPress={() => TrackPlayer.skipToNext()} />
           </View>
@@ -174,50 +186,61 @@ export const PlayerScreen = () => {
               onPress={togglePlayMode}
               disabled={syncStatus === 'syncing'}
             />
+            {hasMultiParts && (
+              <IconButton
+                name="format-list-numbered"
+                size={24}
+                color={isGlass ? textPrimary : t.colors.text}
+                onPress={() => setIsPartsModalVisible(true)}
+              />
+            )}
           </View>
-          {(isBuffering || isResolving) && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 8, opacity: 0.8 }}>
-              <ActivityIndicator size="small" color={textPrimary} />
-              <Text style={[s.time, { marginLeft: 6 }]}>加载中...</Text>
-            </View>
-          )}
-          {hasMultiParts && currentVideo && (
-            <View style={s.partsContainer}>
-              <TouchableOpacity style={s.partsHeader} onPress={() => setIsPartsExpanded(!isPartsExpanded)} activeOpacity={0.7}>
-                <Text style={s.partsHeaderText} numberOfLines={1}>
-                  {currentPart ? `P${(currentVideo.parts!.findIndex((p) => p.cid === currentCid) + 1)}/${currentVideo.parts!.length} ${currentPart.title}` : `选集 (${currentVideo.parts!.length})`}
-                </Text>
-                <Icon name={isPartsExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={textSecondary} />
-              </TouchableOpacity>
-              {isPartsExpanded && (
-                <ScrollView style={s.partsList} showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
-                  {currentVideo.parts!.map((part) => {
-                    const isActive = part.cid === currentCid;
-                    return (
-                      <TouchableOpacity
-                        key={part.cid}
-                        style={[s.partItem, isActive && s.partItemActive]}
-                        onPress={() => {
-                          playSpecificPart(currentVideo.bvid, part.cid, part.title);
-                          setIsPartsExpanded(false);
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <View style={s.partItemContent}>
-                          <Text style={[s.partItemText, isActive && s.partItemTextActive]} numberOfLines={1}>
-                            {part.title}
-                          </Text>
-                          {isActive && <Text style={s.playingIndicator}>▶</Text>}
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              )}
-            </View>
-          )}
-        </ScrollView>
+        </View>
       </View>
+
+      {hasMultiParts && currentVideo && (
+        <Modal
+          visible={isPartsModalVisible}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setIsPartsModalVisible(false)}
+        >
+          <View style={s.modalOverlay}>
+            <TouchableWithoutFeedback onPress={() => setIsPartsModalVisible(false)}>
+              <View style={s.modalBackground} />
+            </TouchableWithoutFeedback>
+            <View style={s.modalContent}>
+              <View style={s.modalHeader}>
+                <Text style={s.modalTitle}>选集 ({currentVideo.parts!.length})</Text>
+                <IconButton name="close" size={24} color={textPrimary} onPress={() => setIsPartsModalVisible(false)} />
+              </View>
+              <ScrollView style={s.modalScroll} showsVerticalScrollIndicator={false}>
+                {currentVideo.parts!.map((part) => {
+                  const isActive = part.cid === currentCid;
+                  return (
+                    <TouchableOpacity
+                      key={part.cid}
+                      style={[s.modalPartItem, isActive && s.modalPartItemActive]}
+                      onPress={() => {
+                        playSpecificPart(currentVideo.bvid, part.cid, part.title);
+                        setIsPartsModalVisible(false);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={s.partItemContent}>
+                        <Text style={[s.partItemText, isActive && s.partItemTextActive]} numberOfLines={1}>
+                          {part.title}
+                        </Text>
+                        {isActive && <Text style={s.playingIndicator}>▶</Text>}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 };
