@@ -28,6 +28,7 @@ export async function setupPlayer() {
         appKilledPlaybackBehavior:
           AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
       },
+      color: 0xFFFB7299, // B站粉色
       capabilities: [
         Capability.Play, Capability.Pause,
         Capability.SkipToNext, Capability.SkipToPrevious,

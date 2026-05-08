@@ -2,9 +2,10 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, StatusBar, Image, Dimensions, Linking } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  Text, ScrollView, StyleSheet, Alert,
+  Text, ScrollView, StyleSheet,
 } from 'react-native';
 import { Header } from '../components/Header';
+import { Dialog } from '../components/Dialog';
 import { ListItem } from '../components/ListItem';
 import { Switch } from '../components/Switch';
 import { Button } from '../components/Button';
@@ -66,6 +67,21 @@ export const SettingsScreen = ({ navigation }: any) => {
   const { syncStatus, progressData, syncError, startSync, abortSync, resetSyncState } = useSyncStore();
   const [globalIndexCount, setGlobalIndexCount] = useState(0);
 
+  const [dialogConfig, setDialogConfig] = useState<{
+    visible: boolean;
+    title?: string;
+    message?: string;
+    actions?: Array<{ text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }>;
+  }>({ visible: false });
+
+  const showDialog = useCallback((title: string, message: string, actions?: any[]) => {
+    setDialogConfig({ visible: true, title, message, actions });
+  }, []);
+
+  const hideDialog = useCallback(() => {
+    setDialogConfig(prev => ({ ...prev, visible: false }));
+  }, []);
+
   // Auth state
   const { loggedIn, userId, userInfo, isVip, logout, setUserInfo } = useAuthStore();
   const { setLoginModalVisible } = useUIStore();
@@ -73,15 +89,15 @@ export const SettingsScreen = ({ navigation }: any) => {
   // 音质选择逻辑（VIP 验证）
   const handleQualitySelect = useCallback((opt: typeof QUALITY_OPTIONS[number]) => {
     if (opt.requiresVip && !loggedIn) {
-      Alert.alert('提示', '请先登录后再选择该音质');
+      showDialog('提示', '请先登录后再选择该音质');
       return;
     }
     if (opt.requiresVip && !isVip) {
-      Alert.alert('大会员专享', `「${opt.title}」需要开通 B 站大会员后方可使用`);
+      showDialog('大会员专享', `「${opt.title}」需要开通 B 站大会员后方可使用`);
       return;
     }
     setQuality(opt.key);
-  }, [loggedIn, isVip, setQuality]);
+  }, [loggedIn, isVip, setQuality, showDialog]);
   const triggerLogin = () => setLoginModalVisible(true);
   const handleLogout = async () => {
     await logout();
@@ -155,24 +171,24 @@ export const SettingsScreen = ({ navigation }: any) => {
       if (e?.code === 'E_PICKER_CANCELLED' || e?.message === 'User cancelled image selection') {
         // 用户取消，什么都不做
       } else {
-        Alert.alert('错误', '背景图导入失败，请重试');
+        showDialog('错误', '背景图导入失败，请重试');
       }
     }
-  }, [setCustomBackgroundImage]);
+  }, [setCustomBackgroundImage, showDialog]);
 
   const handleClearBackground = useCallback(() => {
-    Alert.alert('重置背景图', '确定要恢复默认背景吗？', [
-      { text: '取消' },
+    showDialog('重置背景图', '确定要恢复默认背景吗？', [
+      { text: '取消', style: 'cancel' },
       {
         text: '重置', style: 'destructive',
         onPress: () => setCustomBackgroundImage(null),
       },
     ]);
-  }, [setCustomBackgroundImage]);
+  }, [setCustomBackgroundImage, showDialog]);
 
   const onClear = () => {
-    Alert.alert('确认清空', '将删除所有已缓存的音频文件', [
-      { text: '取消' },
+    showDialog('确认清空', '将删除所有已缓存的音频文件', [
+      { text: '取消', style: 'cancel' },
       {
         text: '清空', style: 'destructive',
         onPress: async () => { await audioCache.clearAll(); refresh(); },
@@ -182,7 +198,7 @@ export const SettingsScreen = ({ navigation }: any) => {
 
   const onSyncGlobalIndex = () => {
     if (!userId) {
-      Alert.alert('提示', '请先登录');
+      showDialog('提示', '请先登录');
       return;
     }
     // 传入 hiddenFolderIds，仅同步用户选中的收藏夹
@@ -443,6 +459,14 @@ export const SettingsScreen = ({ navigation }: any) => {
           />
         </View>
       </ScrollView>
+
+      <Dialog
+        visible={dialogConfig.visible}
+        title={dialogConfig.title}
+        message={dialogConfig.message}
+        actions={dialogConfig.actions}
+        onClose={hideDialog}
+      />
     </View>
   );
 };

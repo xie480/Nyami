@@ -4,7 +4,7 @@ import { useAuthStore } from './store/authStore';
 import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler, PermissionsAndroid, StatusBar } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, useTheme } from './theme';
@@ -53,20 +53,17 @@ const SplashScreenWithBg = withBackground(SplashScreen);
 const SyncDetailsScreenWithBg = withBackground(SyncDetailsScreen);
 
 /**
- * 安全区域适配包装器 — 仅在 Android 异形屏顶部注入 paddingTop
+ * 安全区域适配包装器
  */
 const SafeAreaWrapper: React.FC<{ children: React.ReactNode; baseBgColor: string }> = ({
   children,
   baseBgColor,
 }) => {
-  const insets = useSafeAreaInsets();
-  const androidTopPadding = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight ?? 0) : 0;
   return (
     <View
       style={{
         flex: 1,
         backgroundColor: baseBgColor,
-        paddingTop: androidTopPadding,
       }}
     >
       {children}

@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import {
-  View, Text, StyleSheet, KeyboardAvoidingView, Platform, SafeAreaView, StatusBar, Image
+  View, Text, StyleSheet, KeyboardAvoidingView, Platform, StatusBar, Image
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Button } from '../components/Button';
@@ -25,10 +25,13 @@ export const HomeScreen = ({ navigation }: any) => {
     setLoginModalVisible(true);
   };
 
+  const paddingTop = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight ?? 0) : insets.top;
+
   const s = StyleSheet.create({
     container: {
       flex: 1,
       padding: t.spacing.lg,
+      paddingTop,
       backgroundColor: t.colors.background,
       justifyContent: 'center',
       alignItems: 'center',
@@ -52,7 +55,7 @@ export const HomeScreen = ({ navigation }: any) => {
   });
 
   return (
-    <SafeAreaView style={s.container}>
+    <View style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
       <View style={s.iconWrap}>
@@ -68,6 +71,6 @@ export const HomeScreen = ({ navigation }: any) => {
         设置
       </Text>
     </KeyboardAvoidingView>
-  </SafeAreaView>
+  </View>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, StatusBar, Image } from 'react-native';
+import { View, Text, StyleSheet, StatusBar, Image, Platform } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,13 +21,15 @@ export const SplashScreen = ({ navigation }: any) => {
     }
   }, [authReady, loggedIn, navigation]);
 
+  const statusBarHeight = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight ?? 0) : insets.top;
+
   const s = StyleSheet.create({
     container: {
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
       backgroundColor: t.colors.background,
-      paddingTop: insets.top,
+      paddingTop: statusBarHeight,
     },
     iconWrap: {
       width: 80, height: 80, borderRadius: 20, backgroundColor: t.colors.primaryLight,

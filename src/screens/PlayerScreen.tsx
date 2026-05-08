@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback } from 'react-native';
+import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback, Platform } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import TrackPlayer, { useActiveTrack, usePlaybackState, State } from 'react-native-track-player';
 import { useNavigation } from '@react-navigation/native';
@@ -45,6 +45,8 @@ export const PlayerScreen = () => {
   const isBuffering = playback.state === State.Buffering || playback.state === State.Loading;
   const isGlass = !!t.glass;
 
+  const statusBarHeight = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight ?? 0) : insets.top;
+
   if (!track) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.background }}>
@@ -84,7 +86,7 @@ export const PlayerScreen = () => {
       alignItems: 'center',
       paddingHorizontal: t.spacing.xl,
       justifyContent: 'space-between',
-      marginTop: t.spacing.md,
+      marginTop: t.spacing.md + statusBarHeight,
     },
     headerTextContainer: {
       flex: 1,

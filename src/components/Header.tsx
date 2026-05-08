@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform, StatusBar } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from './IconButton';
 import { GlassView } from './GlassView';
 import { useTheme } from '../theme';
@@ -25,6 +26,8 @@ export const Header: React.FC<Props> = ({ title, showBack, left, right, noBorder
   const t = useTheme();
   const nav = useNavigation();
   const isGlass = !!t.glass;
+  const insets = useSafeAreaInsets();
+  const statusBarHeight = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight ?? 0) : insets.top;
 
   const s = StyleSheet.create({
     outer: {
@@ -32,6 +35,7 @@ export const Header: React.FC<Props> = ({ title, showBack, left, right, noBorder
       borderBottomColor: t.colors.divider,
       elevation: 0,
       shadowOpacity: 0,
+      paddingTop: statusBarHeight,
     },
     container: {
       height: 48, flexDirection: 'row', alignItems: 'center',

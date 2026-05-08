@@ -112,6 +112,8 @@ export const FoldersScreen = ({ navigation }: any) => {
     load(true);
   };
 
+  const statusBarHeight = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight ?? 0) : insets.top;
+
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background },
     list: { padding: t.spacing.lg, gap: t.spacing.md },
@@ -150,6 +152,7 @@ export const FoldersScreen = ({ navigation }: any) => {
           alignItems: 'center',
           paddingHorizontal: t.spacing.lg,
           paddingVertical: t.spacing.md,
+          paddingTop: t.spacing.md + statusBarHeight,
         }}
       >
         <View
