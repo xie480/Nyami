@@ -20,12 +20,22 @@ interface FolderDataState {
   error: string | null;
   searchQuery: string;
   sortOption: SortOption;
+  /** 是否正在执行增量刷新（单收藏夹） */
+  isRefreshing: boolean;
   
   initFolder: (folderId: number) => void;
   loadMore: () => Promise<void>;
   setSearchQuery: (query: string) => void;
   setSortOption: (option: SortOption) => void;
   getDisplayedList: () => FavoriteVideo[];
+  /**
+   * 增量刷新当前收藏夹。
+   * 调用 favorService.syncSingleFolder 获取新增视频，然后将其
+   * 无损追加到 list 头部（新视频收藏时间最新，自然排最前），
+   * 避免全量替换 list 导致的视图闪烁和列表滚动位置丢失。
+   * 刷新完成后返回新增视频数量，调用方可据此决定是否给出用户反馈。
+   */
+  refreshFolder: (mediaId: number) => Promise<number>;
 }
 
 export const useFolderDataStore = create<FolderDataState>((set, get) => ({
@@ -37,6 +47,7 @@ export const useFolderDataStore = create<FolderDataState>((set, get) => ({
   error: null,
   searchQuery: '',
   sortOption: SortOption.FavoriteTimeDesc,
+  isRefreshing: false,
 
   initFolder: (folderId: number) => {
     if (get().folderId === folderId) return;
@@ -86,6 +97,39 @@ export const useFolderDataStore = create<FolderDataState>((set, get) => ({
       }));
     } catch (e: any) {
       set({ error: e.message, loading: false });
+    }
+  },
+
+  /**
+   * 增量刷新：拉取新增视频 → 追加到 list 头部 → 更新全局索引
+   *
+   * === 无损追加策略 ===
+   * 新增视频来源于 B 站 API（order=mtime 倒序），即最新收藏的排最前。
+   * 因此直接将 newVideos 拼接到 list 头部即可维持时间倒序语义，
+   * 无需全量重新从全局索引过滤，避免列表滚动位置回顶和白屏闪烁。
+   */
+  refreshFolder: async (mediaId: number): Promise<number> => {
+    const state = get();
+    // 防止刷新期间再次触发
+    if (state.isRefreshing) return 0;
+    // 防止刷新的收藏夹与当前视图不对应
+    if (state.folderId !== mediaId) return 0;
+
+    set({ isRefreshing: true, error: null });
+    try {
+      const newVideos = await favoriteService.syncSingleFolder(mediaId);
+      if (newVideos.length > 0) {
+        // 将新增视频追加到 list 头部（新视频 = 最新收藏，排在前面）
+        set(prev => ({
+          list: [...newVideos, ...prev.list],
+        }));
+      }
+      return newVideos.length;
+    } catch (e: any) {
+      set({ error: e.message });
+      throw e;
+    } finally {
+      set({ isRefreshing: false });
     }
   },
 

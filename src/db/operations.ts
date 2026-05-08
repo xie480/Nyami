@@ -1,6 +1,6 @@
 import { database, playlistMetaCollection, videoMetaCollection, syncJobCollection } from './database';
 import { Q } from '@nozbe/watermelondb';
-import type { FavoriteVideo } from '../types/domain';
+import type { FavoriteVideo, VideoPart } from '../types/domain';
 
 /**
  * 批量插入或更新视频记录（针对特定收藏夹）
@@ -333,5 +333,28 @@ export async function clearAllData(): Promise<void> {
     await playlistMetaCollection.query().markAllAsDeleted();
     await videoMetaCollection.query().markAllAsDeleted();
     await syncJobCollection.query().markAllAsDeleted();
+  });
+}
+
+/**
+ * 持久化视频分P信息到数据库 extra_json 字段。
+ *
+ * 当 lazyResolve 解析出多P视频时调用，将 parts（包含各分P的 cid、title、duration）
+ * 写入 WatermelonDB 的 extra_json 列。下次冷启动时，buildPlaceholderTrack 直接从 DB
+ * 读取 parts 数据并注入 cid 到占位符 URL，使 lazyResolve 跳过首次 videoInfo 请求，
+ * 减少 1 RTT，显著提升加载速度。
+ *
+ * 如果数据库中不存在该视频记录（尚未同步完成），则静默跳过。
+ */
+export async function persistVideoPartsToDb(bvid: string, parts: VideoPart[]): Promise<void> {
+  await database.write(async writer => {
+    const records = await videoMetaCollection.query(Q.where('video_id', bvid)).fetch();
+    if (records.length === 0) return;
+    const updates = records.map(record =>
+      record.prepareUpdate(v => {
+        v.extraJson = JSON.stringify(parts);
+      })
+    );
+    await writer.batch(updates);
   });
 }

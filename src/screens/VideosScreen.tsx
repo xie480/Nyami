@@ -135,6 +135,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
     setSearchQuery,
     setSortOption,
     getDisplayedList,
+    isRefreshing,
+    refreshFolder,
   } = useFolderDataStore();
 
   const [initing, setIniting] = useState(true);
@@ -153,6 +155,57 @@ export const VideosScreen = ({ route, navigation }: any) => {
   useEffect(() => {
     return () => { mountedRef.current = false; };
   }, []);
+
+  // ========== 增量刷新按钮逻辑 ==========
+  // 防抖锁：防止用户在刷新动画未结束时再次点击
+  const refreshLockRef = useRef(false);
+
+  /**
+   * 处理刷新点击事件。
+   * 内置防抖：若已有刷新任务在执行则静默忽略。
+   * 刷新完成后通过 Toast（Android）或 Alert（iOS）反馈结果。
+   */
+  const handleRefresh = useCallback(async () => {
+    // Step 1: 防抖检测，避免重复触发
+    if (refreshLockRef.current || isRefreshing) return;
+    refreshLockRef.current = true;
+
+    try {
+      const newCount = await refreshFolder(mediaId);
+      // Step 2: 组件卸载后跳过 UI 反馈
+      if (!mountedRef.current) return;
+
+      if (newCount > 0) {
+        const msg = `新视频同步完成，共 ${newCount} 个`;
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(msg, ToastAndroid.SHORT);
+        } else {
+          Alert.alert('同步完成', msg);
+        }
+      } else {
+        const msg = '暂无新增视频';
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(msg, ToastAndroid.SHORT);
+        } else {
+          Alert.alert('检查完毕', msg);
+        }
+      }
+    } catch (e: any) {
+      if (!mountedRef.current) return;
+      const msg = e.message || '刷新失败，请稍后重试';
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(msg, ToastAndroid.SHORT);
+      } else {
+        Alert.alert('刷新失败', msg);
+      }
+    } finally {
+      // 延迟释放锁，确保 loading 动画完全过渡
+      setTimeout(() => {
+        refreshLockRef.current = false;
+      }, 500);
+    }
+  }, [mediaId, refreshFolder, isRefreshing]);
+  // ========== 增量刷新按钮逻辑结束 ==========
 
   useEffect(() => {
     setIniting(true);
@@ -367,6 +420,23 @@ export const VideosScreen = ({ route, navigation }: any) => {
             onChangeText={setSearchQuery} editable={!isSearchDisabled}
           />
         </View>
+        {/* 增量刷新按钮：点击触发单收藏夹增量同步 */}
+        {isRefreshing ? (
+          <ActivityIndicator
+            size="small"
+            color={t.colors.primary}
+            style={{ marginLeft: t.spacing.sm, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' }}
+          />
+        ) : (
+          <IconButton
+            name="refresh"
+            size={24}
+            color={t.colors.text}
+            style={{ marginLeft: t.spacing.sm }}
+            disabled={isSearchDisabled || isRefreshing}
+            onPress={handleRefresh}
+          />
+        )}
         <IconButton name="sort-variant" size={24} color={t.colors.text} style={{ marginLeft: t.spacing.sm }} disabled={isSearchDisabled} onPress={() => setSortModalVisible(true)} />
       </View>
 

@@ -21,6 +21,7 @@ import {
   clearAllData,
   deletePlaylistAndVideos,
   getPlaylistVideoCount,
+  getVideosByPlaylistId,
 } from '../db/operations';
 import { database, videoMetaCollection } from '../db/database';
 import { Q } from '@nozbe/watermelondb';
@@ -78,6 +79,97 @@ export async function loadGlobalIndexCache(): Promise<void> {
     }
   }
   globalIndexCache = Array.from(uniqueVideosMap.values());
+}
+
+/**
+ * 单收藏夹增量刷新 —— 仅拉取新增视频数据，不触发全量重新加载。
+ *
+ * === 数据流向 ===
+ * 1. 从本地数据库获取当前收藏夹已有视频的 BVID 集合
+ * 2. 从 B 站 API 逐页拉取（order=mtime 收藏时间倒序，最新视频排在最前）
+ * 3. 遍历远端数据，遇到首个已存在于本地的 BVID 时停止（后续全部为旧数据）
+ * 4. 将纯新增的视频批量写入 WatermelonDB（upsertVideosBatch）
+ * 5. 将新增视频直接追加合并到 globalIndexCache（内存缓存），不触发全量 DB 重读
+ * 6. 返回新增视频列表供 UI 层直接消费
+ *
+ * === 增量判断原理 ===
+ * B 站收藏夹资源列表接口支持 order=mtime 参数，返回按收藏时间倒序排列的数据。
+ * 因此最新收藏的视频必定排在列表最前面。利用这一特性，只需逐页读取直到遇到本地
+ * 已存在的视频，即可断定后续再无增量数据，从而以最少 API 调用量完成增量检测。
+ *
+ * @param mediaId  收藏夹 ID
+ * @param signal   可选的 AbortSignal，用于取消进行中的请求
+ * @returns        新增视频列表（FavoriteVideo[]），无新增时返回空数组
+ */
+async function syncSingleFolder(
+  mediaId: number,
+  signal?: AbortSignal,
+): Promise<FavoriteVideo[]> {
+  const playlistId = mediaId.toString();
+
+  // Step 1: 读取本地已有视频的 BVID 集合（仅限该收藏夹，含未删除记录）
+  const existingLocalRecords = await getVideosByPlaylistId(playlistId);
+  const existingBvids = new Set(
+    existingLocalRecords.map((v: VideoMeta) => v.videoId),
+  );
+
+  const newVideos: FavoriteVideo[] = [];
+  let page = 1;
+  let hasMore = true;
+  let reachedExisting = false;
+
+  // Step 2: 逐页拉取远端数据，force=true 绕过内存缓存确保获取最新内容
+  while (hasMore && !reachedExisting && !signal?.aborted) {
+    const pageRes = await favoriteService.getVideos(mediaId, page, 20, true, signal);
+    if (pageRes.list.length === 0) break;
+
+    for (const video of pageRes.list) {
+      if (existingBvids.has(video.bvid)) {
+        // 由 mtime 倒序可知：一旦遇到已存在的视频，后续全为旧数据，终止拉取
+        reachedExisting = true;
+        break;
+      }
+      // 确保 folderIds 携带当前收藏夹 ID（trimFavoriteVideo 不填充此字段）
+      video.folderIds = video.folderIds
+        ? [...new Set([...video.folderIds, mediaId])]
+        : [mediaId];
+      newVideos.push(video);
+      existingBvids.add(video.bvid); // 同批次内去重
+    }
+
+    hasMore = pageRes.hasMore;
+    page++;
+
+    // 请求间隔抖动，防止触发 B 站接口限流
+    if (hasMore && !reachedExisting) {
+      await new Promise(r => setTimeout(r, 500 + Math.random() * 1000));
+    }
+  }
+
+  // 无新增数据，提前返回空数组
+  if (newVideos.length === 0) return [];
+
+  // Step 3: 批量写入 WatermelonDB（upsertVideosBatch 内部区分 create / update）
+  await upsertVideosBatch(playlistId, newVideos);
+
+  // Step 4: 直接追加合并至全局索引内存缓存 —— 绝不触发全量 DB 重读
+  const cacheBvids = new Set(globalIndexCache.map(v => v.bvid));
+  for (const video of newVideos) {
+    if (!cacheBvids.has(video.bvid)) {
+      // 纯新增视频，追加到缓存尾部
+      globalIndexCache.push(video);
+    } else {
+      // 该 BVID 已在缓存中（可能来自其他收藏夹），仅补充 folderIds
+      const cached = globalIndexCache.find(v => v.bvid === video.bvid);
+      if (cached && video.folderIds) {
+        cached.folderIds = [
+          ...new Set([...(cached.folderIds || []), ...video.folderIds]),
+        ];
+      }
+    }
+  }
+
+  return newVideos;
 }
 
 export const favoriteService = {
@@ -366,4 +458,10 @@ export const favoriteService = {
     const records = await getRandomVideosBatch(playlistId, limit);
     return records.map(mapVideoMetaToFavoriteVideo);
   },
+
+  /**
+   * 单收藏夹增量刷新：检测收藏夹内新增视频并合并到全局索引。
+   * 详情见上方 syncSingleFolder 函数定义及注释。
+   */
+  syncSingleFolder,
 };

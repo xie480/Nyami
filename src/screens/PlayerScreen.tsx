@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback, Platform } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback, Platform, Animated } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import TrackPlayer, { useActiveTrack, usePlaybackState, State } from 'react-native-track-player';
 import { useNavigation } from '@react-navigation/native';
@@ -49,6 +49,59 @@ export const PlayerScreen = () => {
   const isGlass = !!t.glass;
 
   const statusBarHeight = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight ?? 0) : insets.top;
+
+  // ========== UI 过渡动画 ==========
+  const coverOpacity = useRef(new Animated.Value(1)).current;
+  const titleOpacity = useRef(new Animated.Value(1)).current;
+  const loadingPulseAnim = useRef(new Animated.Value(0)).current;
+  const prevTrackIdRef = useRef<string | undefined>(undefined);
+
+  // 封面淡入淡出：track 切换时执行
+  useEffect(() => {
+    if (track?.id && track.id !== prevTrackIdRef.current) {
+      prevTrackIdRef.current = track.id;
+      // 旧内容淡出 → 新内容淡入
+      coverOpacity.setValue(0.3);
+      titleOpacity.setValue(0);
+      Animated.parallel([
+        Animated.timing(coverOpacity, {
+          toValue: 1,
+          duration: 350,
+          useNativeDriver: true,
+        }),
+        Animated.timing(titleOpacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [track?.id, track?.title, coverOpacity, titleOpacity]);
+
+  // 加载中脉冲动画：isResolving 或 isBuffering 时 cover 区域显示脉冲光效
+  useEffect(() => {
+    if (isResolving || isBuffering) {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(loadingPulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(loadingPulseAnim, {
+            toValue: 0,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulse.start();
+      return () => pulse.stop();
+    } else {
+      loadingPulseAnim.setValue(0);
+    }
+  }, [isResolving, isBuffering, loadingPulseAnim]);
+  // ========== UI 过渡动画结束 ==========
 
   if (!track) {
     return (
@@ -100,6 +153,11 @@ export const PlayerScreen = () => {
     headerArtist: { fontSize: t.fontSize.sm, color: textSecondary, marginTop: 2 },
     body: { flex: 1 },
     cover: { width: 320, height: 320, borderRadius: t.radius.xl, marginTop: t.spacing.xxl + 40, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
+    coverLoadingOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      borderRadius: t.radius.xl,
+      backgroundColor: 'rgba(0,0,0,0.08)',
+    },
     progressBox: { width: '100%', marginTop: t.spacing.xxl + 50 },
     timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -2 },
     time: { fontSize: t.fontSize.xs, color: textTertiary },
@@ -149,15 +207,33 @@ export const PlayerScreen = () => {
       <View style={s.contentLayer}>
         <View style={s.header}>
           <View style={s.headerTextContainer}>
-            <MarqueeText text={track.title || '未知歌曲'} style={s.headerTitle} />
-            <Text style={s.headerArtist} numberOfLines={1}>
-              {track.artist || '未知歌手'}
-            </Text>
+            <Animated.View style={{ opacity: titleOpacity }}>
+              <MarqueeText text={track.title || '未知歌曲'} style={s.headerTitle} />
+              <Text style={s.headerArtist} numberOfLines={1}>
+                {track.artist || '未知歌手'}
+              </Text>
+            </Animated.View>
           </View>
           <IconButton name="chevron-down" size={28} color={isGlass ? textPrimary : t.colors.text} onPress={() => nav.goBack()} />
         </View>
         <View style={[s.body, { alignItems: 'center', paddingHorizontal: t.spacing.xl }]}>
-          <FastImage source={{ uri: track.artwork as string }} style={s.cover} />
+          <Animated.View style={{ opacity: coverOpacity }}>
+            <FastImage source={{ uri: track.artwork as string }} style={s.cover} />
+            {(isResolving || isBuffering) && (
+              <Animated.View
+                style={[
+                  s.coverLoadingOverlay,
+                  {
+                    opacity: loadingPulseAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, 0.5],
+                    }),
+                  },
+                ]}
+                pointerEvents="none"
+              />
+            )}
+          </Animated.View>
           <View style={s.progressBox}>
             <ProgressBar progress={progressDuration > 0 ? progressPosition / progressDuration : 0} onSeekEnd={onSeekEnd} />
             <View style={s.timeRow}>
