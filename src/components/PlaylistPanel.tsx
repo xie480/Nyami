@@ -9,7 +9,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { IconButton } from './IconButton';
 import type { FavoriteVideo } from '../types/domain';
 import { formatDuration } from '../utils/format';
-import { playSpecificPart } from '../services/trackPlayer';
+import { playSpecificPart, playWithIntent } from '../services/trackPlayer';
 import { useFolderDataStore } from '../store/folderDataStore';
 import { useSyncStore } from '../store/syncStore';
 
@@ -50,7 +50,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     const idx = q.findIndex((v) => v.bvid === bvid);
     if (idx !== -1) {
       await TrackPlayer.skip(idx);
-      TrackPlayer.play();
+      playWithIntent();
       usePlayerStore.getState().setCurrentBvid(bvid);
       onClose();
     }

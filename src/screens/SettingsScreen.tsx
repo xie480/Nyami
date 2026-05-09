@@ -504,7 +504,7 @@ export const SettingsScreen = ({ navigation }: any) => {
           <View style={s.sep} />
           <ListItem
             title="项目 Github 地址"
-            subtitle="如果觉得好用的话，请给个Star好吗~"
+            subtitle="如果觉得好用的话，求求给个Star~"
             onPress={() => Linking.openURL('https://github.com/xie480/Nyami.git')}
             showArrow
           />

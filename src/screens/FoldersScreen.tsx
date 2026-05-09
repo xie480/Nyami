@@ -25,7 +25,7 @@ import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
-import { appendQueue as tpAppendQueue, loadQueue } from '../services/trackPlayer';
+import { appendQueue as tpAppendQueue, loadQueue, playWithIntent } from '../services/trackPlayer';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useSyncStore } from '../store/syncStore';
@@ -137,7 +137,7 @@ export const FoldersScreen = ({ navigation }: any) => {
     setQueue(shuffled, shuffled[0]?.bvid);
     await loadQueue(shuffled, shuffled[0]?.bvid);
     // 【修复E】显式调用 play()，不再依赖 _pendingPlay 事件标志
-    await TrackPlayer.play();
+    await playWithIntent();
     navigation.navigate('Player');
   };
 
@@ -253,7 +253,7 @@ export const FoldersScreen = ({ navigation }: any) => {
                   setQueue(queueVideos, video.bvid);
                   await loadQueue(queueVideos, video.bvid);
                   // 【修复E】显式调用 play()，不再依赖 _pendingPlay 事件标志
-                  await TrackPlayer.play();
+                  await playWithIntent();
                   navigation.navigate('Player');
                 } catch (e: any) {
                   const msg = e.message || '播放失败';

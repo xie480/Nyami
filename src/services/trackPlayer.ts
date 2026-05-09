@@ -26,8 +26,25 @@ const resolving = new Set<number>();
  *  由 PlaybackError 处理器设置，lazyResolve 完成时消费并重置。
  *  不作为 autoPlay 参数传递，而是 lazyResolve 内部 shouldResumePlay 判定的一项输入。 */
 let _pendingAutoPlayAfterResolve = false;
+/**
+ * 显式播放意图标志：当 JS 层显式调用 playWithIntent() 时设置。
+ * lazyResolve 在完成占位符替换后，根据此标志决定是否自动播放。
+ *
+ * 与 _pendingAutoPlayAfterResolve 的区别：
+ * - _pendingAutoPlayAfterResolve → PlaybackError 恢复机制
+ * - _pendingPlayIntent → 用户主动触发的播放意图（VideosScreen 点击、播放全部等）
+ *
+ * 生命周期：
+ * - 设置：playWithIntent() 中
+ * - 清空：loadQueue（新队列开始）、消费后（lazyResolve 内部）
+ */
+let _pendingPlayIntent = false;
 /** 连续解析失败的歌曲数，用于触发全局熔断 */
 let consecutiveTrackFailures = 0;
+/** 冷启动时目标历史轨道的 BVID，用于在事件处理器中识别并跳过不必要的 lazyResolve */
+let _coldStartBvid: string | null = null;
+/** 冷启动时待恢复的历史播放进度（秒），在用户首次播放时由 lazyResolve 消费 */
+let _pendingSeek: number | null = null;
 
 /** 队列版本号：每次 loadQueue / setupPlayer 单调递增。
  *  所有异步回调（事件处理器、lazyResolve、预取）携带此版本号，
@@ -117,38 +134,70 @@ export async function setupPlayer() {
     }
 
     const store = usePlayerStore.getState();
-    if (store.queue && store.queue.length > 0) {
-      // 【冷启动静默恢复】
-      // 1. 构建队列 + 定位到历史音频位置
-      // 2. 静默解析目标轨道（仅填充 URL，不播放）
-      // 3. 恢复进度
-      // 4. 保持暂停
-      // 全程不触发任何首位音频的预加载或自动播放
+    if (store.queue && store.queue.length > 0 && store.currentBvid) {
+      // 【冷启动静默恢复 - 重构 v2】
+      // 核心原则：绝不在冷启动时做任何网络请求（API 解析），所有音频 URL 的加载
+      // 延迟到用户点击播放按钮后由 PlaybackError → lazyResolve 路径触发。
+      //
+      // 关键修复点：
+      // 1. 首先只添加目标历史轨道（store.currentBvid）的占位符到原生播放器，
+      //    确保原生层初始化时的 index 0 就是目标轨道本身，而非收藏夹首个音频。
+      // 2. 再插入前后轨道，恢复完整的队列顺序。
+      // 3. 将历史播放进度记录到 _pendingSeek，不在冷启动时 seekTo，
+      //    待用户首次播放、lazyResolve 替换真实 URL 后再恢复进度。
+      // 4. 记录 _coldStartBvid 供事件处理器跳过不必要的 lazyResolve。
 
-      const version = ++_queueVersion;
+      ++_queueVersion;
       _queueStable = false;
       _pendingAutoPlayAfterResolve = false;
 
       try {
-        const tracks = store.queue.map(buildPlaceholderTrack);
-        await addTracksBatched(tracks);
+        const currentBvid = store.currentBvid;
+        const currentIdx = store.queue.findIndex((v) => v.bvid === currentBvid);
 
-        const startIndex = Math.max(0, store.queue.findIndex((v) => v.bvid === store.currentBvid));
-        await TrackPlayer.skip(startIndex);
+        if (currentIdx === -1) {
+          // 目标 BVID 不在队列中，回退：全部添加后跳到索引 0
+          const tracks = store.queue.map(buildPlaceholderTrack);
+          await addTracksBatched(tracks);
+          await TrackPlayer.skip(0);
+          _queueStable = true;
+          await TrackPlayer.pause();
+          return;
+        }
+
+        // 设置冷启动标志
+        _coldStartBvid = currentBvid;
+        const lastPosition = storage.getNumber('lastPlaybackPosition');
+        _pendingSeek = (lastPosition && lastPosition > 0) ? lastPosition : null;
+
+        // Step 1: 先只添加目标历史轨道（成为 index 0，原生播放器准备的目标就是正确的）
+        const targetTrack = buildPlaceholderTrack(store.queue[currentIdx]);
+        await TrackPlayer.reset();
+        await TrackPlayer.add(targetTrack);
+
+        // Step 2: 在目标轨道之前插入前面的轨道（插入到 index 0，将目标推到后面）
+        const beforeTracks = store.queue.slice(0, currentIdx).map(buildPlaceholderTrack);
+        if (beforeTracks.length > 0) {
+          await addTracksBatched(beforeTracks, 0);
+        }
+
+        // Step 3: 在目标轨道之后追加后面的轨道
+        const afterTracks = store.queue.slice(currentIdx + 1).map(buildPlaceholderTrack);
+        if (afterTracks.length > 0) {
+          await addTracksBatched(afterTracks);
+        }
+
+        // Step 4: 跳转到目标轨道（现在位于 beforeTracks.length 处）
+        const finalTargetIndex = beforeTracks.length;
+        await TrackPlayer.skip(finalTargetIndex);
 
         _queueStable = true;
 
-        // 静默恢复进度
-        const lastPosition = storage.getNumber('lastPlaybackPosition');
-        if (lastPosition && lastPosition > 0) {
-          await TrackPlayer.seekTo(lastPosition);
-        }
-
-        // 静默解析目标轨道（不播放）
-        await resolveCurrentTrack(version);
-
-        // 最终保险：强制执行暂停
+        // Step 5: 强制执行暂停，保持静默状态
         await TrackPlayer.pause();
+
+        // 注意：不调用 resolveCurrentTrack，不 seekTo，不进行任何网络请求。
+        // 音频 URL 解析延迟到用户点击播放按钮后。
       } finally {
         _queueStable = true;
       }
@@ -201,6 +250,11 @@ export async function loadQueue(
   _queueStable = false;
   // 清空残留的自动播放标志（上一代遗留）
   _pendingAutoPlayAfterResolve = false;
+  // 清空显式播放意图标志（新队列开始，等待新的 play 意图）
+  _pendingPlayIntent = false;
+  // 用户主动操作加载新队列，清空冷启动状态
+  _coldStartBvid = null;
+  _pendingSeek = null;
 
   try {
     await TrackPlayer.reset();
@@ -243,6 +297,20 @@ export async function loadQueue(
     _queueStable = true;
     // 版本号已递增，后续到达的旧版本事件全部被 guardVersion 拦截
   }
+}
+
+/**
+ * 显式播放当前轨道，并记录播放意图。
+ *
+ * 与直接调用 TrackPlayer.play() 的区别：
+ * - 此函数会设置 _pendingPlayIntent 标志，供 lazyResolve 在后续占位符替换时消费
+ * - 确保用户主动触发的播放意图不会因占位符 URL 错误 / 异步时序而丢失
+ *
+ * 适用场景：VideosScreen::playFrom、playAll、shuffle、FoldersScreen 全局搜索播放等
+ */
+export async function playWithIntent(): Promise<void> {
+  _pendingPlayIntent = true;
+  await TrackPlayer.play();
 }
 
 /**
@@ -645,24 +713,45 @@ async function lazyResolve(
       await TrackPlayer.skip(actualIndex + 1);
 
       // ======== 统一播放决策 ========
-      // 三条规则按优先级：
+      // 四条规则按优先级：
       // 1. _pendingAutoPlayAfterResolve（PlaybackError 恢复标志）→ 需恢复播放
       // 2. autoPlay（仅 PlaybackError 路径通过标志间接达成，此处为防御性检查）
       // 3. skip 前正在播放 → 恢复播放（用户主动操作中）
+      // 4. _coldStartBvid 存在且匹配 → 用户点击播放，需要恢复历史进度
       // 其他情况：保持暂停
+      // 消费 _pendingPlayIntent 标志
+      const hasPlayIntent = _pendingPlayIntent;
+      if (_pendingPlayIntent) {
+        _pendingPlayIntent = false;  // 消费标志
+      }
+
       const shouldResumePlay =
-        _pendingAutoPlayAfterResolve || autoPlay || isPlaying;
+        _pendingAutoPlayAfterResolve || autoPlay || isPlaying || hasPlayIntent;
+      const isColdStartTarget = _coldStartBvid !== null && bvid === _coldStartBvid;
 
       // 消费恢复标志
       if (_pendingAutoPlayAfterResolve) {
         _pendingAutoPlayAfterResolve = false;
       }
 
-      if (shouldResumePlay) {
+      if (shouldResumePlay || isColdStartTarget) {
         await TrackPlayer.play();
+
+        // 冷启动首次播放：在替换真实 URL 后恢复历史播放进度
+        if (isColdStartTarget && _pendingSeek !== null) {
+          await TrackPlayer.seekTo(_pendingSeek);
+          LoggerService.info('TrackPlayer', 'lazyResolve', `冷启动进度恢复: seekTo(${_pendingSeek})`);
+        }
       } else {
         await TrackPlayer.pause();
       }
+
+      // 消费冷启动状态
+      if (isColdStartTarget) {
+        _coldStartBvid = null;
+        _pendingSeek = null;
+      }
+
       await TrackPlayer.remove(actualIndex);
     } else {
       // 非活跃轨道 → 直接替换（remove + add），不触发事件级联
@@ -729,8 +818,43 @@ async function autoCache(bvid: string, cid?: number) {
   } catch {}
 }
 
+/**
+ * 恢复/开始播放当前轨道。
+ *
+ * 区别于直接调用 TrackPlayer.play()，此函数会先检查当前活跃轨道是否为占位符。
+ * 如果是占位符（冷启动后用户首次点击播放），则先触发 lazyResolve 解析真实 URL，
+ * 解析完成后自动播放。
+ *
+ * 适用于：MiniPlayer 播放按钮、全屏播放器播放按钮、RemotePlay 事件。
+ */
+export async function resumePlayback(): Promise<void> {
+  try {
+    const activeTrack = await TrackPlayer.getActiveTrack();
+    if (!activeTrack) return;
+
+    const isPlaceholder = typeof activeTrack.url === 'string' &&
+      activeTrack.url.startsWith('placeholder://');
+
+    if (isPlaceholder) {
+      const activeIndex = await TrackPlayer.getActiveTrackIndex();
+      if (typeof activeIndex === 'number' && activeIndex >= 0) {
+        // 传入 autoPlay: true，解析完成后自动播放
+        await lazyResolve(activeIndex, { version: _queueVersion, autoPlay: true });
+        return;
+      }
+    }
+
+    // 已解析的轨道，直接播放
+    await TrackPlayer.play();
+  } catch (e) {
+    LoggerService.error('TrackPlayer', 'resumePlayback', '恢复播放失败:', e);
+    // 兜底：直接尝试播放
+    await TrackPlayer.play().catch(() => {});
+  }
+}
+
 export async function PlaybackService() {
-  TrackPlayer.addEventListener(Event.RemotePlay, () => TrackPlayer.play());
+  TrackPlayer.addEventListener(Event.RemotePlay, () => resumePlayback());
   TrackPlayer.addEventListener(Event.RemotePause, () => TrackPlayer.pause());
   TrackPlayer.addEventListener(Event.RemoteStop, () => TrackPlayer.stop());
   // 【修复二】锁屏/通知栏切歌时同步触发播放，暂停状态下切歌自动恢复播放
@@ -848,7 +972,7 @@ export async function PlaybackService() {
       return;
     }
 
-    // ======== 路径 B：轨道是占位符 → 静默解析（不自动播放） ========
+    // ======== 路径 B：轨道是占位符 → 是否需要解析？ ========
     const bvid = activeTrack.id as string;
     performanceMonitor.start(bvid);
     usePlayerStore.getState().setCurrentBvid(bvid);
@@ -870,6 +994,18 @@ export async function PlaybackService() {
       } else {
         usePlayerStore.getState().setCurrentCid(null);
       }
+    }
+
+    // 【冷启动优化】目标轨道跳过 lazyResolve，URL 解析完全延迟到用户点击播放
+    if (_coldStartBvid && bvid === _coldStartBvid) {
+      // 保留 _coldStartBvid / _pendingSeek 标志，待用户播放后由 lazyResolve 消费
+      prefetchNextTracks(actualIndex).catch(() => {});
+      return;
+    }
+    // 如果冷启动标志存在但 BVID 不匹配，说明用户已切换至其他音频，清除状态
+    if (_coldStartBvid) {
+      _coldStartBvid = null;
+      _pendingSeek = null;
     }
 
     // 使用实际活跃索引（而非 e.index）调用 lazyResolve
@@ -910,6 +1046,19 @@ export async function PlaybackService() {
           'PlaybackError',
           '检测到占位符轨道播放错误，触发补解析',
         );
+
+        // 【冷启动忽略】如果当前轨道是冷启动目标轨道，忽略该 PlaybackError
+        // ExoPlayer 在 skip 到占位符轨道时会急切准备（eager preparation），
+        // 导致无效 URL 错误。这是预期行为，不应触发网络请求和自动播放。
+        const errorBvid = activeTrack.id as string;
+        if (_coldStartBvid && errorBvid === _coldStartBvid) {
+          LoggerService.info(
+            'TrackPlayer',
+            'PlaybackError',
+            `冷启动目标轨道 (${errorBvid}) 的占位符播放错误已忽略（用户点击播放后由 resumePlayback 触发解析）`,
+          );
+          return;
+        }
 
         // 仅设置恢复标志，不传递 autoPlay=true
         // 真正是否播放由 lazyResolve 内部的 shouldResumePlay 三段判定决定

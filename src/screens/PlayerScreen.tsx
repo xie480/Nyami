@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback, Platform, Animated } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import TrackPlayer, { useActiveTrack, usePlaybackState, State } from 'react-native-track-player';
+import { resumePlayback, playSpecificPart } from '../services/trackPlayer';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from '../components/IconButton';
@@ -16,7 +17,6 @@ import { useTheme } from '../theme';
 import { useSettingsStore } from '../store/settingsStore';
 import { netStatus } from '../services/netStatus';
 import { usePlayerStore } from '../store/playerStore';
-import { playSpecificPart } from '../services/trackPlayer';
 import { useSyncStore } from '../store/syncStore';
 import { useProgressStore } from '../store/progressStore';
 
@@ -67,7 +67,13 @@ export const PlayerScreen = () => {
   const duration = progressDuration || fallbackDuration;
 
   const isPlaying = playback.state === State.Playing;
-  const isBuffering = playback.state === State.Buffering || playback.state === State.Loading;
+  // ======== 加载状态判定 ========
+  // 【终极补丁】如果当前轨道的 URL 是占位符（placeholder://），说明播放器底层还没拿到真实地址，
+  // 此时 ExoPlayer 可能因为尝试加载无效 URL 而卡在 Loading/Buffering 状态。
+  // 这种情况不是"真的在加载"，不应显示转圈动画和脉冲光效，而应展示可交互的播放按钮。
+  const trackUrl = track?.url;
+  const isPlaceholder = typeof trackUrl === 'string' && trackUrl.startsWith('placeholder://');
+  const isBuffering = !isPlaceholder && (playback.state === State.Buffering || playback.state === State.Loading);
   const isGlass = !!t.glass;
 
   const statusBarHeight = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight ?? 0) : insets.top;
@@ -78,29 +84,40 @@ export const PlayerScreen = () => {
   const loadingPulseAnim = useRef(new Animated.Value(0)).current;
   const prevTrackIdRef = useRef<string | undefined>(undefined);
 
-  // 封面淡入淡出：track 切换时执行
+  // 封面淡入淡出：仅在 track 真正切换（不同 ID）时执行动画。
+  // 注意：lazyResolve 将占位符替换为真实 URL 时，track.id 不变，
+  // 此时不应触发动画，否则已显示的内容会从 0.3→1 重做淡入造成闪屏。
+  // 无论是否占位符，都记录 track ID 到 ref，避免替换后误触发动画。
   useEffect(() => {
-    if (track?.id && track.id !== prevTrackIdRef.current && !track.url?.startsWith('placeholder://')) {
+    if (track?.id && track.id !== prevTrackIdRef.current) {
       prevTrackIdRef.current = track.id;
-      // 旧内容淡出 → 新内容淡入
-      coverOpacity.setValue(0.3);
-      titleOpacity.setValue(0);
-      Animated.parallel([
-        Animated.timing(coverOpacity, {
-          toValue: 1,
-          duration: 350,
-          useNativeDriver: true,
-        }),
-        Animated.timing(titleOpacity, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
+      // 占位符 → 真实 URL 的过渡属于"同轨道内容刷新"，不触发动画
+      if (!track.url?.startsWith('placeholder://')) {
+        // 旧内容淡出 → 新内容淡入
+        coverOpacity.setValue(0.3);
+        titleOpacity.setValue(0);
+        Animated.parallel([
+          Animated.timing(coverOpacity, {
+            toValue: 1,
+            duration: 350,
+            useNativeDriver: true,
+          }),
+          Animated.timing(titleOpacity, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      } else {
+        // 占位符阶段：立即显示全透明内容（不触发动画）
+        coverOpacity.setValue(1);
+        titleOpacity.setValue(1);
+      }
     }
   }, [track?.id, track?.title, coverOpacity, titleOpacity]);
 
   // 加载中脉冲动画：isResolving 或 isBuffering 时 cover 区域显示脉冲光效
+  // 注意：isResolving 和 isBuffering 已经过 isPlaceholder 过滤，不会因占位符触发
   useEffect(() => {
     if (isResolving || isBuffering) {
       const pulse = Animated.loop(
@@ -269,7 +286,7 @@ export const PlayerScreen = () => {
               {(isBuffering || isResolving) ? (
                 <ActivityIndicator size="large" color={playTextColor} />
               ) : (
-                <IconButton name={isPlaying ? 'pause' : 'play'} size={32} color={playTextColor} onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())} />
+                <IconButton name={isPlaying ? 'pause' : 'play'} size={32} color={playTextColor} onPress={() => (isPlaying ? TrackPlayer.pause() : resumePlayback())} />
               )}
             </View>
             <IconButton name="skip-next" size={36} color={isGlass ? textPrimary : t.colors.text} onPress={async () => { await TrackPlayer.skipToNext(); await TrackPlayer.play(); }} />

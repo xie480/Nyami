@@ -26,7 +26,7 @@ import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
-import { loadQueue, insertNext, appendQueue as tpAppendQueue } from '../services/trackPlayer';
+import { loadQueue, insertNext, appendQueue as tpAppendQueue, playWithIntent } from '../services/trackPlayer';
 import { usePlayerStore } from '../store/playerStore';
 import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
@@ -277,7 +277,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       await loadQueue(displayedList, target.bvid);
 
       // 显式播放：触发 PlaybackActiveTrackChanged → 事件处理器 → lazyResolve（静默）
-      await TrackPlayer.play();
+      await playWithIntent();
 
       // 后台异步加载更多数据并追加到队列尾部
       usePlayerStore.getState().setQueueLoading(true);
@@ -310,7 +310,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       setQueue(currentList, target.bvid, context);
       navigation.navigate('Player');
       await loadQueue(currentList, target.bvid);
-      await TrackPlayer.play();
+      await playWithIntent();
 
       usePlayerStore.getState().setQueueLoading(true);
       loadMoreInBackground().catch(() => {
@@ -340,7 +340,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       setQueue(shuffled, target.bvid, context);
       navigation.navigate('Player');
       await loadQueue(shuffled, target.bvid);
-      await TrackPlayer.play();
+      await playWithIntent();
     } catch (e: any) {
       const msg = e.message || '随机播放失败';
       if (Platform.OS === 'android') {

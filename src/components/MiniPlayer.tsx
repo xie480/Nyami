@@ -5,6 +5,7 @@ import FastImage from 'react-native-fast-image';
 import TrackPlayer, {
   useActiveTrack, usePlaybackState, State,
 } from 'react-native-track-player';
+import { resumePlayback } from '../services/trackPlayer';
 import { useNavigation } from '@react-navigation/native';
 import { IconButton } from './IconButton';
 import { GlassView } from './GlassView';
@@ -26,7 +27,12 @@ export const MiniPlayer: React.FC = () => {
 
   if (!track) return null;
   const isPlaying = playback.state === State.Playing;
-  const isBufferingOrResolving = playback.state === State.Buffering || playback.state === State.Loading || isResolving;
+  // ======== 加载状态判定 ========
+  // 【终极补丁】如果当前轨道的 URL 是占位符（placeholder://），说明播放器底层还没拿到真实地址，
+  // 此时 ExoPlayer 可能因为尝试加载无效 URL 而卡在 Loading/Buffering 状态。
+  // 这种情况不是"真的在加载"，不应显示转圈动画，而应展示可交互的播放按钮。
+  const isPlaceholder = typeof track.url === 'string' && track.url.startsWith('placeholder://');
+  const isBufferingOrResolving = !isPlaceholder && (playback.state === State.Buffering || playback.state === State.Loading || isResolving);
   const p = progressDuration > 0 ? progressPosition / progressDuration : 0;
 
   const s = StyleSheet.create({
@@ -88,7 +94,7 @@ export const MiniPlayer: React.FC = () => {
               name={isPlaying ? 'pause' : 'play'}
               size={26}
               color={t.colors.text}
-              onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())}
+              onPress={() => (isPlaying ? TrackPlayer.pause() : resumePlayback())}
             />
           )}
           <IconButton name="skip-next" size={26} color={t.colors.text}
