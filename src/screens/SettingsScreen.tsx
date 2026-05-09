@@ -476,15 +476,21 @@ export const SettingsScreen = ({ navigation }: any) => {
             title="导出运行日志"
             subtitle="将应用运行期间的日志导出为文件进行查看"
             onPress={async () => {
-              const success = await LoggerService.exportLogs();
-              if (!success) {
-                const msg = '暂无日志数据可导出';
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(msg, ToastAndroid.SHORT);
-                } else {
-                  Alert.alert('提示', msg);
-                }
+              if (Platform.OS === 'android') {
+                ToastAndroid.show('日志导出中...', ToastAndroid.SHORT);
               }
+              // 稍微延迟一下让 Toast 有机会显示出来
+              setTimeout(async () => {
+                const success = await LoggerService.exportLogs();
+                if (!success) {
+                  const msg = '暂无日志数据可导出';
+                  if (Platform.OS === 'android') {
+                    ToastAndroid.show(msg, ToastAndroid.SHORT);
+                  } else {
+                    Alert.alert('提示', msg);
+                  }
+                }
+              }, 100);
             }}
             showArrow
           />

@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   StatusBar,
+  BackHandler,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Header } from '../components/Header';
@@ -111,6 +112,18 @@ export const FoldersScreen = ({ navigation }: any) => {
   useEffect(() => {
     loadGlobalIndexCache().then(() => setGlobalIndexReady(true));
   }, []);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      if (searchQuery.length > 0) {
+        setSearchQuery('');
+        return true;
+      }
+      return false;
+    };
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => subscription.remove();
+  }, [searchQuery]);
 
   useEffect(() => {
     StatusBar.setBarStyle(t.isDark ? 'light-content' : 'dark-content');

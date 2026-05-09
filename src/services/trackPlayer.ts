@@ -91,7 +91,7 @@ export async function setupPlayer() {
   try {
     const mixWithOthers = useSettingsStore.getState().mixWithOthers;
     await TrackPlayer.setupPlayer({
-      autoHandleInterruptions: true,
+      autoHandleInterruptions: !mixWithOthers,
       iosCategory: IOSCategory.Playback,
       iosCategoryMode: IOSCategoryMode.Default,
       iosCategoryOptions: mixWithOthers ? [IOSCategoryOptions.MixWithOthers] : [],

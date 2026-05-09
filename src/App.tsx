@@ -134,12 +134,24 @@ export default function App() {
       }
     });
 
+    let lastBackPressed = 0;
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
       if (navigationRef.isReady() && navigationRef.canGoBack()) {
         navigationRef.goBack();
         return true;
       }
-      return false;
+      
+      // 如果在根页面（如 FoldersScreen），实现双击退出
+      const now = Date.now();
+      if (now - lastBackPressed < 2000) {
+        return false; // 允许系统默认行为（退出应用）
+      }
+      
+      lastBackPressed = now;
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('再按一次退出应用', ToastAndroid.SHORT);
+      }
+      return true; // 拦截本次返回，不退出
     });
 
     startProgressPolling();

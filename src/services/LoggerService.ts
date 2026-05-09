@@ -9,7 +9,8 @@
  */
 
 import RNFS from 'react-native-fs';
-import { Platform, Share, ToastAndroid, Alert } from 'react-native';
+import { Platform, ToastAndroid, Alert } from 'react-native';
+import Share from 'react-native-share';
 
 // 日志级别枚举
 export enum LogLevel {
@@ -308,7 +309,7 @@ class LoggerService {
       }
 
       // 合并所有日志文件为一个临时导出文件
-      const exportPath = `${RNFS.CachesDirectoryPath}/BiliMusic_logs_export.txt`;
+      const exportPath = `${RNFS.CachesDirectoryPath}/Nyami_logs_export.txt`;
       let combinedContent = '';
 
       for (const filePath of logFiles) {
@@ -320,23 +321,24 @@ class LoggerService {
         }
       }
 
-      if (Platform.OS === 'android') {
-        const downloadPath = `${RNFS.DownloadDirectoryPath}/BiliMusic_logs_export_${Date.now()}.txt`;
-        await RNFS.writeFile(downloadPath, combinedContent, 'utf8');
-        ToastAndroid.show(`日志已导出至: ${downloadPath}`, ToastAndroid.LONG);
-      } else {
-        // 写入临时导出文件
-        await RNFS.writeFile(exportPath, combinedContent, 'utf8');
+      // 写入临时导出文件
+      await RNFS.writeFile(exportPath, combinedContent, 'utf8');
 
-        // 使用系统分享
-        await Share.share({
+      // 使用系统分享
+      try {
+        await Share.open({
           title: 'BiliMusic 运行日志',
           message: '请查收 BiliMusic 应用运行日志文件',
-          url: exportPath,
+          url: `file://${exportPath}`,
+          type: 'text/plain',
         });
+        this.info('LoggerService', 'exportLogs', '日志导出成功');
+      } catch (shareError: any) {
+        // 用户取消分享或手动返回应用时，react-native-share 会抛出错误
+        // 我们将其作为普通信息记录，避免触发全局的错误 Toast 提示
+        this.info('LoggerService', 'exportLogs', `分享操作结束: ${shareError?.message || '未知状态'}`);
       }
 
-      this.info('LoggerService', 'exportLogs', '日志导出成功');
       return true;
     } catch (error) {
       console.error('[LoggerService] 导出日志失败:', error);

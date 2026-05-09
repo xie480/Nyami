@@ -11,6 +11,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@nozbe/watermelondb": "^0.27.0",
     "@react-native-community/blur": "^4.4.1",
     "@react-native-community/netinfo": "^12.0.1",
     "@react-native-cookies/cookies": "^6.2.1",
@@ -33,11 +34,11 @@
     "react-native-reanimated": "^3.16.1",
     "react-native-safe-area-context": "^5.7.0",
     "react-native-screens": "4.5.0",
+    "react-native-share": "^12.3.1",
     "react-native-track-player": "^4.1.2",
     "react-native-vector-icons": "^10.3.0",
     "react-native-webview": "^13.16.1",
-    "zustand": "^5.0.12",
-    "@nozbe/watermelondb": "^0.27.0"
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
