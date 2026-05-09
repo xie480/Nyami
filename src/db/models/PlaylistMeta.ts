@@ -11,7 +11,7 @@ export class PlaylistMeta extends Model {
   @field('sync_cursor') syncCursor!: string | null;
   @field('last_synced_video_id') lastSyncedVideoId!: string | null;
   @field('remote_revision') remoteRevision!: string | null;
-  @field('sync_status') syncStatus!: string;
+  @field('playlist_sync_status') playlistSyncStatus!: string;
   @date('last_synced_at') lastSyncedAt!: Date | null;
   @field('need_resync') needResync!: boolean;
   @readonly @date('created_at') createdAt!: Date;

@@ -292,8 +292,8 @@ export const favoriteService = {
         } else if (
           localMeta.localSyncedCount < folder.mediaCount ||
           localMeta.needResync ||
-          localMeta.syncStatus === 'failed' ||
-          localMeta.syncStatus === 'running' // 上次崩溃
+          localMeta.playlistSyncStatus === 'failed' ||
+          localMeta.playlistSyncStatus === 'running' // 上次崩溃
         ) {
           needSync = true;
         }
@@ -311,7 +311,7 @@ export const favoriteService = {
           playlistId,
           title: folder.title,
           remoteVideoCount: folder.mediaCount,
-          syncStatus: 'syncing',
+          playlistSyncStatus: 'syncing',
           needResync: force ? true : (localMeta?.needResync || false),
         });
 
@@ -404,13 +404,13 @@ export const favoriteService = {
             await markPlaylistSyncSuccess(playlistId);
           } else {
             await finishSyncJob(jobId, 'cancelled');
-            await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, syncStatus: 'idle' });
+            await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, playlistSyncStatus: 'idle' });
           }
 
         } catch (err: any) {
           LoggerService.warn('favoriteService', 'syncPlaylist', `文件夹 ${folder.id} 同步异常:`, err.message);
           await finishSyncJob(jobId, 'failed', err.message);
-          await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, syncStatus: 'failed' });
+          await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, playlistSyncStatus: 'failed' });
           if (err instanceof AuthRequiredError) {
             throw err;
           }

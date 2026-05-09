@@ -125,7 +125,7 @@ export async function upsertPlaylistMeta(data: {
   title?: string;
   remoteVideoCount: number;
   remoteRevision?: string;
-  syncStatus?: string;
+  playlistSyncStatus?: string;
   needResync?: boolean;
 }) {
   await database.write(async writer => {
@@ -135,7 +135,7 @@ export async function upsertPlaylistMeta(data: {
         if (data.title) record.title = data.title;
         record.remoteVideoCount = data.remoteVideoCount;
         if (data.remoteRevision) record.remoteRevision = data.remoteRevision;
-        if (data.syncStatus) record.syncStatus = data.syncStatus;
+        if (data.playlistSyncStatus) record.playlistSyncStatus = data.playlistSyncStatus;
         if (data.needResync !== undefined) record.needResync = data.needResync;
       });
     } else {
@@ -145,7 +145,7 @@ export async function upsertPlaylistMeta(data: {
         record.remoteVideoCount = data.remoteVideoCount;
         record.localSyncedCount = 0;
         record.remoteRevision = data.remoteRevision || null;
-        record.syncStatus = data.syncStatus || 'idle';
+        record.playlistSyncStatus = data.playlistSyncStatus || 'idle';
         record.needResync = data.needResync || false;
       });
     }
@@ -185,7 +185,7 @@ export async function markPlaylistSyncSuccess(playlistId: string) {
     const meta = await getPlaylistMeta(playlistId);
     if (meta) {
       await meta.update(record => {
-        record.syncStatus = 'success';
+        record.playlistSyncStatus = 'success';
         record.lastSyncedAt = new Date();
         record.needResync = false;
         record.syncCursor = null; // 清空游标

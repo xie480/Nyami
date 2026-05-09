@@ -84,7 +84,7 @@ class LoggerService {
       const files = await RNFS.readDir(this.logDir);
       const cutoff = Date.now() - maxDays * 24 * 60 * 60 * 1000;
       for (const file of files) {
-        if (file.name.endsWith('.log') && file.mtime.getTime() < cutoff) {
+        if (file.name.endsWith('.log') && file.mtime && file.mtime.getTime() < cutoff) {
           await RNFS.unlink(file.path);
         }
       }
@@ -286,7 +286,7 @@ class LoggerService {
       const files = await RNFS.readDir(this.logDir);
       return files
         .filter((f) => f.name.endsWith('.log'))
-        .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+        .sort((a, b) => (b.mtime?.getTime() || 0) - (a.mtime?.getTime() || 0))
         .map((f) => f.path);
     } catch {
       return [];

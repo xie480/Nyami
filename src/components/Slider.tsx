@@ -4,6 +4,7 @@ import {
   PanResponder,
   StyleSheet,
   LayoutChangeEvent,
+  DimensionValue,
 } from 'react-native';
 
 interface SliderProps {
@@ -77,7 +78,7 @@ export const Slider: React.FC<SliderProps> = ({
     });
   };
 
-  const thumbLeft = `${fraction * 100}%`;
+  const thumbLeft: DimensionValue = `${fraction * 100}%`;
 
   const styles = StyleSheet.create({
     container: {

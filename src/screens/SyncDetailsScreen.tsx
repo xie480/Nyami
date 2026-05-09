@@ -23,7 +23,7 @@ function getSyncStatusDisplay(meta: PlaylistMeta | null) {
   if (!meta) {
     return { text: '未同步', color: 'textSub' as const };
   }
-  switch (meta.syncStatus) {
+  switch (meta.playlistSyncStatus) {
     case 'syncing':
       return { text: `同步中 (${meta.localSyncedCount}/${meta.remoteVideoCount})`, color: 'primary' as const };
     case 'success':

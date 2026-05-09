@@ -13,7 +13,7 @@ export const schema = appSchema({
         { name: 'sync_cursor', type: 'string', isOptional: true },
         { name: 'last_synced_video_id', type: 'string', isOptional: true },
         { name: 'remote_revision', type: 'string', isOptional: true },
-        { name: 'sync_status', type: 'string' },
+        { name: 'playlist_sync_status', type: 'string' },
         { name: 'last_synced_at', type: 'number', isOptional: true },
         { name: 'need_resync', type: 'boolean' },
         { name: 'created_at', type: 'number' },
