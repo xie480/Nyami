@@ -440,7 +440,7 @@ export const SettingsScreen = ({ navigation }: any) => {
           <ListItem
             title="与其他应用同时播放"
             subtitle="允许与其他应用的音频混合播放"
-            right={<Switch value={mixWithOthers} onValueChange={setMixWithOthers} />}
+            right={<Switch value={mixWithOthers} onValueChange={(v) => { setMixWithOthers(v); ToastAndroid.show('设置已保存，重启应用后生效', ToastAndroid.SHORT); }} />}
           />
         </View>
 
