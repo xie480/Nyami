@@ -92,57 +92,127 @@ const DEFAULT_PEQ_FILTERS_PRESET: PEQFilter[] = [
 export const EMOTION_PRESETS: EQPreset[] = [
   {
     id: 'flat',
-    name: '平直',
-    description: '无任何增益修饰',
-    graphicBands: FLAT_BANDS,
+    name: '原音',
+    description: '忠实还原，不染色',
+    graphicBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   },
+
+  // ===== Nyami Signature =====
+  {
+    id: 'nyami',
+    name: 'Nyami',
+    description: '哈基咪亲自调音，通吃',
+    graphicBands: [2, 2, 1, 0, 0, 1, 2, 2, 1, 0],
+  },
+
   {
     id: 'cat_bass',
-    name: '猫耳低音',
-    description: '超低频增强',
-    graphicBands: [6, 5, 4, 2, 0, -1, -1, 0, 0, 0],
+    name: '低频',
+    description: '柔弹下潜，不轰头',
+    graphicBands: [5, 4, 3, 1, 0, -1, -1, 0, 1, 1],
   },
+
   {
-    id: 'midnight_radio',
-    name: '深夜电台',
-    description: '高频柔化，温暖氛围',
-    graphicBands: [3, 3, 2, 1, 0, -1, -2, -3, -4, -4],
+    id: 'cyber_bass',
+    name: '赛博震域',
+    description: '电子/EDM/Sub Bass',
+    graphicBands: [7, 5, 3, 1, -1, -2, 0, 2, 3, 2],
   },
-  {
-    id: 'tokyo_rain',
-    name: '东京雨夜',
-    description: '空间感增强，空灵',
-    graphicBands: [2, 1, 0, -1, -1, 0, 1, 2, 3, 4],
-  },
+
+  // ===== Vocal =====
   {
     id: 'girl_band',
     name: '少女乐队',
-    description: '女声增强，清亮',
-    graphicBands: [0, 0, 0, 1, 2, 3, 4, 3, 2, 1],
+    description: '女声贴耳，明亮通透',
+    graphicBands: [-1, 0, 0, 1, 2, 3, 4, 3, 2, 1],
   },
+
+  {
+    id: 'idol_stage',
+    name: '偶像现场',
+    description: '突出主唱与空气感',
+    graphicBands: [-1, -1, 0, 1, 2, 3, 3, 4, 4, 2],
+  },
+
+  {
+    id: 'whisper',
+    name: '贴耳模式',
+    description: '近距离',
+    graphicBands: [-2, -2, -1, 0, 2, 4, 5, 4, 2, 1],
+  },
+
+  // ===== Atmosphere =====
+  {
+    id: 'midnight_radio',
+    name: '深夜电台',
+    description: '暖厚收敛，适合熄灯',
+    graphicBands: [3, 2, 2, 1, 0, -1, -2, -3, -3, -4],
+  },
+
+  {
+    id: 'tokyo_rain',
+    name: '东京雨夜',
+    description: '湿润空气感',
+    graphicBands: [1, 1, 0, -1, -1, 0, 1, 2, 3, 2],
+  },
+
   {
     id: 'vaporwave',
     name: 'Vaporwave',
-    description: '中低频氛围感',
-    graphicBands: [4, 4, 3, 2, 1, 0, -1, -2, -2, -1],
+    description: '朦胧复古磁带',
+    graphicBands: [4, 3, 2, 1, 0, -1, -2, -1, 0, -1],
   },
+
+  {
+    id: 'lofi_cafe',
+    name: 'Lo-fi Café',
+    description: '旧磁带颗粒感',
+    graphicBands: [2, 2, 1, 0, -1, -1, -2, -2, -3, -4],
+  },
+
+  // ===== Electronic =====
   {
     id: 'cyberpunk',
     name: 'Cyberpunk',
-    description: '高频电子感，凌厉',
-    graphicBands: [-1, 0, 1, 2, 1, 2, 3, 4, 5, 6],
+    description: '锐利未来电子',
+    graphicBands: [-2, -1, 0, 1, 1, 2, 3, 4, 5, 4],
   },
+
   {
-    id: 'cyber_bass',
-    name: '赛博低频',
-    description: 'Sub Bass 强力增强',
-    graphicBands: [8, 6, 4, 2, 0, -1, -2, -1, 0, 1],
+    id: 'neon_drive',
+    name: '霓虹疾驰',
+    description: 'Synthwave 速度感',
+    graphicBands: [3, 2, 1, 0, -1, 0, 2, 4, 5, 3],
   },
+
+  // ===== Live =====
   {
     id: 'live',
-    name: 'Live 现场',
-    description: '混响感增强，氛围',
-    graphicBands: [2, 2, 1, 1, 0, 0, 1, 2, 3, 4],
+    name: 'Live现场',
+    description: '空间拓宽',
+    graphicBands: [1, 1, 0, 0, 0, 1, 2, 3, 3, 2],
+  },
+
+  {
+    id: 'hall',
+    name: '星穹大厅',
+    description: '古典厅堂空间感',
+    graphicBands: [2, 1, 0, -1, -1, 0, 1, 2, 2, 3],
+  },
+
+  // ===== Fun =====
+  {
+    id: '8bit',
+    name: '8-Bit猫机',
+    description: '像素复古',
+    graphicBands: [-5, -4, -2, 0, 2, 4, 5, 4, 2, -1],
+  },
+
+  {
+    id: 'crystal',
+    name: '水晶薄荷',
+    description: '极致解析空气感',
+    graphicBands: [-2, -2, -1, 0, 0, 1, 3, 5, 5, 4],
   },
 ];
 

@@ -63,7 +63,7 @@ export const HomeScreen = ({ navigation }: any) => {
       </View>
       <Text style={s.title}>Nyami</Text>
       <Text style={s.subtitle}>猫在听，你也在听</Text>
-      <Button title="立即登录" onPress={onLogin} style={s.enter} />
+      <Button title="使用B站账号进行登录" onPress={onLogin} style={s.enter} />
       <Text
         style={[s.settingsBtnText, s.settingsBtn]}
         onPress={() => navigation.navigate('Settings')}

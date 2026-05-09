@@ -243,9 +243,9 @@ export const PlayerScreen = () => {
       textSecondary: g.colors.text.secondary,
       textTertiary: g.colors.text.tertiary,
       accentPrimary: g.colors.accent.primary,
-      surfaceBg: g.colors.glass.bg,
+      surfaceBg: g.colors.player?.bgOverlay || g.colors.glass.bg,
       dividerColor: t.colors.divider,
-      blurRadius: g.material.blurRadius,
+      blurRadius: g.material.playerBlurRadius || g.material.blurRadius,
       playBg: typeof g.colors.button.playBg === 'string'
         ? g.colors.button.playBg
         : g.colors.button.playBg[0],

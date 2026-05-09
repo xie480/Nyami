@@ -1,76 +1,231 @@
 <div align="center">
-  <img src="resource/icon.png" width="120" height="120" alt="Nyami Icon" />
-  <h1>Nyami</h1>
-  <p>基于 React Native 的 B 站第三方纯音频播放器，专注于高音质与离线体验</p>
+  <img src="resource/icon.png" width="120" height="120" alt="Nyami Icon"/>
+
+# Nyami
+
+### 🐾 A Modern Bilibili Audio Player for Android
+
+基于 React Native 构建的 **Bilibili 第三方纯音频播放器**  
+专注于 **高音质 · 离线同步 · 专业 DSP 调音体验**
+
+<p>
+<img src="https://img.shields.io/badge/Platform-Android-green?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/React%20Native-0.74-blue?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/TypeScript-5.x-blue?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Media3-ExoPlayer-orange?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/License-MIT-purple?style=for-the-badge"/>
+</p>
+
 </div>
 
-## 📖 项目定位
+---
 
-Nyami 是一款专为 Bilibili 用户打造的第三方纯音频播放应用。它通过解析 B 站视频音频流，结合本地数据库同步机制与自定义底层音频 DSP 引擎，为用户提供无缝的在线/离线音乐聆听体验。
+# ✨ 项目简介
 
-## ✨ 核心特点
+**Nyami** 是一款面向 Bilibili 用户打造的高质量纯音频播放器。
 
-- **原生级音频 DSP 引擎**：深度定制 ExoPlayer/Media3 音频处理链路，内置 10 段图形均衡器 (Graphic EQ) 与 8 段参数均衡器 (PEQ)，支持实时 FFT 频谱分析与可视化。
-- **强大的离线同步机制**：基于 WatermelonDB 构建本地增量同步架构，支持 B 站收藏夹全量/增量同步，断网环境下依然可以流畅播放本地缓存音频。
-- **B 站原生 API 深度集成**：内置 B 站 WBI 签名算法与 Cookie 状态管理，支持获取高音质音频流与私密收藏夹内容。
-- **现代化的 UI 设计**：全面支持毛玻璃 (Glassmorphism) 主题与深色模式，提供流畅的手势交互与沉浸式播放体验。
+它能够解析 B 站视频音频流，并通过本地同步数据库与原生音频 DSP 引擎，为用户提供：
 
-## 🚀 主要功能
+- 高品质在线播放
+- 收藏夹离线同步
+- 专业级 EQ 调音
+- 沉浸式现代播放器 UI
+- 弱网 / 离线环境无缝切换
 
-- **收藏夹同步**：一键同步 B 站账号下的视频收藏夹，支持后台增量更新与同步状态追踪。
-- **纯音频播放**：提取 B 站视频的高音质音频流进行播放，支持后台播放、锁屏控制与播放列表管理。
-- **Sound Lab (音效实验室)**：提供专业的 EQ 调节界面，支持自定义 PEQ 滤波器参数与预设管理，实时渲染音频频谱。
-- **智能缓存与网络管理**：自适应网络状态，离线时自动切换至本地缓存播放，节省流量。
+Nyami 的目标不是简单“听视频”，而是打造 **真正可替代主流音乐 App 的 Bilibili 音乐生态体验**。
 
-## 🛠️ 技术栈
+---
 
-### 前端 (React Native)
-- **框架**: React Native 0.74.5 + TypeScript
-- **状态管理**: Zustand 5.0
-- **本地存储**: WatermelonDB (关系型数据) + react-native-mmkv (键值配置)
-- **导航**: React Navigation 7
-- **音频播放**: react-native-track-player 4.1.2
+# 🚀 核心特性
 
-### 原生端 (Android)
-- **音频引擎**: ExoPlayer / Media3
-- **DSP 处理**: 自定义 `DSPAudioProcessor` (Kotlin/C++)，实现 Biquad / RBJ 滤波器
-- **频谱渲染**: OpenGL ES (`SpectrumGLSurfaceView`)
+## 🎧 专业级音频引擎
 
-## 📦 部署与运行
+基于 **Media3 / ExoPlayer** 深度定制音频处理链：
 
-### 环境要求
-- Node.js >= 18
+- 10 段 Graphic EQ
+- 8 段 Parametric EQ（PEQ）
+- Biquad / RBJ 滤波器
+- 实时 FFT 分析
+- OpenGL 频谱渲染
+- 猫耳动态频谱动画
+- 后台播放 / 锁屏控制 / 通知栏媒体中心集成
+
+---
+
+## 📦 离线收藏夹同步
+
+基于 **WatermelonDB** 构建高性能本地增量同步架构：
+
+- 收藏夹全量同步
+- 增量更新检测
+- 本地索引持久化
+- 弱网自动降级
+- 离线缓存播放
+- 断点恢复同步
+
+即使离线，也能像本地音乐播放器一样使用。
+
+---
+
+## 🔐 深度 Bilibili API 集成
+
+内置：
+
+- WBI 签名算法
+- Cookie 状态管理
+- 收藏夹权限解析
+- 高音质音频流获取
+- API 限流令牌桶保护
+
+保障账号安全与稳定访问。
+
+---
+
+## 🎨 现代化 UI 体验
+
+Nyami 提供完整沉浸式设计语言：
+
+- Glassmorphism 毛玻璃主题
+- 深色模式
+- 流畅手势交互
+- 全局动态模糊
+- Android 原生媒体面板联动
+- 锁屏播放器控制
+
+---
+
+# 🛠 技术栈
+
+## Frontend
+
+- **React Native 0.74**
+- **TypeScript**
+- **React Navigation 7**
+- **Zustand**
+- **WatermelonDB**
+- **MMKV**
+- **React Native Track Player**
+
+---
+
+## Android Native
+
+- **Kotlin**
+- **Media3 / ExoPlayer**
+- **OpenGL ES**
+- **JNI / C++ DSP**
+- **Custom AudioProcessor Pipeline**
+
+---
+
+# 📂 项目架构
+
+```text
+Nyami
+├── src/
+│   ├── screens/
+│   ├── components/
+│   ├── store/
+│   ├── database/
+│   ├── api/
+│   └── player/
+│
+├── android/
+│   ├── native-dsp/
+│   ├── audio-engine/
+│   └── spectrum-renderer/
+│
+└── resource/
+```
+
+---
+
+# ⚡ 快速开始
+
+## 环境要求
+
+- Node.js ≥ 18
 - JDK 17
-- Android Studio & Android SDK (API 34+)
-- Yarn 或 npm
+- Android Studio
+- Android SDK 34+
+- Yarn / npm
 
-### 1. 克隆项目与安装依赖
+---
+
+## 安装
 
 ```bash
 git clone <repository-url>
-cd BiliMusic
+cd Nyami
 npm install
-# 或使用 yarn
+```
+
+或
+
+```bash
 yarn install
 ```
 
-### 2. 启动 Metro Bundler
+---
+
+## 启动 Metro
 
 ```bash
-npm run start
+npm start
 ```
 
-### 3. 运行应用 (Android)
+---
 
-保持 Metro Bundler 运行，在新的终端窗口中执行：
+## 启动 Android
 
 ```bash
 npm run android
 ```
 
-### 4. 配置 B 站 Cookie (可选)
+---
 
-为了访问私密收藏夹和获取最高音质的音频流，建议在应用内的“设置”页面登录 B 站账号或手动配置 Cookie。应用内置了 WBI 签名算法，可自动处理 API 请求鉴权。
+# 🔑 登录 Bilibili
+
+为了访问：
+
+- 私密收藏夹
+- 更高音质流
+- 用户订阅内容
+
+请在应用内：
+
+`设置 → 账号登录`
+
+Nyami 会自动完成：
+
+- WBI 鉴权
+- Cookie 刷新
+- 请求签名
 
 ---
-*注：本项目仅供学习交流使用，请勿用于商业用途。*
+
+# ⚠️ 注意事项
+
+- 当前仅支持 **Android**
+- 推荐 Android 12+
+- 测试设备：
+
+```text
+iQOO 11S · Android 15
+```
+
+- 内置限流保护机制，避免高频请求触发风控
+
+---
+
+# 📜 License
+
+MIT License
+
+---
+
+<div align="center">
+
+**Nyami · 吾辈只是一只猫罢了 🐾**
+
+</div>

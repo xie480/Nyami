@@ -32,6 +32,9 @@ export interface GlassTheme {
       highlightInner: string;
       shimmerEdge: string;
     };
+    player?: {
+      bgOverlay: string;
+    };
     accent: {
       primary: string;
       secondary: string;
@@ -56,6 +59,7 @@ export interface GlassTheme {
   };
   material: {
     blurRadius: number;
+    playerBlurRadius?: number;
     shadowLayers: ShadowLayer[];
     backgroundOrbs: OrbConfig[];
     floatingShards: ShardConfig[];
@@ -76,6 +80,9 @@ export const GlassLightTheme: GlassTheme = {
       border: 'rgba(255, 255, 255, 0.55)',
       highlightInner: 'rgba(255, 255, 255, 0.7)',
       shimmerEdge: 'rgba(255, 255, 255, 0.7)'
+    },
+    player: {
+      bgOverlay: 'rgba(255, 255, 255, 0.12)'
     },
     accent: {
       primary: '#6c5ce7',
@@ -101,6 +108,7 @@ export const GlassLightTheme: GlassTheme = {
   },
   material: {
     blurRadius: 16,
+    playerBlurRadius: 18,
     shadowLayers: [
       { offsetY: 8, blur: 40, color: 'rgba(0, 0, 0, 0.08)' },
       { offsetY: 2, blur: 8,  color: 'rgba(0, 0, 0, 0.04)' }
@@ -134,6 +142,9 @@ export const GlassDarkTheme: GlassTheme = {
       highlightInner: 'rgba(255, 255, 255, 0.14)',
       shimmerEdge: 'rgba(255, 255, 255, 0.18)'
     },
+    player: {
+      bgOverlay: 'rgba(5, 5, 10, 0.20)'
+    },
     accent: {
       primary: '#b44dff',
       secondary: '#00e5ff',
@@ -158,6 +169,7 @@ export const GlassDarkTheme: GlassTheme = {
   },
   material: {
     blurRadius: 64,
+    playerBlurRadius: 28,
     shadowLayers: [
       { offsetY: 18, blur: 56, color: 'rgba(0, 0, 0, 0.85)' },
       { offsetY: 6, blur: 24,  color: 'rgba(0, 0, 0, 0.65)' },
