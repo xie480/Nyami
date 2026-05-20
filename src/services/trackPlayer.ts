@@ -744,8 +744,6 @@ async function lazyResolve(
       const playbackState = await TrackPlayer.getPlaybackState();
       const isPlaying = playbackState.state === State.Playing || playbackState.state === State.Buffering;
 
-      await TrackPlayer.skip(actualIndex + 1);
-
       // ======== 统一播放决策 ========
       // 四条规则按优先级：
       // 1. _pendingAutoPlayAfterResolve（PlaybackError 恢复标志）→ 需恢复播放
@@ -768,8 +766,17 @@ async function lazyResolve(
         _pendingAutoPlayAfterResolve = false;
       }
 
+      // 【P0修复 - 后台切歌 WakeLock】核心修复：
+      // 必须先将 ExoPlayer 置于 playWhenReady=true 状态（play()），
+      // 再执行 skip()，这样 ExoPlayer 在缓冲新网络音频期间
+      // 会持续持有 Partial WakeLock，防止 CPU 休眠。
+      //
+      // 旧逻辑是 skip() → play()，导致 skip 时 ExoPlayer 停止
+      // 当前 track（silent.wav）、释放 WakeLock，CPU 休眠后
+      // play() 无法及时执行，直到用户唤回前台才恢复。
       if (shouldResumePlay || isColdStartTarget) {
-        await TrackPlayer.play();
+        await TrackPlayer.play();        // Step 1: 先 play，锁定 WakeLock
+        await TrackPlayer.skip(actualIndex + 1); // Step 2: 再 skip 切换真实 URL
 
         // 冷启动首次播放：在替换真实 URL 后恢复历史播放进度
         if (isColdStartTarget && _pendingSeek !== null) {
@@ -777,7 +784,8 @@ async function lazyResolve(
           LoggerService.info('TrackPlayer', 'lazyResolve', `冷启动进度恢复: seekTo(${_pendingSeek})`);
         }
       } else {
-        await TrackPlayer.pause();
+        await TrackPlayer.pause();       // 不需要播放时先 pause
+        await TrackPlayer.skip(actualIndex + 1);  // 再执行切换
       }
 
       // 消费冷启动状态
@@ -902,14 +910,20 @@ export async function PlaybackService() {
   TrackPlayer.addEventListener(Event.RemoteNext, async () => {
     // 【P0性能优化】乐观加载状态：切歌时立即显示加载动画
     usePlayerStore.getState().setResolving(true);
-    await TrackPlayer.skipToNext();
+    // 【P0修复 - 后台切歌 WakeLock】必须先 play() 再 skipToNext()。
+    // ExoPlayer 必须在 playWhenReady=true 的状态下才能保证
+    // 在缓冲新网络音频期间持续持有 Partial WakeLock。
+    // 若先 skipToNext 后 play，skip 会导致 ExoPlayer 释放 WakeLock，
+    // CPU 休眠 → play() 无法及时执行 → 卡在旧占位符/静默 BGM 上。
     await TrackPlayer.play();
+    await TrackPlayer.skipToNext();
   });
   TrackPlayer.addEventListener(Event.RemotePrevious, async () => {
     // 【P0性能优化】乐观加载状态：切歌时立即显示加载动画
     usePlayerStore.getState().setResolving(true);
-    await TrackPlayer.skipToPrevious();
+    // 【P0修复 - 后台切歌 WakeLock】同上：先 play 锁定 WakeLock，再切歌。
     await TrackPlayer.play();
+    await TrackPlayer.skipToPrevious();
   });
   TrackPlayer.addEventListener(Event.RemoteSeek, ({ position }) =>
     TrackPlayer.seekTo(position)

@@ -53,18 +53,21 @@ export const biliApi = {
     })();
   },
 
-  /** 获取视频元信息（含 cid） */
-  getVideoInfo(bvid: string) {
+  /** 获取视频元信息（含 cid）
+   *  @param silent 静默模式：为 true 时遇到鉴权错误不弹登录窗，直接抛异常（后台播放场景必需） */
+  getVideoInfo(bvid: string, silent = false) {
     if (!bvid) {
       return Promise.reject(new Error('bvid 不能为空'));
     }
     return biliGet<BiliVideoInfo>('/x/web-interface/view', {
       params: { bvid },
+      silent,
     });
   },
   
-  /** 获取播放地址（DASH，含独立音频流，需 WBI 签名） */
-  async getPlayUrl(bvid: string, cid: number) {
+  /** 获取播放地址（DASH，含独立音频流，需 WBI 签名）
+   *  @param silent 静默模式：为 true 时遇到鉴权错误不弹登录窗，直接抛异常（后台播放场景必需） */
+  async getPlayUrl(bvid: string, cid: number, silent = false) {
     if (!bvid || cid == null) {
       throw new Error('bvid 和 cid 不能为空');
     }
@@ -74,7 +77,7 @@ export const biliApi = {
       imgKey,
       subKey
     );
-    return biliGet<BiliPlayUrlData>(`/x/player/wbi/playurl?${query}`);
+    return biliGet<BiliPlayUrlData>(`/x/player/wbi/playurl?${query}`, { silent });
   },
 
   /** 获取登录用户信息（包含 UID、用户名、头像、大会员状态） */

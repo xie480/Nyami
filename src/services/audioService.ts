@@ -136,15 +136,19 @@ export const audioService = {
         cacheKey,
         config.cacheTTL.audioUrl,
         async () => {
+          // 【P0修复 - 后台切歌】后台解析音频 URL 时强制使用 silent=true，
+          // 防止在锁屏/后台状态下发起的 API 请求因 Cookie 过期/缺失
+          // 触发 http.ts 中的 AuthRequiredError → setLoginModalVisible(true)
+          // 导致 Promise 永久挂起、lazyResolve 死锁、静默 BGM 无法被替换。
           const info = await cache.getOrSet(
             `videoInfo:${bvid}`,
             config.cacheTTL.videoInfo,
-            () => biliApi.getVideoInfo(bvid),
+            () => biliApi.getVideoInfo(bvid, true),
             true
           );
   
           const targetCid = cid ?? info.cid;
-          const playUrl = await biliApi.getPlayUrl(bvid, targetCid);
+          const playUrl = await biliApi.getPlayUrl(bvid, targetCid, true);
           
           let audios = (playUrl.dash?.audio || []).map(normalizeAudio);
           

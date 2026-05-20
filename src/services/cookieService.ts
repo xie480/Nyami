@@ -25,7 +25,11 @@ export const cookieService = {
     const uid = this.extractUid(trimmed) ?? '';
     await Keychain.setGenericPassword(uid, trimmed, {
       service: COOKIE_SERVICE,
-      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      // 【P0修复 - 后台切歌】将访问级别从 WHEN_UNLOCKED（锁屏不可用）
+      // 改为 AFTER_FIRST_UNLOCK（设备启动首次解锁后后台可读）。
+      // 原配置导致锁屏状态下 cookieService.get() 阻塞/抛出异常，
+      // 进而使 lazyResolve 无法获取 Cookie → API 请求失败 → 死锁。
+      accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
     });
     // 切换账号或登录后，需要清空业务缓存
     cache.deletePrefix('folders:');
