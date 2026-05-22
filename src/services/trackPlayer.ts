@@ -305,8 +305,6 @@ async function maintainQueueBuffer() {
             e,
           );
         }
-      } else {
-        addedCount++;
       }
       i++;
     }
