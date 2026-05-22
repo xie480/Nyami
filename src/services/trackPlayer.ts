@@ -636,6 +636,9 @@ export async function PlaybackService() {
     usePlayerStore.getState().setPlaybackError('播放失败，请检查网络或重试');
     await TrackPlayer.pause();
   });
+
+  // 保持后台任务活跃，防止 setTimeout 在后台被挂起导致预加载死锁
+  return new Promise(() => {});
 }
 
 export async function playSpecificPart(
