@@ -11,6 +11,8 @@ const COOKIE_SERVICE = 'bili_auth_cookie';
  * - 仅保存完整的 Cookie 字符串（包含 SESSDATA、bili_jct、DedeUserID 等）
  * - 提供 async 接口以匹配 Keychain 的 Promise API
  */
+let _hasMigratedKeychain = false;
+
 export const cookieService = {
   /**
    * 保存 Cookie（完整字符串）
@@ -25,8 +27,10 @@ export const cookieService = {
     const uid = this.extractUid(trimmed) ?? '';
     await Keychain.setGenericPassword(uid, trimmed, {
       service: COOKIE_SERVICE,
-      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      // 使用 AFTER_FIRST_UNLOCK 允许后台锁屏状态下读取，解决后台预加载失效问题
+      accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
     });
+    _hasMigratedKeychain = true;
     // 切换账号或登录后，需要清空业务缓存
     cache.deletePrefix('folders:');
     cache.deletePrefix('videos:');
@@ -38,6 +42,15 @@ export const cookieService = {
     try {
       const credentials = await Keychain.getGenericPassword({ service: COOKIE_SERVICE });
       if (credentials) {
+        // 自动迁移逻辑：如果读取成功且尚未迁移过，则使用新权限重新保存一次
+        if (!_hasMigratedKeychain) {
+          _hasMigratedKeychain = true;
+          // 异步执行迁移，不阻塞当前读取
+          Keychain.setGenericPassword(credentials.username, credentials.password, {
+            service: COOKIE_SERVICE,
+            accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+          }).catch(e => LoggerService.error('cookieService', 'migrate', '迁移 Keychain 权限失败', e));
+        }
         return credentials.password;
       }
     } catch (e) {
