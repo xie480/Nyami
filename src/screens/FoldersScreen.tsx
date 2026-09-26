@@ -16,7 +16,6 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Header } from '../components/Header';
 import { useSelectionStore } from '../store/selectionStore';
-import TrackPlayer from 'react-native-track-player';
 import { usePlayerStore } from '../store/playerStore';
 import { useProgressStore } from '../store/progressStore';
 import { ListItem } from '../components/ListItem';
@@ -545,7 +544,7 @@ export const FoldersScreen = ({ navigation }: any) => {
 
                 // Append to queue and start playback
                 await tpAppendQueue(shuffled);
-                await TrackPlayer.play();
+                await playWithIntent();
                 clear();
 
                 if (Platform.OS === 'android') {

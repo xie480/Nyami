@@ -1,7 +1,6 @@
 // src/components/PlaylistPanel.tsx (refactored)
 import React, { useCallback, memo, useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo, ActivityIndicator } from 'react-native';
-import TrackPlayer from 'react-native-track-player';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../theme';
 import { GlassView } from './GlassView';
@@ -9,7 +8,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { IconButton } from './IconButton';
 import type { FavoriteVideo } from '../types/domain';
 import { formatDuration } from '../utils/format';
-import { playSpecificPart, playWithIntent, loadQueue } from '../services/trackPlayer';
+import { playSpecificPart, playWithIntent, loadQueue, playQueuedTrack } from '../services/trackPlayer';
 import { useFolderDataStore } from '../store/folderDataStore';
 import { useSyncStore } from '../store/syncStore';
 
@@ -46,15 +45,14 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
 
   // 点击歌曲条目：立即跳转播放
   const handlePress = useCallback(async (bvid: string) => {
-    const q = usePlayerStore.getState().queue;
-    const nativeQueue = await TrackPlayer.getQueue();
-    const nativeIndex = nativeQueue.findIndex((t) => t.id === bvid);
-    
-    if (nativeIndex !== -1) {
-      await TrackPlayer.skip(nativeIndex);
-      playWithIntent();
-    } else {
-      await loadQueue(q, bvid);
+    const played = await playQueuedTrack(bvid);
+    if (!played) {
+      const q = usePlayerStore.getState().queue;
+      const loaded = await loadQueue(q, bvid);
+      if (loaded === 0) {
+        return;
+      }
+      await playWithIntent();
     }
     usePlayerStore.getState().setCurrentBvid(bvid);
     onClose();

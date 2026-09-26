@@ -20,6 +20,7 @@ import TrackPlayer, {
   State,
 } from 'react-native-track-player';
 import {
+  pausePlayback,
   resumePlayback,
   playSpecificPart,
   skipToNext,
@@ -536,7 +537,7 @@ export const PlayerScreen = () => {
                   size={32}
                   color={themeColors.playTextColor}
                   onPress={() =>
-                    isPlaying ? TrackPlayer.pause() : resumePlayback()
+                    isPlaying ? pausePlayback() : resumePlayback()
                   }
                 />
               )}

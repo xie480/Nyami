@@ -27,7 +27,51 @@ let _ready = false;
 
 const MIN_NATIVE_BUFFER = 8;
 const TARGET_NATIVE_BUFFER = 12;
-let hydratingPromise: Promise<void> | null = null;
+let queueRevision = 0;
+let queueMaintenanceRequested = false;
+let queueMaintenancePromise: Promise<void> | null = null;
+let queueEndRecoveryPromise: Promise<void> | null = null;
+let nativeQueueMutation: Promise<void> = Promise.resolve();
+let playbackIntent = false;
+let userPauseRevision = 0;
+
+function advanceQueueRevision(): number {
+  queueRevision += 1;
+  return queueRevision;
+}
+
+function withNativeQueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = nativeQueueMutation.then(operation, operation);
+  nativeQueueMutation = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+function findNativeNextIndex(
+  nativeQueue: Track[],
+  activeIndex: number | undefined,
+  endedBvid: string | undefined,
+  logicalQueue: FavoriteVideo[],
+): number {
+  if (typeof activeIndex === 'number' && activeIndex >= 0) {
+    return activeIndex + 1 < nativeQueue.length ? activeIndex + 1 : -1;
+  }
+
+  const endedIndex = nativeQueue.findIndex(track => track.id === endedBvid);
+  if (endedIndex !== -1) {
+    return endedIndex + 1 < nativeQueue.length ? endedIndex + 1 : -1;
+  }
+
+  const logicalIndex = logicalQueue.findIndex(video => video.bvid === endedBvid);
+  for (let i = Math.max(0, logicalIndex + 1); i < logicalQueue.length; i++) {
+    const nativeIndex = nativeQueue.findIndex(
+      track => track.id === logicalQueue[i].bvid,
+    );
+    if (nativeIndex !== -1) {
+      return nativeIndex;
+    }
+  }
+  return -1;
+}
 
 export async function setupPlayer() {
   if (_ready) {
@@ -93,24 +137,36 @@ export async function setupPlayer() {
     const store = usePlayerStore.getState();
     if (store.queue && store.queue.length > 0 && store.currentBvid) {
       try {
+        const revision = queueRevision;
         const currentBvid = store.currentBvid;
         const currentIdx = store.queue.findIndex(v => v.bvid === currentBvid);
 
         if (currentIdx !== -1) {
           const targetVideo = store.queue[currentIdx];
           const realTracks = await hydrateVideo(targetVideo);
-          if (realTracks.length > 0) {
-            await TrackPlayer.reset();
-            await TrackPlayer.add(realTracks);
+          if (realTracks.length > 0 && revision === queueRevision) {
+            await withNativeQueueMutation(async () => {
+              if (revision !== queueRevision) {
+                return;
+              }
+              await TrackPlayer.reset();
+              if (revision !== queueRevision) {
+                return;
+              }
+              await TrackPlayer.add(realTracks);
 
-            const lastPosition = storage.getNumber('lastPlaybackPosition');
-            if (lastPosition && lastPosition > 0) {
-              await TrackPlayer.seekTo(lastPosition);
-            }
-            await TrackPlayer.pause();
+              const lastPosition = storage.getNumber('lastPlaybackPosition');
+              if (lastPosition && lastPosition > 0) {
+                await TrackPlayer.seekTo(lastPosition);
+              }
+              await TrackPlayer.pause();
+              playbackIntent = false;
+            });
 
             // 异步水合后续轨道
-            maintainQueueBuffer().catch(() => {});
+            if (revision === queueRevision) {
+              maintainQueueBuffer().catch(() => {});
+            }
           }
         }
       } catch (e) {
@@ -232,87 +288,139 @@ async function hydrateVideo(
   }
 }
 
-async function maintainQueueBuffer() {
-  if (hydratingPromise) {
-    return hydratingPromise;
+async function maintainQueueBufferOnce(revision: number): Promise<void> {
+  const logicalQueue = usePlayerStore.getState().queue;
+  const nativeQueue = await TrackPlayer.getQueue();
+  const activeIndex = await TrackPlayer.getActiveTrackIndex();
+
+  if (revision !== queueRevision || typeof activeIndex !== 'number') {
+    return;
   }
 
-  hydratingPromise = (async () => {
-    const logicalQueue = usePlayerStore.getState().queue;
-    const nativeQueue = await TrackPlayer.getQueue();
-    const activeIndex = await TrackPlayer.getActiveTrackIndex();
+  const remaining = nativeQueue.length - 1 - activeIndex;
+  LoggerService.info(
+    'TrackPlayer',
+    'maintainQueueBuffer',
+    `revision: ${revision}, nativeLength: ${nativeQueue.length}, activeIndex: ${activeIndex}, remaining: ${remaining}`,
+  );
 
-    if (typeof activeIndex !== 'number') {
+  if (remaining >= MIN_NATIVE_BUFFER) {
+    return;
+  }
+
+  const need = TARGET_NATIVE_BUFFER - remaining;
+  const activeTrack = nativeQueue[activeIndex];
+  if (!activeTrack?.id) {
+    return;
+  }
+
+  const logicalIndex = logicalQueue.findIndex(v => v.bvid === activeTrack.id);
+  if (logicalIndex === -1) {
+    return;
+  }
+
+  const nativeIds = new Set(nativeQueue.map(t => t.id));
+  let addedCount = 0;
+  let i = logicalIndex + 1;
+
+  while (addedCount < need && i < logicalQueue.length) {
+    if (revision !== queueRevision) {
       return;
     }
 
-    const remaining = nativeQueue.length - 1 - activeIndex;
+    const video = logicalQueue[i];
+    if (!nativeIds.has(video.bvid)) {
+      try {
+        const tracks = await hydrateVideo(video);
+        if (revision !== queueRevision) {
+          return;
+        }
 
-    LoggerService.info(
-      'TrackPlayer',
-      'maintainQueueBuffer',
-      `nativeLength: ${nativeQueue.length}, activeIndex: ${activeIndex}, remaining: ${remaining}`,
-    );
+        if (tracks.length > 0) {
+          const appended = await withNativeQueueMutation(async () => {
+            if (revision !== queueRevision) {
+              return false;
+            }
 
-    if (remaining >= MIN_NATIVE_BUFFER) {
-      return;
-    }
+            const latestQueue = await TrackPlayer.getQueue();
+            if (latestQueue.some(track => track.id === video.bvid)) {
+              return false;
+            }
+            const latestActiveIndex = await TrackPlayer.getActiveTrackIndex();
+            if (revision !== queueRevision) {
+              return false;
+            }
+            if (typeof latestActiveIndex === 'number') {
+              const latestActiveTrack = latestQueue[latestActiveIndex];
+              const latestLogicalQueue = usePlayerStore.getState().queue;
+              const latestLogicalIndex = latestLogicalQueue.findIndex(
+                item => item.bvid === latestActiveTrack?.id,
+              );
+              const candidateIndex = latestLogicalQueue.findIndex(
+                item => item.bvid === video.bvid,
+              );
+              if (
+                latestLogicalIndex !== -1 &&
+                candidateIndex !== -1 &&
+                candidateIndex <= latestLogicalIndex
+              ) {
+                return false;
+              }
+            }
 
-    const need = TARGET_NATIVE_BUFFER - remaining;
-
-    const activeTrack = nativeQueue[activeIndex];
-    if (!activeTrack?.id) {
-      return;
-    }
-
-    const logicalIndex = logicalQueue.findIndex(v => v.bvid === activeTrack.id);
-    if (logicalIndex === -1) {
-      return;
-    }
-
-    const nativeIds = new Set(nativeQueue.map(t => t.id));
-    let addedCount = 0;
-    let i = logicalIndex + 1;
-
-    while (addedCount < need && i < logicalQueue.length) {
-      const video = logicalQueue[i];
-      if (!nativeIds.has(video.bvid)) {
-        try {
-          // 独立解析每一首歌
-          const tracks = await hydrateVideo(video);
-          if (tracks.length > 0) {
-            // 解析成功后立即入队
             await TrackPlayer.add(tracks);
+            return true;
+          });
+
+          if (appended) {
             nativeIds.add(video.bvid);
             addedCount++;
             LoggerService.info(
               'TrackPlayer',
               'maintainQueueBuffer',
-              `即时追加成功: ${video.bvid}`,
-            );
-          } else {
-            LoggerService.warn(
-              'TrackPlayer',
-              'maintainQueueBuffer',
-              `跳过失效视频: ${video.bvid}`,
+              `revision: ${revision}, 即时追加成功: ${video.bvid}`,
             );
           }
-        } catch (e) {
+        } else {
           LoggerService.warn(
             'TrackPlayer',
             'maintainQueueBuffer',
-            `解析异常跳过: ${video.bvid}`,
-            e,
+            `跳过失效视频: ${video.bvid}`,
           );
         }
+      } catch (e) {
+        LoggerService.warn(
+          'TrackPlayer',
+          'maintainQueueBuffer',
+          `解析异常跳过: ${video.bvid}`,
+          e,
+        );
       }
-      i++;
     }
-  })().finally(() => {
-    hydratingPromise = null;
-  });
+    i++;
+  }
+}
 
-  return hydratingPromise;
+async function runQueueBufferMaintenance(): Promise<void> {
+  try {
+    while (queueMaintenanceRequested) {
+      queueMaintenanceRequested = false;
+      await maintainQueueBufferOnce(queueRevision);
+    }
+  } finally {
+    queueMaintenancePromise = null;
+    if (queueMaintenanceRequested) {
+      await maintainQueueBuffer();
+    }
+  }
+}
+
+function maintainQueueBuffer(): Promise<void> {
+  queueMaintenanceRequested = true;
+  if (!queueMaintenancePromise) {
+    queueMaintenancePromise = runQueueBufferMaintenance();
+  }
+  return queueMaintenancePromise;
 }
 
 export async function loadQueue(
@@ -323,6 +431,9 @@ export async function loadQueue(
     return 0;
   }
 
+  const revision = advanceQueueRevision();
+  const pauseRevision = userPauseRevision;
+  usePlayerStore.getState().setPlaybackError(null);
   usePlayerStore.getState().setResolving(true);
   try {
     const startIndex = Math.max(
@@ -334,16 +445,38 @@ export async function loadQueue(
 
     // 1. 仅水合当前目标歌曲 (Fast Path)，实现秒播
     const targetTracks = await hydrateVideo(targetVideo);
+    if (revision !== queueRevision) {
+      return 0;
+    }
 
     if (targetTracks.length === 0) {
       usePlayerStore.getState().setPlaybackError('加载音频失败，请检查网络');
       return 0;
     }
 
-    // 2. 立即重置并播放首曲
-    await TrackPlayer.reset();
-    await TrackPlayer.add(targetTracks);
-    await TrackPlayer.play();
+    // 2. 串行重置并播放首曲；过期的加载不能覆盖较新的队列。
+    const loaded = await withNativeQueueMutation(async () => {
+      if (revision !== queueRevision) {
+        return false;
+      }
+      await TrackPlayer.reset();
+      if (revision !== queueRevision) {
+        return false;
+      }
+      await TrackPlayer.add(targetTracks);
+      if (revision !== queueRevision) {
+        return false;
+      }
+      if (pauseRevision !== userPauseRevision && !playbackIntent) {
+        return true;
+      }
+      await TrackPlayer.play();
+      playbackIntent = true;
+      return true;
+    });
+    if (!loaded || revision !== queueRevision) {
+      return 0;
+    }
 
     if (targetTracks[0]) {
       autoCache(targetTracks[0].id as string);
@@ -364,12 +497,56 @@ export async function loadQueue(
 
     return 1;
   } finally {
-    usePlayerStore.getState().setResolving(false);
+    if (revision === queueRevision) {
+      usePlayerStore.getState().setResolving(false);
+    }
   }
 }
 
 export async function playWithIntent(): Promise<void> {
-  await TrackPlayer.play();
+  await withNativeQueueMutation(async () => {
+    await TrackPlayer.play();
+    playbackIntent = true;
+  });
+}
+
+export async function pausePlayback(): Promise<void> {
+  userPauseRevision += 1;
+  playbackIntent = false;
+  await withNativeQueueMutation(async () => {
+    await TrackPlayer.pause();
+    playbackIntent = false;
+  });
+}
+
+export async function playQueuedTrack(bvid: string): Promise<boolean> {
+  const revision = queueRevision;
+  const pauseRevision = userPauseRevision;
+  return withNativeQueueMutation(async () => {
+    if (revision !== queueRevision) {
+      return false;
+    }
+    const nativeQueue = await TrackPlayer.getQueue();
+    const nativeIndex = nativeQueue.findIndex(track => track.id === bvid);
+    if (revision !== queueRevision) {
+      return false;
+    }
+    if (nativeIndex === -1) {
+      return false;
+    }
+    await TrackPlayer.skip(nativeIndex);
+    if (revision !== queueRevision) {
+      return false;
+    }
+    if (pauseRevision !== userPauseRevision && !playbackIntent) {
+      return true;
+    }
+    await TrackPlayer.play();
+    playbackIntent = true;
+    usePlayerStore.getState().setCurrentBvid(bvid);
+    usePlayerStore.getState().setPlaybackError(null);
+    return true;
+  });
 }
 
 export async function resolveCurrentTrack(_version: number): Promise<void> {
@@ -377,6 +554,7 @@ export async function resolveCurrentTrack(_version: number): Promise<void> {
 }
 
 export async function insertNext(video: FavoriteVideo): Promise<void> {
+  const revision = advanceQueueRevision();
   const cur = usePlayerStore.getState();
   const logicalQueue = [...cur.queue];
 
@@ -391,20 +569,36 @@ export async function insertNext(video: FavoriteVideo): Promise<void> {
     }
   }
 
+  if (revision !== queueRevision) {
+    return;
+  }
   logicalQueue.splice(insertPos, 0, video);
   cur.setQueue(logicalQueue, cur.currentBvid ?? undefined);
 
-  const activeIndex = await TrackPlayer.getActiveTrackIndex();
-  if (typeof activeIndex === 'number') {
-    const realTracks = await hydrateVideo(video);
-    if (realTracks.length > 0) {
-      // 插入到当前播放轨道之后
-      await TrackPlayer.add(realTracks, activeIndex + 1);
-    }
+  const realTracks = await hydrateVideo(video);
+  if (revision !== queueRevision) {
+    return;
   }
+
+  if (realTracks.length > 0) {
+    await withNativeQueueMutation(async () => {
+      if (revision !== queueRevision) {
+        return;
+      }
+      const activeIndex = await TrackPlayer.getActiveTrackIndex();
+      if (revision !== queueRevision) {
+        return;
+      }
+      if (typeof activeIndex === 'number') {
+        await TrackPlayer.add(realTracks, activeIndex + 1);
+      }
+    });
+  }
+  maintainQueueBuffer().catch(() => {});
 }
 
 export async function removeFromQueue(bvid: string): Promise<void> {
+  advanceQueueRevision();
   const cur = usePlayerStore.getState();
   const filtered = cur.queue.filter(v => v.bvid !== bvid);
   cur.setQueue(filtered, cur.currentBvid ?? undefined);
@@ -417,7 +611,13 @@ export async function reorderQueue(
   videos: FavoriteVideo[],
   startBvid?: string,
 ): Promise<void> {
+  advanceQueueRevision();
   if (videos.length === 0) {
+    usePlayerStore.getState().setQueue([], undefined);
+    await withNativeQueueMutation(async () => {
+      await TrackPlayer.reset();
+      playbackIntent = false;
+    });
     return;
   }
 
@@ -452,6 +652,7 @@ export async function appendQueue(
     return;
   }
 
+  advanceQueueRevision();
   const cur = usePlayerStore.getState();
   const combined = [...cur.queue, ...videos];
   cur.setQueue(combined, startBvid ?? cur.currentBvid ?? undefined);
@@ -489,46 +690,98 @@ async function autoCache(bvid: string, cid?: number) {
 }
 
 export async function resumePlayback(): Promise<void> {
-  await TrackPlayer.play().catch(() => {});
+  await withNativeQueueMutation(async () => {
+    await TrackPlayer.play();
+    playbackIntent = true;
+  }).catch(() => {});
 }
 
 let lastSkipToastTime = 0;
 let isSkipping = false;
 
-function showSkipLimitToast() {
+function showQueueNotReadyToast() {
   const now = Date.now();
   if (now - lastSkipToastTime > 2000) {
     if (Platform.OS === 'android') {
       try {
-        ToastAndroid.show('为了防止触发限流，请稍后再切歌', ToastAndroid.SHORT);
+        ToastAndroid.show('下一首暂时无法播放，请检查网络后重试', ToastAndroid.SHORT);
       } catch (e) {}
     }
     lastSkipToastTime = now;
   }
 }
 
+async function hasLogicalNextTrack(): Promise<boolean> {
+  const activeTrack = await TrackPlayer.getActiveTrack();
+  const activeBvid = (activeTrack?.id as string | undefined)
+    ?? usePlayerStore.getState().currentBvid
+    ?? undefined;
+  const logicalQueue = usePlayerStore.getState().queue;
+  const logicalIndex = logicalQueue.findIndex(video => video.bvid === activeBvid);
+  return logicalIndex !== -1 && logicalIndex + 1 < logicalQueue.length;
+}
+
+async function skipNativeQueueToNext(pauseRevision: number): Promise<boolean> {
+  const revision = queueRevision;
+  return withNativeQueueMutation(async () => {
+    if (revision !== queueRevision) {
+      return false;
+    }
+    const nativeQueue = await TrackPlayer.getQueue();
+    const activeIndex = await TrackPlayer.getActiveTrackIndex();
+    const activeTrack = await TrackPlayer.getActiveTrack();
+    if (revision !== queueRevision) {
+      return false;
+    }
+    const currentIndex =
+      typeof activeIndex === 'number' && activeIndex >= 0
+        ? activeIndex
+        : nativeQueue.findIndex(track => track.id === activeTrack?.id);
+    const remaining =
+      currentIndex >= 0 ? nativeQueue.length - 1 - currentIndex : 0;
+    if (remaining <= 0) {
+      return false;
+    }
+    if (typeof activeIndex === 'number' && activeIndex >= 0) {
+      await TrackPlayer.skipToNext();
+    } else {
+      await TrackPlayer.skip(currentIndex + 1);
+    }
+    if (pauseRevision !== userPauseRevision && !playbackIntent) {
+      return true;
+    }
+    await TrackPlayer.play();
+    playbackIntent = true;
+    return true;
+  });
+}
+
 export async function skipToNext() {
+  if (queueEndRecoveryPromise) {
+    await queueEndRecoveryPromise.catch(() => {});
+    return;
+  }
   if (isSkipping) {
     return;
   }
   isSkipping = true;
+  const pauseRevision = userPauseRevision;
   try {
-    const nativeQueue = await TrackPlayer.getQueue();
-    const activeIndex = await TrackPlayer.getActiveTrackIndex();
-
-    const remaining =
-      typeof activeIndex === 'number'
-        ? nativeQueue.length - 1 - activeIndex
-        : 0;
-
-    if (remaining <= 0) {
-      showSkipLimitToast();
-      maintainQueueBuffer().catch(() => {});
-      return;
+    let skipped = await skipNativeQueueToNext(pauseRevision);
+    const hasLogicalNext = !skipped && await hasLogicalNextTrack();
+    if (hasLogicalNext) {
+      await maintainQueueBuffer();
+      skipped = await skipNativeQueueToNext(pauseRevision);
     }
 
-    await TrackPlayer.skipToNext();
-    await TrackPlayer.play();
+    if (!skipped && hasLogicalNext) {
+      usePlayerStore.getState().setPlaybackError('下一首暂时无法加载，请检查网络后重试');
+      showQueueNotReadyToast();
+    } else {
+      if (skipped) {
+        usePlayerStore.getState().setPlaybackError(null);
+      }
+    }
   } catch (e) {
     LoggerService.error(
       'TrackPlayer',
@@ -536,7 +789,8 @@ export async function skipToNext() {
       'Error skipping to next',
       e,
     );
-    showSkipLimitToast();
+    usePlayerStore.getState().setPlaybackError('下一首暂时无法加载，请检查网络后重试');
+    showQueueNotReadyToast();
     maintainQueueBuffer().catch(() => {});
   } finally {
     isSkipping = false;
@@ -544,9 +798,23 @@ export async function skipToNext() {
 }
 
 export async function skipToPrevious() {
+  const revision = queueRevision;
+  const pauseRevision = userPauseRevision;
   try {
-    await TrackPlayer.skipToPrevious();
-    await TrackPlayer.play();
+    await withNativeQueueMutation(async () => {
+      if (revision !== queueRevision) {
+        return;
+      }
+      await TrackPlayer.skipToPrevious();
+      if (revision !== queueRevision) {
+        return;
+      }
+      if (pauseRevision !== userPauseRevision && !playbackIntent) {
+        return;
+      }
+      await TrackPlayer.play();
+      playbackIntent = true;
+    });
   } catch (e) {
     LoggerService.error(
       'TrackPlayer',
@@ -557,14 +825,191 @@ export async function skipToPrevious() {
   }
 }
 
+async function recoverQueueAfterEnd(endedTrackIndex: number): Promise<void> {
+  if (isSkipping) {
+    return;
+  }
+  if (queueEndRecoveryPromise) {
+    return queueEndRecoveryPromise;
+  }
+
+  const revision = queueRevision;
+  queueEndRecoveryPromise = (async () => {
+    if (!playbackIntent) {
+      return;
+    }
+    const playbackState = await TrackPlayer.getPlaybackState();
+    if (
+      playbackState.state === State.Playing ||
+      playbackState.state === State.Buffering ||
+      playbackState.state === State.Loading
+    ) {
+      return;
+    }
+
+    const nativeQueue = await TrackPlayer.getQueue();
+    const activeTrack = await TrackPlayer.getActiveTrack();
+    if (revision !== queueRevision) {
+      return;
+    }
+    const endedTrack = nativeQueue[endedTrackIndex] ?? activeTrack;
+    const endedBvid = (endedTrack?.id as string | undefined)
+      ?? usePlayerStore.getState().currentBvid
+      ?? undefined;
+    const logicalQueue = usePlayerStore.getState().queue;
+    const logicalIndex = logicalQueue.findIndex(video => video.bvid === endedBvid);
+    if (logicalIndex === -1 || logicalIndex + 1 >= logicalQueue.length) {
+      return;
+    }
+
+    await maintainQueueBuffer();
+    if (revision !== queueRevision) {
+      return;
+    }
+
+    let latestNativeQueue = await TrackPlayer.getQueue();
+    let latestActiveIndex = await TrackPlayer.getActiveTrackIndex();
+    let latestLogicalQueue = usePlayerStore.getState().queue;
+    let nextNativeIndex = findNativeNextIndex(
+      latestNativeQueue,
+      latestActiveIndex,
+      endedBvid,
+      latestLogicalQueue,
+    );
+
+    // 如果补队列因当前轨道索引暂不可用而未完成，至少尝试解析并加入逻辑下一首。
+    if (nextNativeIndex === -1) {
+      latestLogicalQueue = usePlayerStore.getState().queue;
+      const latestLogicalIndex = latestLogicalQueue.findIndex(
+        video => video.bvid === endedBvid,
+      );
+      const nextVideo = latestLogicalQueue[latestLogicalIndex + 1];
+      if (!nextVideo || latestLogicalIndex === -1) {
+        return;
+      }
+
+      const tracks = await hydrateVideo(nextVideo);
+      if (revision !== queueRevision || tracks.length === 0) {
+        usePlayerStore.getState().setPlaybackError('下一首暂时无法加载，请检查网络后重试');
+        showQueueNotReadyToast();
+        return;
+      }
+
+      await withNativeQueueMutation(async () => {
+        if (revision !== queueRevision) {
+          return;
+        }
+        latestNativeQueue = await TrackPlayer.getQueue();
+        if (revision !== queueRevision) {
+          return;
+        }
+        if (!latestNativeQueue.some(track => track.id === nextVideo.bvid)) {
+          await TrackPlayer.add(tracks);
+        }
+      });
+      latestNativeQueue = await TrackPlayer.getQueue();
+      latestActiveIndex = await TrackPlayer.getActiveTrackIndex();
+      latestLogicalQueue = usePlayerStore.getState().queue;
+      nextNativeIndex = findNativeNextIndex(
+        latestNativeQueue,
+        latestActiveIndex,
+        endedBvid,
+        latestLogicalQueue,
+      );
+    }
+
+    if (revision !== queueRevision) {
+      return;
+    }
+
+    const resumed = await withNativeQueueMutation(async () => {
+      if (revision !== queueRevision) {
+        return false;
+      }
+      latestNativeQueue = await TrackPlayer.getQueue();
+      latestActiveIndex = await TrackPlayer.getActiveTrackIndex();
+      if (revision !== queueRevision) {
+        return false;
+      }
+      latestLogicalQueue = usePlayerStore.getState().queue;
+      nextNativeIndex = findNativeNextIndex(
+        latestNativeQueue,
+        latestActiveIndex,
+        endedBvid,
+        latestLogicalQueue,
+      );
+      if (nextNativeIndex === -1) {
+        return false;
+      }
+
+      await TrackPlayer.skip(nextNativeIndex);
+      if (revision !== queueRevision) {
+        return false;
+      }
+      if (!playbackIntent) {
+        return false;
+      }
+      await TrackPlayer.play();
+      playbackIntent = true;
+      return true;
+    });
+
+    if (resumed) {
+      usePlayerStore.getState().setPlaybackError(null);
+    } else if (revision === queueRevision && playbackIntent) {
+      usePlayerStore.getState().setPlaybackError('下一首暂时无法加载，请检查网络后重试');
+      showQueueNotReadyToast();
+    }
+  })().finally(() => {
+    queueEndRecoveryPromise = null;
+    if (revision !== queueRevision) {
+      TrackPlayer.getPlaybackState()
+        .then(state => {
+          if (state.state === State.Ended) {
+            return recoverQueueAfterEnd(endedTrackIndex);
+          }
+          return undefined;
+        })
+        .catch(error => {
+          LoggerService.warn(
+            'TrackPlayer',
+            'PlaybackQueueEnded',
+            '检查队列代次变更后的恢复状态失败',
+            error,
+          );
+        });
+    }
+  });
+
+  return queueEndRecoveryPromise;
+}
+
 export async function PlaybackService() {
-  TrackPlayer.addEventListener(Event.RemotePlay, () => TrackPlayer.play());
-  TrackPlayer.addEventListener(Event.RemotePause, () => TrackPlayer.pause());
-  TrackPlayer.addEventListener(Event.RemoteStop, () => TrackPlayer.stop());
+  TrackPlayer.addEventListener(Event.RemotePlay, resumePlayback);
+  TrackPlayer.addEventListener(Event.RemotePause, pausePlayback);
+  TrackPlayer.addEventListener(Event.RemoteStop, () => {
+    userPauseRevision += 1;
+    playbackIntent = false;
+    return withNativeQueueMutation(async () => {
+      await TrackPlayer.stop();
+      playbackIntent = false;
+    });
+  });
 
   // 极简切歌：原生队列中已经是真实 URL，直接 skip
   TrackPlayer.addEventListener(Event.RemoteNext, skipToNext);
   TrackPlayer.addEventListener(Event.RemotePrevious, skipToPrevious);
+
+  TrackPlayer.addEventListener(Event.PlaybackQueueEnded, ({track}) => {
+    recoverQueueAfterEnd(track).catch(error => {
+      LoggerService.error(
+        'TrackPlayer',
+        'PlaybackQueueEnded',
+        '队列结束后恢复下一首失败',
+        error,
+      );
+    });
+  });
 
   TrackPlayer.addEventListener(Event.RemoteSeek, ({position}) =>
     TrackPlayer.seekTo(position),
@@ -646,6 +1091,8 @@ export async function playSpecificPart(
   cid: number,
   partTitle: string,
 ) {
+  const revision = queueRevision;
+  const pauseRevision = userPauseRevision;
   usePlayerStore.getState().setResolving(true);
   try {
     const expandMultiPart = useSettingsStore.getState().expandMultiPart;
@@ -656,9 +1103,30 @@ export async function playSpecificPart(
     );
 
     if (existingIndex !== -1) {
-      await TrackPlayer.skip(existingIndex);
-      await TrackPlayer.play();
-      usePlayerStore.getState().setCurrentCid(cid);
+      const switched = await withNativeQueueMutation(async () => {
+        if (revision !== queueRevision) {
+          return false;
+        }
+        const latestQueue = await TrackPlayer.getQueue();
+        if (revision !== queueRevision) {
+          return false;
+        }
+        const latestIndex = latestQueue.findIndex(
+          track => track.id === bvid && (track as any).cid === cid,
+        );
+        if (latestIndex === -1) {
+          return false;
+        }
+        await TrackPlayer.skip(latestIndex);
+        if (pauseRevision !== userPauseRevision && !playbackIntent) {
+          return false;
+        }
+        await TrackPlayer.play();
+        return true;
+      });
+      if (switched && revision === queueRevision) {
+        usePlayerStore.getState().setCurrentCid(cid);
+      }
       return;
     }
 
@@ -669,6 +1137,9 @@ export async function playSpecificPart(
     }
 
     const realTracks = await hydrateVideo(video, cid);
+    if (revision !== queueRevision) {
+      return;
+    }
     if (realTracks.length === 0) {
       usePlayerStore.getState().setPlaybackError('加载分P失败');
       return;
@@ -676,28 +1147,49 @@ export async function playSpecificPart(
     const realTrack = realTracks[0];
     realTrack.title = `${video.title} - ${partTitle}`;
 
-    const rawIdx = await TrackPlayer.getActiveTrackIndex();
-    const idx = typeof rawIdx === 'number' ? rawIdx : -1;
-
-    if (expandMultiPart) {
-      const insertPos = idx >= 0 ? idx + 1 : 0;
-      await TrackPlayer.add(realTrack, insertPos);
-      await TrackPlayer.skip(insertPos);
-    } else {
-      if (idx === -1) {
-        await TrackPlayer.add(realTrack, 0);
-        await TrackPlayer.skip(0);
-      } else {
-        // 工业级方案：禁止 remove，直接 add 并 skip
-        await TrackPlayer.add(realTrack, idx + 1);
-        await TrackPlayer.skip(idx + 1);
+    const switched = await withNativeQueueMutation(async () => {
+      if (revision !== queueRevision) {
+        return false;
       }
+      const rawIdx = await TrackPlayer.getActiveTrackIndex();
+      if (revision !== queueRevision) {
+        return false;
+      }
+      const idx = typeof rawIdx === 'number' ? rawIdx : -1;
+
+      if (expandMultiPart) {
+        const insertPos = idx >= 0 ? idx + 1 : 0;
+        await TrackPlayer.add(realTrack, insertPos);
+        await TrackPlayer.skip(insertPos);
+      } else {
+        if (idx === -1) {
+          await TrackPlayer.add(realTrack, 0);
+          await TrackPlayer.skip(0);
+        } else {
+          // 保留原生历史轨道，插入分P后直接跳转。
+          await TrackPlayer.add(realTrack, idx + 1);
+          await TrackPlayer.skip(idx + 1);
+        }
+      }
+      if (revision !== queueRevision) {
+        return false;
+      }
+      if (pauseRevision !== userPauseRevision && !playbackIntent) {
+        return false;
+      }
+      await TrackPlayer.play();
+      playbackIntent = true;
+      return true;
+    });
+    if (switched && revision === queueRevision) {
+      usePlayerStore.getState().setCurrentCid(cid);
+      usePlayerStore.getState().setPlaybackError(null);
     }
-    await TrackPlayer.play();
-    usePlayerStore.getState().setCurrentCid(cid);
 
     maintainQueueBuffer().catch(() => {});
   } finally {
-    usePlayerStore.getState().setResolving(false);
+    if (revision === queueRevision) {
+      usePlayerStore.getState().setResolving(false);
+    }
   }
 }

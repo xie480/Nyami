@@ -13,7 +13,7 @@ import TrackPlayer, {
   usePlaybackState,
   State,
 } from 'react-native-track-player';
-import {resumePlayback, skipToNext} from '../services/trackPlayer';
+import {pausePlayback, resumePlayback, skipToNext} from '../services/trackPlayer';
 import {useNavigation} from '@react-navigation/native';
 import {IconButton} from './IconButton';
 import {GlassView} from './GlassView';
@@ -126,7 +126,7 @@ export const MiniPlayer: React.FC = () => {
               size={26}
               color={t.colors.text}
               onPress={() =>
-                isPlaying ? TrackPlayer.pause() : resumePlayback()
+                isPlaying ? pausePlayback() : resumePlayback()
               }
             />
           )}
