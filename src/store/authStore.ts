@@ -1,7 +1,10 @@
-import { create } from 'zustand';
-import { cookieService } from '../services';
-import { biliApi } from '../services/biliApi';
+import {create} from 'zustand';
+import {cookieService} from '../services';
+import {biliApi} from '../services/biliApi';
 import LoggerService from '../services/LoggerService';
+import {biliLoginService} from '../services/biliLoginService';
+import {biliWebViewBridge} from '../services/biliWebViewBridge';
+import {AuthRequiredError} from '../core/errors';
 
 type UserInfo = {
   uid: string;
@@ -34,7 +37,7 @@ type AuthState = {
   /** 认证状态是否已初始化完成 */
   authReady: boolean;
   /** 登录成功后调用，设置状态并可传入 UID */
-  login: (uid?: string) => Promise<void>;
+  login: (uid?: string) => Promise<boolean>;
   /** 登出，清除本地 Cookie 并重置状态 */
   logout: () => Promise<void>;
   /** 用于在登录完成后继续挂起的请求 */
@@ -57,55 +60,119 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isVip: false,
   authReady: false,
   initAuth: async () => {
-    const cookie = await cookieService.get();
-    if (cookie) {
-      try {
-        const info = await biliApi.getUserInfo();
-        const isVip = info.vipStatus.status === 1 && info.vipStatus.type > 0;
-        set({
-          loggedIn: true,
-          userId: info.uid,
-          userInfo: { uid: info.uid, name: info.name, avatar: info.avatar },
-          vipStatus: info.vipStatus,
-          isVip,
-        });
-      } catch (e) {
-        LoggerService.error('authStore', 'initAuth', 'initAuth failed', e);
-        set({ loggedIn: false, userId: null, userInfo: null, vipStatus: null, isVip: false });
-      }
-    } else {
-      set({ loggedIn: false, userId: null, userInfo: null, vipStatus: null, isVip: false });
-    }
-    set({ authReady: true });
-  },
-  setAuthReady: (ready) => set({ authReady: ready }),
-  login: async (uid) => {
-    set({ loggedIn: true, userId: uid ?? null });
     try {
-      const info = await biliApi.getUserInfo();
+      const credentials = await cookieService.getCredentials();
+      if (!credentials.cookie) {
+        set({
+          loggedIn: false,
+          userId: null,
+          userInfo: null,
+          vipStatus: null,
+          isVip: false,
+        });
+        return;
+      }
+
+      if (credentials.refreshToken) {
+        try {
+          const refreshInfo = await biliLoginService.getCookieRefreshInfo(
+            credentials.cookie,
+          );
+          if (refreshInfo.refresh) {
+            const refreshed = await biliWebViewBridge.refreshCookie(
+              credentials.cookie,
+              credentials.refreshToken,
+              refreshInfo.timestamp,
+            );
+            await cookieService.setCredentials(
+              refreshed.cookie,
+              refreshed.refreshToken,
+            );
+          }
+        } catch (error) {
+          // 续期网络失败时继续校验现有 Cookie；绝不因临时失败清除 Keychain。
+          LoggerService.warn(
+            'authStore',
+            'initAuth',
+            error instanceof AuthRequiredError
+              ? 'B 站会话需要重新登录'
+              : 'B 站会话续期未完成',
+          );
+        }
+      }
+
+      const info = await biliApi.getUserInfo(true);
       const isVip = info.vipStatus.status === 1 && info.vipStatus.type > 0;
       set({
-        userInfo: { uid: info.uid, name: info.name, avatar: info.avatar },
-        userId: info.uid,
+        loggedIn: true,
+        userId: info.uid || null,
+        userInfo: {uid: info.uid, name: info.name, avatar: info.avatar},
         vipStatus: info.vipStatus,
         isVip,
       });
+    } catch (error) {
+      LoggerService.warn(
+        'authStore',
+        'initAuth',
+        error instanceof AuthRequiredError
+          ? '已保存的 B 站会话失效'
+          : '恢复 B 站登录状态失败',
+      );
+      set({
+        loggedIn: false,
+        userId: null,
+        userInfo: null,
+        vipStatus: null,
+        isVip: false,
+      });
+    } finally {
+      set({authReady: true});
+    }
+  },
+  setAuthReady: ready => set({authReady: ready}),
+  login: async uid => {
+    let loggedIn = false;
+    try {
+      const info = await biliApi.getUserInfo(true);
+      const isVip = info.vipStatus.status === 1 && info.vipStatus.type > 0;
+      set({
+        loggedIn: true,
+        userInfo: {uid: info.uid, name: info.name, avatar: info.avatar},
+        userId: info.uid || uid || null,
+        vipStatus: info.vipStatus,
+        isVip,
+      });
+      loggedIn = true;
     } catch (e) {
-      LoggerService.error('authStore', 'login', 'login fetch user info failed', e);
+      LoggerService.warn('authStore', 'login', 'B 站未确认当前登录凭证');
+      set({
+        loggedIn: false,
+        userId: null,
+        userInfo: null,
+        vipStatus: null,
+        isVip: false,
+      });
     }
     const resolver = get().loginResolver;
     if (resolver) {
       resolver();
-      set({ loginResolver: null });
+      set({loginResolver: null});
     }
+    return loggedIn;
   },
   logout: async () => {
     await cookieService.clear();
-    set({ loggedIn: false, userId: null, userInfo: null, vipStatus: null, isVip: false });
+    set({
+      loggedIn: false,
+      userId: null,
+      userInfo: null,
+      vipStatus: null,
+      isVip: false,
+    });
   },
-  setLoginResolver: (resolver) => {
-    set({ loginResolver: resolver });
+  setLoginResolver: resolver => {
+    set({loginResolver: resolver});
   },
   loginResolver: null,
-  setUserInfo: (info) => set({ userInfo: info }),
+  setUserInfo: info => set({userInfo: info}),
 }));
