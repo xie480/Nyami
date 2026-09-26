@@ -39,31 +39,30 @@ function extractDomain(url: string): string {
   }
 }
 
-/** 全局 CDN 域名测速缓存：避免对同一域名的每个 BVID 重复 HEAD 请求 */
-const domainSpeedCache = new Map<string, { fastestBaseUrl: string; timestamp: number }>();
+/**
+ * CDN 主机偏好缓存：只保存主机名，不保存带有单曲路径和签名参数的完整播放 URL。
+ * key 为原始 baseUrl 主机；命中后仍需从当前资源的候选 URL 中选出对应地址。
+ */
+const domainSpeedCache = new Map<string, { fastestHostname: string; timestamp: number }>();
 const DOMAIN_CACHE_TTL = 30 * 60 * 1000; // 30 分钟
 
 /**
- * 基于域名缓存的快速 URL 选择
- * - 如果当前 baseUrl 所在域名已被测速为最快，跳过 HEAD 请求直接使用
- * - 如果当前 baseUrl 域名未知，执行测速并缓存结果
+ * 基于主机偏好缓存的 URL 选择。跨请求只能复用主机偏好，不能复用媒体 URL。
  */
-async function selectFastestUrl(bvid: string, baseUrl: string, backupUrls: string[]): Promise<string> {
-  const cacheKey = `fastestUrl:${bvid}`;
-  const cached = cache.get<string>(cacheKey);
-  if (cached) return cached;
-
-  const domain = extractDomain(baseUrl);
+async function selectFastestUrl(baseUrl: string, backupUrls: string[]): Promise<string> {
+  const sourceHostname = extractDomain(baseUrl);
   const now = Date.now();
+  const urls = [baseUrl, ...(backupUrls || [])];
 
-  // 域名级缓存命中：直接返回该域名下的最快 URL，跳过 HEAD 请求
-  const domainEntry = domainSpeedCache.get(domain);
+  // 只从当前资源的候选地址中挑选偏好主机，绝不复用另一首歌的完整 URL。
+  const domainEntry = sourceHostname ? domainSpeedCache.get(sourceHostname) : undefined;
   if (domainEntry && (now - domainEntry.timestamp) < DOMAIN_CACHE_TTL) {
-    cache.set(cacheKey, domainEntry.fastestBaseUrl, config.cacheTTL.audioUrl);
-    return domainEntry.fastestBaseUrl;
+    const preferredUrl = urls.find(
+      url => extractDomain(url) === domainEntry.fastestHostname,
+    );
+    if (preferredUrl) return preferredUrl;
   }
 
-  const urls = [baseUrl, ...(backupUrls || [])];
   const tryUrl = async (url: string): Promise<string> => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
@@ -72,39 +71,37 @@ async function selectFastestUrl(bvid: string, baseUrl: string, backupUrls: strin
       Referer: config.referer,
     };
     try {
-      const res = await fetch(url, {
-        method: 'HEAD',
-        headers: commonHeaders,
-        signal: controller.signal,
-      });
-      if (res.ok) return url;
-    } catch {}
-    try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: { ...commonHeaders, Range: 'bytes=0-0' },
-        signal: controller.signal,
-      });
-      if (res.ok) return url;
-    } catch {}
-    throw new Error('unreachable');
+      try {
+        const res = await fetch(url, {
+          method: 'HEAD',
+          headers: commonHeaders,
+          signal: controller.signal,
+        });
+        if (res.ok) return url;
+      } catch {}
+      try {
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: { ...commonHeaders, Range: 'bytes=0-0' },
+          signal: controller.signal,
+        });
+        if (res.ok) return url;
+      } catch {}
+      throw new Error('unreachable');
+    } finally {
+      clearTimeout(timeout);
+    }
   };
 
   try {
     const fastest = await Promise.any(urls.map(tryUrl));
-    cache.set(cacheKey, fastest, config.cacheTTL.audioUrl);
-    // 缓存域名级结果
-    const fastestDomain = extractDomain(fastest);
-    if (fastestDomain) {
-      domainSpeedCache.set(fastestDomain, { fastestBaseUrl: fastest, timestamp: now });
+    const fastestHostname = extractDomain(fastest);
+    if (sourceHostname && fastestHostname) {
+      domainSpeedCache.set(sourceHostname, { fastestHostname, timestamp: now });
     }
     return fastest;
   } catch {
-    cache.set(cacheKey, baseUrl, config.cacheTTL.audioUrl);
-    // 即使全部失败，也缓存域名结果避免重复测速
-    if (domain) {
-      domainSpeedCache.set(domain, { fastestBaseUrl: baseUrl, timestamp: now });
-    }
+    // 探测失败时仅将本资源的 baseUrl 作为临时回退，不污染跨资源主机偏好。
     return baseUrl;
   }
 }
@@ -181,7 +178,7 @@ export const audioService = {
               id: audio.id,
               bitrate: Math.round((audio.bandwidth || 0) / 1000),
               mimeType: audio.mimeType,
-              baseUrl: await selectFastestUrl(bvid, audio.baseUrl, audio.backupUrl),
+              baseUrl: await selectFastestUrl(audio.baseUrl, audio.backupUrl),
               backupUrl: audio.backupUrl,
             },
             parts,

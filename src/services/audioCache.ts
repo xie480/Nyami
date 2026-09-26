@@ -4,7 +4,10 @@ import LoggerService from './LoggerService';
 import type { Quality } from '../types/domain';
 
 const CACHE_DIR = `${RNFS.DocumentDirectoryPath}/audio_cache`;
-const META_KEY = 'audioCache:meta';
+const LEGACY_META_KEY = 'audioCache:meta';
+// 旧版本元数据没有可靠的媒体来源信息，曾可能把错误 URL 下载到曲目缓存中。
+// 使用新索引版本使旧缓存不再命中；旧媒体文件保留在目录中，避免无提示地批量删除用户文件。
+const META_KEY = 'audioCache:meta:v2';
 const MAX_BYTES = 500 * 1024 * 1024; // 500 MB
 
 interface CacheItem {
@@ -146,13 +149,16 @@ class AudioCache {
 
   async clearAll() {
     await this.ready;
-    const meta = this.getMeta();
+    // 一并清理旧索引引用的文件，保持设置页“清理缓存”的既有语义。
+    const legacyMeta = storage.getJSON<MetaMap>(LEGACY_META_KEY) || {};
+    const meta = {...legacyMeta, ...this.getMeta()};
     for (const item of Object.values(meta)) {
       try {
         if (await RNFS.exists(item.path)) await RNFS.unlink(item.path);
       } catch {}
     }
     this.setMeta({});
+    storage.delete(LEGACY_META_KEY);
   }
 }
 
