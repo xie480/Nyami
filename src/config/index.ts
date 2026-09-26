@@ -27,9 +27,10 @@
     burstSize: 2,
   },
 
-  /** 重试次数 */
+  /** 重试次数（不含首次请求） */
   retry: {
     maxAttempts: 6,
     delayMs: 2000,
+    totalTimeoutMs: 180000, // 单次 API 请求及全部重试的最长耗时：3 分钟
   },
 };

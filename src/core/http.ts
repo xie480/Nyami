@@ -74,15 +74,19 @@ export async function biliGet<T>(
   retries = config.retry.maxAttempts,
 ): Promise<T> {
   let lastError: any;
-  const absoluteTimeout = 60000; // 60 秒的绝对超时（与 config.httpTimeout 对齐）
+  const retryDeadline = Date.now() + config.retry.totalTimeoutMs;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    const remainingMs = retryDeadline - Date.now();
+    if (remainingMs <= 0) {
+      throw lastError;
+    }
     // 为每次尝试创建独立的 AbortController，以实现绝对超时
     const abortController = new AbortController();
     const timeoutId = setTimeout(
       () => abortController.abort(),
-      absoluteTimeout,
+      Math.min(config.httpTimeout, remainingMs),
     );
-    // 始终使用内部 abortController.signal，确保 60 秒超时必定生效
+    // 使用内部 abortController.signal，超时不超过本次重试预算剩余时间
     const combinedSignal = abortController.signal;
     // 若用户提供了外部 signal，在其 abort 时同步 abort 内部 controller，保证手动取消也能中断请求
     const onAbort = () => abortController.abort();
@@ -144,18 +148,24 @@ export async function biliGet<T>(
         throw err;
       }
       if (err instanceof RateLimitError) {
-        if (attempt < retries) {
-          const delay = Math.min(
-            config.retry.delayMs * Math.pow(2, attempt),
-            30000,
-          );
-          await new Promise(r => setTimeout(r, delay));
-        } else {
+        if (attempt >= retries) {
           throw err;
         }
+        const delay = Math.min(
+          config.retry.delayMs * Math.pow(2, attempt),
+          30000,
+        );
+        if (delay >= retryDeadline - Date.now()) {
+          throw err;
+        }
+        await new Promise(r => setTimeout(r, delay));
+        continue;
       }
       if (attempt < retries) {
-        let delay = config.retry.delayMs * (attempt + 1);
+        const delay = config.retry.delayMs * (attempt + 1);
+        if (delay >= retryDeadline - Date.now()) {
+          throw err;
+        }
         await new Promise(r => setTimeout(r, delay));
       }
     } finally {

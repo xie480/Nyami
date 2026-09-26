@@ -1,4 +1,5 @@
 import { RateLimitError } from './errors';
+import { config } from '../config';
 
 interface Waiter {
   resolve: () => void;
@@ -11,15 +12,18 @@ export class AdaptiveRateLimiter {
   private lastRefill: number;
   private waitQueue: Waiter[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
-  
   private readonly minRate = 0.1;
-  private readonly maxRate = 1;
+  private readonly maxRate = config.rateLimit.perSecond;
+  private readonly maxTokens = config.rateLimit.burstSize;
   private successCount = 0;
   private readonly successThreshold = 10; // 连续成功10次后提速
 
-  constructor(initialRate = 0.5) {
-    this.currentRate = initialRate;
-    this.tokens = initialRate;
+  constructor(initialRate = config.rateLimit.perSecond) {
+    this.currentRate = Math.max(
+      this.minRate,
+      Math.min(initialRate, this.maxRate),
+    );
+    this.tokens = this.maxTokens;
     this.lastRefill = Date.now();
   }
 
@@ -41,8 +45,12 @@ export class AdaptiveRateLimiter {
   }
 
   private scheduleWake() {
-    if (this.timer) return;
-    if (this.waitQueue.length === 0) return;
+    if (this.timer) {
+      return;
+    }
+    if (this.waitQueue.length === 0) {
+      return;
+    }
     const waitMs = Math.max(0, ((1 - this.tokens) / this.currentRate) * 1000);
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -54,7 +62,7 @@ export class AdaptiveRateLimiter {
   }
 
   private get capacity() {
-    return Math.max(1, this.currentRate);
+    return this.maxTokens;
   }
 
   private refill() {
@@ -85,10 +93,10 @@ export class AdaptiveRateLimiter {
   reportError(isRateLimit: boolean) {
     if (isRateLimit) {
       this.currentRate = Math.max(this.minRate, this.currentRate * 0.5); // 乘减
-      this.tokens = Math.min(this.tokens, this.capacity);
+      this.tokens = 0;
       this.successCount = 0;
     }
   }
 }
 
-export const adaptiveBucket = new AdaptiveRateLimiter(2);
+export const adaptiveBucket = new AdaptiveRateLimiter();
