@@ -13,6 +13,44 @@ export interface BiliFolder {
   media_count: number;
 }
 
+/** 收藏关系目录接口中的条目；fid 为 0 的条目表示视频合集。 */
+export interface BiliCollectedPlaylist {
+  id: number;
+  season_id?: number;
+  fid?: number;
+  mid?: number;
+  title?: string;
+  name?: string;
+  cover?: string;
+  media_count?: number;
+  total?: number;
+  type_name?: string;
+  upper?: { mid?: number; name?: string; face?: string };
+}
+
+export interface BiliCollectedPlaylistList {
+  count?: number;
+  list?: BiliCollectedPlaylist[] | null;
+}
+
+export interface BiliSeasonArchive {
+  aid?: number;
+  bvid?: string;
+  title: string;
+  pic?: string;
+  cover?: string;
+  duration?: number;
+  pubdate?: number;
+  ctime?: number;
+  owner?: { mid?: number; name?: string };
+  upper?: { mid?: number; name?: string };
+}
+
+export interface BiliSeasonArchivesPage {
+  archives?: BiliSeasonArchive[];
+  page?: { page_num?: number; page_size?: number; total?: number };
+}
+
 export interface BiliFavoriteVideoMedia {
   bvid: string;
   title: string;

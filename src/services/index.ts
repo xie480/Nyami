@@ -1,4 +1,5 @@
 export { favoriteService } from './favoriteService';
+export { importedPlaylistService } from './importedPlaylistService';
 export { audioService } from './audioService';
 export { cookieService } from './cookieService';
 

@@ -2,6 +2,8 @@
 import {encWbi, getWbiKeys} from '../core/wbi';
 import type {
   BiliFolder,
+  BiliCollectedPlaylistList,
+  BiliSeasonArchivesPage,
   BiliFavoriteVideoMedia,
   BiliVideoInfo,
   BiliPlayUrlData,
@@ -29,6 +31,21 @@ export const biliApi = {
       signal,
       silent: true,
     });
+  },
+
+  /** 获取当前账号收藏的他人收藏夹及视频合集目录（B 站网页端接口）。 */
+  getCollectedPlaylists(upMid: string, pn = 1, ps = 50, signal?: AbortSignal) {
+    if (!upMid) {
+      return Promise.reject(new Error('upMid 不能为空'));
+    }
+    return biliGet<BiliCollectedPlaylistList>(
+      '/x/v3/fav/folder/collected/list',
+      {
+        params: {up_mid: upMid, pn, ps, platform: 'web'},
+        signal,
+        silent: true,
+      },
+    );
   },
 
   /** 获取收藏夹内视频（分页，后台静默请求） */
@@ -59,6 +76,33 @@ export const biliApi = {
         },
       );
     })();
+  },
+
+  /** 获取指定 UP 主合集内的视频（B 站网页端接口）。 */
+  getSeasonArchives(
+    mid: number,
+    seasonId: number,
+    pageNum = 1,
+    pageSize = 20,
+    signal?: AbortSignal,
+  ) {
+    if (!mid || !seasonId) {
+      return Promise.reject(new Error('UP 主 UID 和合集 ID 不能为空'));
+    }
+    return biliGet<BiliSeasonArchivesPage>(
+      '/x/polymer/web-space/seasons_archives_list',
+      {
+        params: {
+          mid,
+          season_id: seasonId,
+          sort_reverse: false,
+          page_num: pageNum,
+          page_size: pageSize,
+        },
+        signal,
+        silent: true,
+      },
+    );
   },
 
   /** 获取视频元信息（含 cid） */

@@ -10,6 +10,21 @@ export interface FavoriteFolder {
   mediaCount: number;
 }
 
+/** 可从 B 站账号关系自动导入的外部播放列表类型。 */
+export type ImportedPlaylistKind = 'collectedFavorite' | 'subscribedSeason';
+
+/** B 站账号已收藏的他人收藏夹或已订阅合集。 */
+export interface ImportedPlaylist {
+  sourceKey: string;
+  kind: ImportedPlaylistKind;
+  remoteId: number;
+  ownerMid: number;
+  ownerName: string;
+  title: string;
+  cover: string;
+  mediaCount: number;
+}
+
 /** 视频分段（P）信息 */
 export interface VideoPart {
   cid: number;
