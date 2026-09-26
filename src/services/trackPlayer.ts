@@ -10,7 +10,7 @@ import TrackPlayer, {
 } from 'react-native-track-player';
 import {AppState, ToastAndroid, Platform} from 'react-native';
 import LoggerService from './LoggerService';
-import {audioService} from './audioService';
+import {audioService, invalidateDomainCache} from './audioService';
 import {audioCache} from './audioCache';
 import {netStatus} from './netStatus';
 import {useSettingsStore} from '../store/settingsStore';
@@ -20,7 +20,7 @@ import {performanceMonitor} from './performanceMonitor';
 import type {FavoriteVideo} from '../types/domain';
 import {storage} from '../core/storage';
 import {useProgressStore} from '../store/progressStore';
-import {getCachedUrl, setCachedUrl} from './urlCache';
+import {getCachedUrl, setCachedUrl, invalidateUrl} from './urlCache';
 import {persistVideoPartsToDb} from '../db/operations';
 
 let _ready = false;
@@ -34,9 +34,12 @@ let queueEndRecoveryPromise: Promise<void> | null = null;
 let nativeQueueMutation: Promise<void> = Promise.resolve();
 let playbackIntent = false;
 let userPauseRevision = 0;
+const playbackErrorAttempts = new Map<string, number>();
+const playbackErrorRecoveries = new Map<string, Promise<void>>();
 
 function advanceQueueRevision(): number {
   queueRevision += 1;
+  playbackErrorAttempts.clear();
   return queueRevision;
 }
 
@@ -757,6 +760,10 @@ async function skipNativeQueueToNext(pauseRevision: number): Promise<boolean> {
 }
 
 export async function skipToNext() {
+  return skipToNextWithPauseRevision(userPauseRevision);
+}
+
+async function skipToNextWithPauseRevision(pauseRevision: number) {
   if (queueEndRecoveryPromise) {
     await queueEndRecoveryPromise.catch(() => {});
     return;
@@ -765,7 +772,6 @@ export async function skipToNext() {
     return;
   }
   isSkipping = true;
-  const pauseRevision = userPauseRevision;
   try {
     let skipped = await skipNativeQueueToNext(pauseRevision);
     const hasLogicalNext = !skipped && await hasLogicalNextTrack();
@@ -984,6 +990,236 @@ async function recoverQueueAfterEnd(endedTrackIndex: number): Promise<void> {
   return queueEndRecoveryPromise;
 }
 
+function buildPlaybackErrorKey(
+  track: Track,
+  activeIndex: number | undefined,
+  revision: number,
+): string {
+  const cid = (track as any).cid;
+  return `${revision}:${track.id}:${typeof cid === 'number' ? cid : 'default'}:${activeIndex ?? -1}`;
+}
+
+async function skipAfterPlaybackError(
+  pauseRevision: number,
+  reason: string,
+): Promise<void> {
+  if (await hasLogicalNextTrack()) {
+    usePlayerStore.getState().setPlaybackError(`${reason}，正在切换下一首`);
+    await skipToNextWithPauseRevision(pauseRevision);
+    return;
+  }
+  usePlayerStore.getState().setPlaybackError(`${reason}，请点击重试`);
+}
+
+async function processPlaybackError(
+  error: unknown,
+  track: Track,
+  activeIndex: number | undefined,
+  revision: number,
+  pauseRevision: number,
+  key: string,
+  manualRetry: boolean,
+): Promise<void> {
+  if (error) {
+    LoggerService.error('TrackPlayer', 'PlaybackError', '播放错误:', error);
+  }
+
+  const bvid = String(track.id);
+  const trackCid = (track as any).cid;
+  const cid = typeof trackCid === 'number' ? trackCid : undefined;
+
+  if (revision !== queueRevision) {
+    return;
+  }
+  if (!playbackIntent) {
+    usePlayerStore.getState().setPlaybackError('播放失败，请检查网络后重试');
+    return;
+  }
+  if (netStatus.type === 'none') {
+    usePlayerStore.getState().setPlaybackError('网络不可用，恢复网络后可重试');
+    return;
+  }
+
+  const playbackErrorKey = key;
+  const attempts = manualRetry
+    ? 0
+    : playbackErrorAttempts.get(playbackErrorKey) ?? 0;
+  if (manualRetry) {
+    playbackErrorAttempts.delete(playbackErrorKey);
+  }
+  if (attempts > 0) {
+    await skipAfterPlaybackError(pauseRevision, '当前歌曲重试失败');
+    return;
+  }
+  playbackErrorAttempts.set(playbackErrorKey, 1);
+
+  const video = usePlayerStore.getState().queue.find(item => item.bvid === bvid);
+  if (!video) {
+    if (await hasLogicalNextTrack()) {
+      usePlayerStore.getState().setPlaybackError('当前歌曲不在播放队列中，正在切换下一首');
+      await skipToNextWithPauseRevision(pauseRevision);
+    } else {
+      usePlayerStore.getState().setPlaybackError('当前歌曲不在播放队列中，无法自动重试');
+    }
+    return;
+  }
+
+  try {
+    if (typeof track.url === 'string' && track.url.startsWith('file://')) {
+      await audioCache.remove(
+        bvid,
+        useSettingsStore.getState().quality,
+        cid,
+      );
+    }
+    audioService.invalidate(bvid, cid);
+    invalidateUrl(bvid, cid);
+    invalidateDomainCache();
+
+    const refreshedTracks = await hydrateVideo(video, cid);
+    if (revision !== queueRevision) {
+      return;
+    }
+    const replacement = refreshedTracks[0];
+    if (!replacement) {
+      await skipAfterPlaybackError(pauseRevision, '重新加载音频失败');
+      return;
+    }
+
+    const replacementResult = await withNativeQueueMutation(async () => {
+      if (revision !== queueRevision) {
+        return 'stale' as const;
+      }
+      const latestActiveIndex = await TrackPlayer.getActiveTrackIndex();
+      const latestTrack = await TrackPlayer.getActiveTrack();
+      if (revision !== queueRevision) {
+        return 'stale' as const;
+      }
+      if (
+        latestTrack?.id !== bvid ||
+        (cid != null && (latestTrack as any).cid !== cid)
+      ) {
+        return 'stale' as const;
+      }
+      if (typeof latestActiveIndex !== 'number' || latestActiveIndex < 0) {
+        return 'failed' as const;
+      }
+
+      await TrackPlayer.remove(latestActiveIndex);
+      if (revision !== queueRevision) {
+        return 'stale' as const;
+      }
+      await TrackPlayer.add(replacement, latestActiveIndex);
+      if (revision !== queueRevision) {
+        return 'stale' as const;
+      }
+      await TrackPlayer.skip(latestActiveIndex);
+      usePlayerStore.getState().setCurrentBvid(bvid);
+      usePlayerStore.getState().setCurrentCid(cid ?? null);
+
+      if (pauseRevision !== userPauseRevision && !playbackIntent) {
+        return 'paused' as const;
+      }
+      await TrackPlayer.play();
+      playbackIntent = true;
+      return 'replaced' as const;
+    });
+
+    if (replacementResult === 'stale') {
+      return;
+    }
+    if (replacementResult === 'replaced' || replacementResult === 'paused') {
+      usePlayerStore.getState().setPlaybackError(null);
+      maintainQueueBuffer().catch(() => {});
+      return;
+    }
+
+    const latestTrack = await TrackPlayer.getActiveTrack();
+    if (revision !== queueRevision || latestTrack?.id !== bvid) {
+      return;
+    }
+    await skipAfterPlaybackError(pauseRevision, '重新加载音频失败');
+  } catch (recoveryError) {
+    LoggerService.error(
+      'TrackPlayer',
+      'PlaybackError',
+      '重新解析并替换失败曲目失败',
+      recoveryError,
+    );
+    if (revision === queueRevision) {
+      await skipAfterPlaybackError(pauseRevision, '重新加载音频失败');
+    }
+  }
+}
+
+async function handlePlaybackError(
+  error: unknown,
+  manualRetry = false,
+  requestedPauseRevision = userPauseRevision,
+): Promise<void> {
+  const activeTrack = await TrackPlayer.getActiveTrack();
+  if (!activeTrack?.id) {
+    usePlayerStore.getState().setPlaybackError('播放失败，请检查网络后重试');
+    return;
+  }
+  const activeIndex = await TrackPlayer.getActiveTrackIndex();
+  const revision = queueRevision;
+  const key = buildPlaybackErrorKey(activeTrack, activeIndex, revision);
+
+  if (!manualRetry) {
+    const state = await TrackPlayer.getPlaybackState();
+    if (
+      state.state === State.Playing ||
+      state.state === State.Buffering ||
+      state.state === State.Loading
+    ) {
+      return;
+    }
+  }
+
+  const existingRecovery = playbackErrorRecoveries.get(key);
+  if (existingRecovery) {
+    await existingRecovery.catch(() => {});
+    return;
+  }
+
+  const recovery = processPlaybackError(
+    error,
+    activeTrack,
+    activeIndex,
+    revision,
+    requestedPauseRevision,
+    key,
+    manualRetry,
+  );
+  playbackErrorRecoveries.set(key, recovery);
+  try {
+    await recovery;
+  } finally {
+    if (playbackErrorRecoveries.get(key) === recovery) {
+      playbackErrorRecoveries.delete(key);
+    }
+  }
+}
+
+export async function retryCurrentTrack(): Promise<void> {
+  playbackIntent = true;
+  const pauseRevision = userPauseRevision;
+  try {
+    const playbackState = await TrackPlayer.getPlaybackState();
+    if (playbackState.state === State.Ended && await hasLogicalNextTrack()) {
+      const activeIndex = await TrackPlayer.getActiveTrackIndex();
+      usePlayerStore.getState().setPlaybackError(null);
+      await recoverQueueAfterEnd(activeIndex ?? 0);
+      return;
+    }
+    await handlePlaybackError(undefined, true, pauseRevision);
+  } catch (error) {
+    LoggerService.error('TrackPlayer', 'retryCurrentTrack', '手动重试播放失败', error);
+    usePlayerStore.getState().setPlaybackError('重试失败，请稍后再试');
+  }
+}
+
 export async function PlaybackService() {
   TrackPlayer.addEventListener(Event.RemotePlay, resumePlayback);
   TrackPlayer.addEventListener(Event.RemotePause, pausePlayback);
@@ -1052,6 +1288,7 @@ export async function PlaybackService() {
 
     const bvid = activeTrack.id as string;
     usePlayerStore.getState().setCurrentBvid(bvid);
+    usePlayerStore.getState().setPlaybackError(null);
 
     const trackCid = (activeTrack as any).cid;
     if (typeof trackCid === 'number') {
@@ -1076,10 +1313,16 @@ export async function PlaybackService() {
     });
   });
 
-  TrackPlayer.addEventListener(Event.PlaybackError, async error => {
-    LoggerService.error('TrackPlayer', 'PlaybackError', '播放错误:', error);
-    usePlayerStore.getState().setPlaybackError('播放失败，请检查网络或重试');
-    await TrackPlayer.pause();
+  TrackPlayer.addEventListener(Event.PlaybackError, error => {
+    handlePlaybackError(error).catch(recoveryError => {
+      LoggerService.error(
+        'TrackPlayer',
+        'PlaybackError',
+        '处理播放错误失败',
+        recoveryError,
+      );
+      usePlayerStore.getState().setPlaybackError('播放失败，请检查网络后重试');
+    });
   });
 
   // 保持后台任务活跃，防止 setTimeout 在后台被挂起导致预加载死锁

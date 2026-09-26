@@ -23,6 +23,7 @@ import {
   pausePlayback,
   resumePlayback,
   playSpecificPart,
+  retryCurrentTrack,
   skipToNext,
   skipToPrevious,
 } from '../services/trackPlayer';
@@ -78,6 +79,7 @@ const STATIC_STYLES = StyleSheet.create({
     elevation: 12,
   },
   progressBox: {width: '100%', marginTop: 90},
+  playbackError: {paddingTop: 12, paddingHorizontal: 12},
   timeRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -173,6 +175,7 @@ export const PlayerScreen = () => {
     storeCurrentBvid,
     currentCid,
     isResolving,
+    playbackError,
     playMode,
     togglePlayMode,
   } = usePlayerStore(
@@ -181,6 +184,7 @@ export const PlayerScreen = () => {
       storeCurrentBvid: s.currentBvid,
       currentCid: s.currentCid,
       isResolving: s.isResolving,
+      playbackError: s.playbackError,
       playMode: s.playMode,
       togglePlayMode: s.togglePlayMode,
     })),
@@ -338,6 +342,10 @@ export const PlayerScreen = () => {
           marginTop: t.spacing.xxl + 50,
         },
         time: {fontSize: t.fontSize.xs, color: themeColors.textTertiary},
+        playbackErrorText: {
+          color: t.colors.error,
+          textAlign: 'center',
+        },
         playBtn: {
           ...STATIC_STYLES.playBtn,
           backgroundColor: themeColors.playBg,
@@ -518,6 +526,17 @@ export const PlayerScreen = () => {
               </Text>
             </View>
           </View>
+          {playbackError ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`${playbackError}，点击重试`}
+              onPress={() => retryCurrentTrack()}
+              style={STATIC_STYLES.playbackError}>
+              <Text style={dynamicStyles.playbackErrorText}>
+                {playbackError} · 点击重试
+              </Text>
+            </TouchableOpacity>
+          ) : null}
           <View style={STATIC_STYLES.controls}>
             <IconButton
               name="skip-previous"

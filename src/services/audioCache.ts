@@ -122,6 +122,26 @@ class AudioCache {
     return downloadPromise;
   }
 
+  async remove(bvid: string, quality: Quality, cid?: number): Promise<void> {
+    await this.ready;
+    const meta = this.getMeta();
+    const cacheIdentity = cid == null ? bvid : `${bvid}-${cid}`;
+    const key = this.key(cacheIdentity, quality);
+    const item = meta[key];
+    if (!item) {
+      return;
+    }
+    delete meta[key];
+    try {
+      if (await RNFS.exists(item.path)) {
+        await RNFS.unlink(item.path);
+      }
+    } catch (error) {
+      LoggerService.error('audioCache', 'remove', '移除失败音频缓存失败:', error);
+    }
+    this.setMeta(meta);
+  }
+
   getTotalSize(): number {
     return Object.values(this.getMeta()).reduce((s, it) => s + (it.size || 0), 0);
   }

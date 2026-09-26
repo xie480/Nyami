@@ -85,8 +85,16 @@ export function setCachedUrl(
  * 移除指定视频的 URL 缓存
  */
 export function invalidateUrl(bvid: string, cid?: number): void {
-  const key = buildKey(bvid, cid);
-  cache.delete(key);
+  if (cid != null) {
+    cache.delete(buildKey(bvid, cid));
+    return;
+  }
+
+  for (const key of cache.keys()) {
+    if (key === bvid || key.startsWith(`${bvid}-`)) {
+      cache.delete(key);
+    }
+  }
 }
 
 /**

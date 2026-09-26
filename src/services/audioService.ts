@@ -188,8 +188,11 @@ export const audioService = {
       );
     },
 
-  /** 强制刷新某 BV 的所有音质缓存 */
-  invalidate(bvid: string) {
-    cache.deletePrefix(`audioInfo:${bvid}`);
+  /** 失效指定视频或分P的播放地址缓存，供播放错误后的重新解析使用。 */
+  invalidate(bvid: string, cid?: number) {
+    const prefix = cid == null
+      ? `audioInfo:${bvid}:`
+      : `audioInfo:${bvid}:${cid}:`;
+    cache.deletePrefix(prefix);
   },
 };
