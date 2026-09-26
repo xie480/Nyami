@@ -1,15 +1,17 @@
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
-import { config } from '../config';
-import { cookieService } from '../services';
-import { adaptiveBucket } from './adaptiveRateLimit';
-import LoggerService from '../services/LoggerService';
+import axios, {AxiosInstance, AxiosRequestConfig} from 'axios';
+import {config} from '../config';
+import {cookieService} from '../services';
+import {adaptiveBucket} from './adaptiveRateLimit';
 import {
-  AuthRequiredError, BiliApiError, normalizeError,
-  ResourceUnavailableError, RateLimitError,
+  AuthRequiredError,
+  BiliApiError,
+  normalizeError,
+  ResourceUnavailableError,
+  RateLimitError,
 } from './errors';
-import type { BiliResponse } from '../types/bili';
-import { useAuthStore } from '../store/authStore';
-import { useUIStore } from '../store/uiStore';
+import type {BiliResponse} from '../types/bili';
+import {useAuthStore} from '../store/authStore';
+import {useUIStore} from '../store/uiStore';
 
 /** 创建带默认头的 axios 实例 */
 function createInstance(): AxiosInstance {
@@ -23,45 +25,28 @@ function createInstance(): AxiosInstance {
   });
 
   // 请求拦截：限流 + 自动注入 Cookie（使用加密存储）
-  ins.interceptors.request.use(async (cfg) => {
+  ins.interceptors.request.use(async cfg => {
     await adaptiveBucket.acquire();
     const cookie = await cookieService.get();
     if (cookie) {
       // 统一使用字符串赋值，避免 axios headers.set 可能引入的编码问题
-      cfg.headers['Cookie'] = cookie;
-      // 调试日志：输出 Cookie 总长度、SESSDATA 字段长度及前 80 字符预览
-      if (__DEV__) {
-        const sessMatch = cookie.match(/SESSDATA=([^;]+)/);
-        const sessLen = sessMatch ? sessMatch[1].length : 0;
-        LoggerService.info(
-          'http',
-          'requestInterceptor',
-          'Cookie len=' + cookie.length +
-          ', SESSDATA len=' + sessLen +
-          ', preview=' + cookie.substring(0, 80)
-        );
-        // 若 SESSDATA 异常短小（< 50 字符），直接输出完整 Cookie 以便排查截断
-        if (sessLen > 0 && sessLen < 50) {
-          LoggerService.warn('http', 'requestInterceptor', 'SESSDATA 可能被截断！完整 Cookie:', cookie);
-        }
-      }
-    } else if (__DEV__) {
-      LoggerService.warn('http', 'requestInterceptor', '未检测到 Cookie，请求可能缺乏鉴权');
+      cfg.headers.Cookie = cookie;
     }
     return cfg;
   });
 
   // 响应拦截：归一化错误 + 状态上报
   ins.interceptors.response.use(
-    (res) => {
+    res => {
       adaptiveBucket.reportSuccess();
       return res;
     },
-    (err) => {
-      const isRateLimit = err?.response?.status === 412 || err?.response?.status === 429;
+    err => {
+      const isRateLimit =
+        err?.response?.status === 412 || err?.response?.status === 429;
       adaptiveBucket.reportError(isRateLimit);
       return Promise.reject(normalizeError(err));
-    }
+    },
   );
   return ins;
 }
@@ -70,8 +55,12 @@ export const http = createInstance();
 
 /** 业务码错误映射 */
 function mapBusinessError(code: number, message: string): never {
-  if (code === -101 || code === -400) throw new AuthRequiredError(message);
-  if (code === 62002 || code === 62004) throw new ResourceUnavailableError(message);
+  if (code === -101 || code === -400) {
+    throw new AuthRequiredError(message);
+  }
+  if (code === 62002 || code === 62004) {
+    throw new ResourceUnavailableError(message);
+  }
   throw new BiliApiError(code, message);
 }
 
@@ -81,15 +70,18 @@ function mapBusinessError(code: number, message: string): never {
  */
 export async function biliGet<T>(
   url: string,
-  options: AxiosRequestConfig & { silent?: boolean } = {},
-  retries = config.retry.maxAttempts
+  options: AxiosRequestConfig & {silent?: boolean} = {},
+  retries = config.retry.maxAttempts,
 ): Promise<T> {
   let lastError: any;
   const absoluteTimeout = 60000; // 60 秒的绝对超时（与 config.httpTimeout 对齐）
   for (let attempt = 0; attempt <= retries; attempt++) {
     // 为每次尝试创建独立的 AbortController，以实现绝对超时
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), absoluteTimeout);
+    const timeoutId = setTimeout(
+      () => abortController.abort(),
+      absoluteTimeout,
+    );
     // 始终使用内部 abortController.signal，确保 60 秒超时必定生效
     const combinedSignal = abortController.signal;
     // 若用户提供了外部 signal，在其 abort 时同步 abort 内部 controller，保证手动取消也能中断请求
@@ -103,12 +95,17 @@ export async function biliGet<T>(
         (options.signal as any).onabort = onAbort;
       }
     }
-    const requestOptions: AxiosRequestConfig = { ...options, signal: combinedSignal };
+    const requestOptions: AxiosRequestConfig = {
+      ...options,
+      signal: combinedSignal,
+    };
     try {
       const res = await http.get<BiliResponse<T>>(url, requestOptions);
       clearTimeout(timeoutId);
-      const { code, data, message } = res.data;
-      if (code !== 0) mapBusinessError(code, message);
+      const {code, data, message} = res.data;
+      if (code !== 0) {
+        mapBusinessError(code, message);
+      }
       return data;
     } catch (err: any) {
       clearTimeout(timeoutId);
@@ -125,9 +122,14 @@ export async function biliGet<T>(
         return new Promise<T>((resolve, reject) => {
           useAuthStore.getState().setLoginResolver(async () => {
             try {
-              const retryRes = await http.get<BiliResponse<T>>(url, requestOptions);
-              const { code, data, message } = retryRes.data;
-              if (code !== 0) mapBusinessError(code, message);
+              const retryRes = await http.get<BiliResponse<T>>(
+                url,
+                requestOptions,
+              );
+              const {code, data, message} = retryRes.data;
+              if (code !== 0) {
+                mapBusinessError(code, message);
+              }
               resolve(data);
             } catch (e) {
               reject(e);
@@ -143,15 +145,18 @@ export async function biliGet<T>(
       }
       if (err instanceof RateLimitError) {
         if (attempt < retries) {
-          const delay = Math.min(config.retry.delayMs * Math.pow(2, attempt), 30000);
-          await new Promise((r) => setTimeout(r, delay));
+          const delay = Math.min(
+            config.retry.delayMs * Math.pow(2, attempt),
+            30000,
+          );
+          await new Promise(r => setTimeout(r, delay));
         } else {
           throw err;
         }
       }
       if (attempt < retries) {
         let delay = config.retry.delayMs * (attempt + 1);
-        await new Promise((r) => setTimeout(r, delay));
+        await new Promise(r => setTimeout(r, delay));
       }
     } finally {
       if (options.signal) {
