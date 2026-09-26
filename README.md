@@ -15,6 +15,7 @@
 <img src="https://img.shields.io/badge/Media3-ExoPlayer-orange?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/License-MIT-purple?style=for-the-badge"/>
 </p>
+<img src="./nyami.jpg" width="300px">
 
 </div>
 
