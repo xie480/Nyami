@@ -328,7 +328,8 @@ export const SettingsScreen = ({ navigation }: any) => {
                <Text style={s.section}>全局索引</Text>
         <View style={s.group}>
           <ListItem
-            title="可见收藏夹偏好"
+            title="主页播放列表偏好"
+            subtitle="选择主页显示的自有收藏夹、他人收藏夹和订阅合集"
             onPress={() => navigation.navigate('VisibleFolders')}
             showArrow
           />

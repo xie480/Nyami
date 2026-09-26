@@ -11,9 +11,15 @@ import { ErrorView } from '../components/ErrorView';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { favoriteService } from '../services';
+import { importedPlaylistService } from '../services/importedPlaylistService';
+import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { FavoriteFolder } from '../types/domain';
+import type { FavoriteFolder, ImportedPlaylist } from '../types/domain';
+
+type PreferenceItem =
+  | { key: string; kind: 'owned'; folder: FavoriteFolder }
+  | { key: string; kind: 'imported'; source: ImportedPlaylist };
 
 export const VisibleFoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
@@ -21,25 +27,37 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
   const uid = useAuthStore((s) => s.userId);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const setHiddenFolderIds = useSettingsStore((s) => s.setHiddenFolderIds);
+  const importedSources = useImportedPlaylistStore((s) => uid ? s.catalogByUid[uid] ?? [] : []);
+  const visibleSourceKeys = useImportedPlaylistStore((s) => uid ? s.visibleSourceKeysByUid[uid] ?? [] : []);
+  const setImportedCatalog = useImportedPlaylistStore((s) => s.setCatalog);
+  const setVisibleSourceKeys = useImportedPlaylistStore((s) => s.setVisibleSourceKeys);
 
   const [folders, setFolders] = useState<FavoriteFolder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   // 本地编辑中的隐藏集合（退出时保存）
   const [localHidden, setLocalHidden] = useState<Set<number>>(new Set(hiddenFolderIds));
+  const [localVisibleSources, setLocalVisibleSources] = useState<Set<string>>(new Set(visibleSourceKeys));
 
   const load = useCallback(async (force = false) => {
     if (!uid) return;
     setError(null);
+    setSourceError(null);
     try {
       const data = await favoriteService.getFolders(uid, force);
       setFolders(data);
     } catch (e: any) {
       setError(e.message || '加载失败');
-    } finally {
-      setRefreshing(false);
     }
-  }, [uid]);
+    try {
+      const sources = await importedPlaylistService.getCollectedPlaylists(uid, force);
+      setImportedCatalog(uid, sources);
+    } catch (e: any) {
+      setSourceError(e.message || '外部收藏来源同步失败');
+    }
+    setRefreshing(false);
+  }, [uid, setImportedCatalog]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -47,6 +65,10 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
   useEffect(() => {
     setLocalHidden(new Set(hiddenFolderIds));
   }, [hiddenFolderIds]);
+
+  useEffect(() => {
+    setLocalVisibleSources(new Set(visibleSourceKeys));
+  }, [visibleSourceKeys]);
 
   const toggleFolder = (id: number) => {
     setLocalHidden(prev => {
@@ -61,15 +83,36 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
   };
 
   const isFolderVisible = (id: number) => !localHidden.has(id);
+  const isSourceVisible = (sourceKey: string) => localVisibleSources.has(sourceKey);
+
+  const preferenceItems: PreferenceItem[] = [
+    ...(folders ?? []).map(folder => ({
+      key: `ownedFavorite:${folder.id}`,
+      kind: 'owned' as const,
+      folder,
+    })),
+    ...importedSources.map(source => ({
+      key: source.sourceKey,
+      kind: 'imported' as const,
+      source,
+    })),
+  ];
+
+  const isItemVisible = (item: PreferenceItem) =>
+    item.kind === 'owned'
+      ? isFolderVisible(item.folder.id)
+      : isSourceVisible(item.source.sourceKey);
 
   const onSave = () => {
     setHiddenFolderIds(Array.from(localHidden));
+    if (uid) setVisibleSourceKeys(uid, Array.from(localVisibleSources));
     navigation.goBack();
   };
 
   const onSelectAll = () => {
     // 全选：清空隐藏列表
     setLocalHidden(new Set());
+    setLocalVisibleSources(new Set(importedSources.map(source => source.sourceKey)));
   };
 
   const onDeselectAll = () => {
@@ -77,6 +120,7 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
     if (folders) {
       setLocalHidden(new Set(folders.map(f => f.id)));
     }
+    setLocalVisibleSources(new Set());
   };
 
   const s = StyleSheet.create({
@@ -97,9 +141,9 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
     <View style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header
-        title="可见收藏夹偏好"
+        title="主页播放列表偏好"
         showBack
-        right={folders && (
+        right={preferenceItems.length > 0 && (
           <TouchableOpacity onPress={onSave}>
             <Text style={{ color: t.colors.primary, fontSize: t.fontSize.base, fontWeight: '600' }}>保存</Text>
           </TouchableOpacity>
@@ -107,10 +151,10 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
       />
       {folders === null && !error ? (
         <Loading />
-      ) : error ? (
+      ) : error && preferenceItems.length === 0 ? (
         <ErrorView message={error} onRetry={() => load(true)} />
-      ) : folders!.length === 0 ? (
-        <Empty title="没有公开的收藏夹" hint="请在设置中填入 SESSDATA 以加载私密收藏夹" />
+      ) : preferenceItems.length === 0 ? (
+        <Empty title="没有可选择的播放列表" hint="登录 B 站后会自动导入已收藏的他人收藏夹和订阅合集" />
       ) : (
         <>
           <View style={s.toolbar}>
@@ -118,25 +162,46 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
               <Text style={{ color: t.colors.primary, fontSize: t.fontSize.sm }}>全选</Text>
             </TouchableOpacity>
             <Text style={{ color: t.colors.textSub, fontSize: t.fontSize.sm }}>
-              已选 {folders!.filter(f => isFolderVisible(f.id)).length}/{folders!.length} 个
+              已选 {preferenceItems.filter(isItemVisible).length}/{preferenceItems.length} 个
             </Text>
             <TouchableOpacity onPress={onDeselectAll}>
               <Text style={{ color: t.colors.error, fontSize: t.fontSize.sm }}>反选</Text>
             </TouchableOpacity>
           </View>
+          {sourceError && (
+            <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.sm }}>
+              外部来源同步失败，保留上次目录：{sourceError}
+            </Text>
+          )}
+          {error && (
+            <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.sm }}>
+              自有收藏夹读取失败：{error}
+            </Text>
+          )}
           <FlatList
             contentContainerStyle={s.list}
-            data={folders!}
+            data={preferenceItems}
             showsVerticalScrollIndicator={false}
-            keyExtractor={(it) => String(it.id)}
-            extraData={localHidden}
+            keyExtractor={(it) => it.key}
+            extraData={{ localHidden, localVisibleSources }}
             ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={t.colors.primary} />
             }
             renderItem={({ item }) => (
               <TouchableOpacity
-                onPress={() => toggleFolder(item.id)}
+                onPress={() => {
+                  if (item.kind === 'owned') {
+                    toggleFolder(item.folder.id);
+                  } else {
+                    setLocalVisibleSources(previous => {
+                      const next = new Set(previous);
+                      if (next.has(item.source.sourceKey)) next.delete(item.source.sourceKey);
+                      else next.add(item.source.sourceKey);
+                      return next;
+                    });
+                  }
+                }}
                 style={{
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -147,15 +212,19 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
                 }}
               >
                 <IconButton
-                  name={isFolderVisible(item.id) ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                  name={isItemVisible(item) ? 'checkbox-marked' : 'checkbox-blank-outline'}
                   size={24}
-                  color={isFolderVisible(item.id) ? t.colors.primary : t.colors.textHint}
+                  color={isItemVisible(item) ? t.colors.primary : t.colors.textHint}
                 />
                 <View style={{ flex: 1, marginLeft: t.spacing.md }}>
                   <ListItem
-                    title={item.title}
-                    subtitle={`${item.mediaCount} 个视频`}
-                    icon="folder-music-outline"
+                    title={item.kind === 'owned' ? item.folder.title : item.source.title}
+                    subtitle={item.kind === 'owned'
+                      ? `${item.folder.mediaCount} 个视频 · 我的收藏夹`
+                      : `${item.source.ownerName || `UP主 UID ${item.source.ownerMid}`} · ${item.source.mediaCount} 个视频 · ${item.source.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹'}`}
+                    icon={item.kind === 'owned'
+                      ? 'folder-music-outline'
+                      : item.source.kind === 'subscribedSeason' ? 'view-grid-outline' : 'folder-heart-outline'}
                     showArrow={false}
                   />
                 </View>

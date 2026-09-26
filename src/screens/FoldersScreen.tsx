@@ -18,7 +18,6 @@ import { Header } from '../components/Header';
 import { useSelectionStore } from '../store/selectionStore';
 import { usePlayerStore } from '../store/playerStore';
 import { useProgressStore } from '../store/progressStore';
-import { ListItem } from '../components/ListItem';
 import { IconButton } from '../components/IconButton';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
@@ -26,22 +25,37 @@ import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
 import { favoriteService, loadGlobalIndexCache } from '../services/favoriteService';
+import { importedPlaylistService } from '../services/importedPlaylistService';
 import { appendQueue as tpAppendQueue, loadQueue, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
 import { useAuthStore } from '../store/authStore';
 import { prefetchAudioUrl } from '../services/dataPrefetcher';
 import { useSettingsStore } from '../store/settingsStore';
+import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
 import { useSyncStore } from '../store/syncStore';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { FavoriteFolder, FavoriteVideo } from '../types/domain';
+import type { FavoriteFolder, FavoriteVideo, ImportedPlaylist } from '../types/domain';
 import FastImage from 'react-native-fast-image';
 import { formatDuration } from '../utils/format';
+
+interface HomePlaylistItem {
+  sourceKey: string;
+  origin: 'owned' | 'collectedFavorite' | 'subscribedSeason';
+  id: number;
+  title: string;
+  mediaCount: number;
+  ownerName?: string;
+  source?: ImportedPlaylist;
+}
 
 export const FoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
   const isGlass = !!t.glass;
   const uid = useAuthStore((s) => s.userId);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
+  const importedCatalog = useImportedPlaylistStore((s) => uid ? s.catalogByUid[uid] ?? [] : []);
+  const visibleSourceKeys = useImportedPlaylistStore((s) => uid ? s.visibleSourceKeysByUid[uid] ?? [] : []);
+  const setImportedCatalog = useImportedPlaylistStore((s) => s.setCatalog);
   const setQueue = usePlayerStore((s) => s.setQueue);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const toggle = useSelectionStore((s) => s.toggle);
@@ -49,6 +63,7 @@ export const FoldersScreen = ({ navigation }: any) => {
   const [allFolders, setAllFolders] = useState<FavoriteFolder[] | null>(null);
   const [globalIndexReady, setGlobalIndexReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importedSyncError, setImportedSyncError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const insets = useSafeAreaInsets();
@@ -67,6 +82,27 @@ export const FoldersScreen = ({ navigation }: any) => {
     ? folders.filter((f) =>
         f.title.toLowerCase().includes(searchQuery.toLowerCase())
       )
+    : null;
+  const visibleImportedSources = importedCatalog.filter(source => visibleSourceKeys.includes(source.sourceKey));
+  const playlistItems: HomePlaylistItem[] | null = allFolders !== null || visibleImportedSources.length > 0
+    ? [
+        ...(folders ?? []).map(folder => ({
+          sourceKey: `ownedFavorite:${folder.id}`,
+          origin: 'owned' as const,
+          id: folder.id,
+          title: folder.title,
+          mediaCount: folder.mediaCount,
+        })),
+        ...visibleImportedSources.map(source => ({
+          sourceKey: source.sourceKey,
+          origin: source.kind,
+          id: source.remoteId,
+          title: source.title,
+          mediaCount: source.mediaCount,
+          ownerName: source.ownerName,
+          source,
+        })),
+      ]
     : null;
 
   // 统计可见视频总数（基于过滤后结果）
@@ -91,16 +127,22 @@ export const FoldersScreen = ({ navigation }: any) => {
     async (force = false) => {
       if (!uid) return;
       setError(null);
+      setImportedSyncError(null);
       try {
         const data = await favoriteService.getFolders(uid, force);
         setAllFolders(data);
       } catch (e: any) {
         setError(e.message || '加载失败');
-      } finally {
-        setRefreshing(false);
       }
+      try {
+        const sources = await importedPlaylistService.getCollectedPlaylists(uid, force);
+        setImportedCatalog(uid, sources);
+      } catch (e: any) {
+        setImportedSyncError(e.message || '外部收藏来源同步失败');
+      }
+      setRefreshing(false);
     },
-    [uid]
+    [uid, setImportedCatalog]
   );
 
   useEffect(() => {
@@ -234,14 +276,20 @@ export const FoldersScreen = ({ navigation }: any) => {
         />
       </View>
 
-      {filteredFolders === null && !error ? (
+      {importedSyncError && !isGlobalSearch && (
+        <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, textAlign: 'center', paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.sm }}>
+          外部收藏来源同步失败，仍显示上次同步目录：{importedSyncError}
+        </Text>
+      )}
+
+      {playlistItems === null && !error ? (
         <Loading />
-      ) : error ? (
+      ) : error && playlistItems === null ? (
         <ErrorView message={error} onRetry={() => load(true)} />
-      ) : !isGlobalSearch && filteredFolders!.length === 0 ? (
+      ) : !isGlobalSearch && playlistItems!.length === 0 ? (
         <Empty
           title="没有可见的收藏夹"
-          hint="可在设置 > 可见收藏夹偏好中调整展示的收藏夹"
+          hint="可在设置 > 可见收藏夹偏好中选择自有收藏夹、他人收藏夹或订阅合集"
         />
       ) : isGlobalSearch && filteredVideos.length === 0 ? (
         <Empty
@@ -365,7 +413,7 @@ export const FoldersScreen = ({ navigation }: any) => {
         <FlatList
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
-          data={filteredFolders}
+          data={playlistItems}
           // ========== 性能优化参数 ==========
           removeClippedSubviews={true}
           maxToRenderPerBatch={10}
@@ -400,7 +448,7 @@ export const FoldersScreen = ({ navigation }: any) => {
                     fontWeight: '500',
                   }}
                 >
-                  随机播放全部 ({totalCount})
+                  随机播放已同步的自有收藏内容 ({totalCount})
                 </Text>
               </TouchableOpacity>
 
@@ -424,7 +472,7 @@ export const FoldersScreen = ({ navigation }: any) => {
               </View>
             </View>
           }
-          keyExtractor={(it) => String(it.id)}
+          keyExtractor={(it) => it.sourceKey}
           ItemSeparatorComponent={() => (
             <View style={{ height: t.spacing.md }} />
           )}
@@ -438,14 +486,19 @@ export const FoldersScreen = ({ navigation }: any) => {
           renderItem={({ item }) => (
             <TouchableOpacity
               activeOpacity={0.7}
+              disabled={isMultiSelectMode && item.origin !== 'owned'}
               onPress={() => {
                 if (isMultiSelectMode) {
-                  toggle(item.id);
+                  if (item.origin === 'owned') toggle(item.id);
                 } else {
-                  navigation.navigate('Videos', {
-                    mediaId: item.id,
-                    title: item.title,
-                  });
+                  if (item.origin === 'owned') {
+                    navigation.navigate('Videos', {
+                      mediaId: item.id,
+                      title: item.title,
+                    });
+                  } else if (item.source) {
+                    navigation.navigate('Videos', {source: item.source});
+                  }
                 }
               }}
               style={{
@@ -468,7 +521,7 @@ export const FoldersScreen = ({ navigation }: any) => {
                 }),
               }}
             >
-              {isMultiSelectMode && (
+              {isMultiSelectMode && item.origin === 'owned' && (
                 <View style={{ padding: 6 }}>
                   <Icon
                     name={selectedIds.has(item.id) ? 'checkbox-marked' : 'checkbox-blank-outline'}
@@ -488,20 +541,31 @@ export const FoldersScreen = ({ navigation }: any) => {
                   marginRight: t.spacing.md,
                 }}
               >
-                <Icon name="folder-music-outline" size={22} color={t.colors.primary} />
+                <Icon
+                  name={item.origin === 'subscribedSeason' ? 'view-grid-outline' : item.origin === 'collectedFavorite' ? 'folder-heart-outline' : 'folder-music-outline'}
+                  size={22}
+                  color={t.colors.primary}
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Text
-                  style={{ fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '500' }}
-                  numberOfLines={1}
-                >
-                  {item.title}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text
+                    style={{ flex: 1, fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '500' }}
+                    numberOfLines={1}
+                  >
+                    {item.title}
+                  </Text>
+                  <View style={{ borderWidth: 1, borderColor: t.colors.primary, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, marginLeft: t.spacing.sm }}>
+                    <Text style={{ color: t.colors.primary, fontSize: t.fontSize.xs }}>
+                      {item.origin === 'owned' ? '我的收藏夹' : item.origin === 'collectedFavorite' ? '他人收藏夹' : '订阅合集'}
+                    </Text>
+                  </View>
+                </View>
                 <Text
                   style={{ fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 2 }}
                   numberOfLines={1}
                 >
-                  {item.mediaCount} 个视频
+                  {item.ownerName ? `${item.ownerName} · ` : ''}{item.mediaCount} 个视频
                 </Text>
               </View>
               {!isMultiSelectMode && (

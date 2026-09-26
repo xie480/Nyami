@@ -15,7 +15,7 @@ function normalizeImportedPlaylist(
   item: BiliCollectedPlaylist,
 ): ImportedPlaylist | null {
   const ownerMid = Number(item.upper?.mid ?? item.mid ?? 0);
-  const isSeason = item.fid === 0 || item.season_id != null;
+  const isSeason = (item.fid != null && Number(item.fid) === 0) || item.season_id != null || item.type_name === '合集';
   const remoteId = Number(isSeason ? item.season_id ?? item.id : item.id);
   if (!ownerMid || !remoteId) return null;
 
@@ -96,7 +96,9 @@ export const importedPlaylistService = {
         const deduplicated = new Map<string, ImportedPlaylist>();
         for (const item of allItems) {
           const source = normalizeImportedPlaylist(item);
-          if (source) deduplicated.set(source.sourceKey, source);
+          if (!source) continue;
+          if (source.kind === 'collectedFavorite' && source.ownerMid === Number(uid)) continue;
+          deduplicated.set(source.sourceKey, source);
         }
         return Array.from(deduplicated.values());
       },

@@ -34,7 +34,7 @@ import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
 import { useSyncStore } from '../store/syncStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { FavoriteVideo } from '../types/domain';
+import type { FavoriteVideo, ImportedPlaylist } from '../types/domain';
 import { useFolderDataStore, SortOption } from '../store/folderDataStore';
 
 // ========== 精细粒度的 Item 组件（React.memo 消除无关重渲染） ==========
@@ -123,6 +123,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const { mediaId, title } = route.params;
+  const source = route.params.source as ImportedPlaylist | undefined;
+  const listTitle = source?.title ?? title ?? '播放列表';
   const setQueue = usePlayerStore((s) => s.setQueue);
   const playMode = usePlayerStore((s) => s.playMode);
   
@@ -134,12 +136,14 @@ export const VideosScreen = ({ route, navigation }: any) => {
     searchQuery,
     sortOption,
     initFolder,
+    initImportedSource,
     loadMore,
     setSearchQuery,
     setSortOption,
     getDisplayedList,
     isRefreshing,
     refreshFolder,
+    refreshImportedSource,
   } = useFolderDataStore();
 
   const [initing, setIniting] = useState(true);
@@ -151,7 +155,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const isSyncing = syncStatus === 'syncing';
   const globalIndex = favoriteService.getGlobalIndex();
   const isGlobalIndexEmpty = globalIndex.length === 0;
-  const isSearchDisabled = isSyncing || isGlobalIndexEmpty;
+  const isSearchDisabled = source ? false : isSyncing || isGlobalIndexEmpty;
 
   // 【性能优化】mountedRef：防止页面卸载后的异步操作更新已卸载组件的状态
   const mountedRef = useRef(true);
@@ -174,7 +178,9 @@ export const VideosScreen = ({ route, navigation }: any) => {
     refreshLockRef.current = true;
 
     try {
-      const newCount = await refreshFolder(mediaId);
+      const newCount = source
+        ? await refreshImportedSource()
+        : await refreshFolder(mediaId);
       // Step 2: 组件卸载后跳过 UI 反馈
       if (!mountedRef.current) return;
 
@@ -207,12 +213,16 @@ export const VideosScreen = ({ route, navigation }: any) => {
         refreshLockRef.current = false;
       }, 500);
     }
-  }, [mediaId, refreshFolder, isRefreshing]);
+  }, [mediaId, source, refreshFolder, refreshImportedSource, isRefreshing]);
   // ========== 增量刷新按钮逻辑结束 ==========
 
   useEffect(() => {
     setIniting(true);
-    initFolder(mediaId);
+    if (source) {
+      initImportedSource(source);
+    } else if (mediaId) {
+      initFolder(mediaId);
+    }
     // Give it a small delay to show loading state if needed, or just set false after init
     const timer = setTimeout(() => {
       if (mountedRef.current) setIniting(false);
@@ -220,26 +230,33 @@ export const VideosScreen = ({ route, navigation }: any) => {
     return () => {
       clearTimeout(timer);
     };
-  }, [mediaId, initFolder]);
+  }, [mediaId, source, initFolder, initImportedSource]);
 
   const MAX_QUEUE_SIZE = 200;
 
   const displayedList = getDisplayedList();
 
   /** 后台异步加载更多分页数据并追加到播放队列尾部 */
-  const loadMoreInBackground = useCallback(async () => {
+  const loadMoreInBackground = useCallback(async (expectedSourceKey: string) => {
     try {
-      const store = useFolderDataStore.getState();
-      let currentList = store.getDisplayedList();
-      while (currentList.length < MAX_QUEUE_SIZE && store.hasMore) {
-        await store.loadMore();
+      const initialStore = useFolderDataStore.getState();
+      if (initialStore.sourceKey !== expectedSourceKey) return;
+      let currentList = initialStore.getDisplayedList();
+      while (currentList.length < MAX_QUEUE_SIZE) {
+        const currentStore = useFolderDataStore.getState();
+        if (currentStore.sourceKey !== expectedSourceKey || !currentStore.hasMore || currentStore.loading) break;
+        await currentStore.loadMore();
         const newState = useFolderDataStore.getState();
+        if (newState.sourceKey !== expectedSourceKey) return;
         currentList = newState.getDisplayedList();
       }
       // 【性能优化】页面卸载后跳过队列追加操作
       if (!mountedRef.current) return;
-      const fullList = useFolderDataStore.getState().getDisplayedList();
+      const finalFolderStore = useFolderDataStore.getState();
+      if (finalFolderStore.sourceKey !== expectedSourceKey) return;
       const playerStore = usePlayerStore.getState();
+      if (playerStore.playContext?.sourceKey !== expectedSourceKey) return;
+      const fullList = finalFolderStore.getDisplayedList();
       const existingBvids = new Set(playerStore.queue.map(v => v.bvid));
       const newItems = fullList.filter(v => !existingBvids.has(v.bvid));
       if (newItems.length > 0) {
@@ -251,7 +268,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
       // 【性能优化】通过 InteractionManager 延迟队列加载状态的清理，
       // 避免在页面切换动画期间抢占主线程
       InteractionManager.runAfterInteractions(() => {
-        usePlayerStore.getState().setQueueLoading(false);
+        const currentPlayer = usePlayerStore.getState();
+        if (currentPlayer.playContext?.sourceKey === expectedSourceKey) currentPlayer.setQueueLoading(false);
       });
     }
   }, []);
@@ -260,7 +278,9 @@ export const VideosScreen = ({ route, navigation }: any) => {
     try {
       const target = displayedList[idx];
       if (!target) return;
-      const context = { folderId: mediaId, sortOption, searchQuery };
+      const context = source
+        ? { sourceKey: source.sourceKey, sortOption, searchQuery }
+        : { folderId: mediaId, sourceKey: `ownedFavorite:${mediaId}`, sortOption, searchQuery };
 
       // 【修复】强制切换为顺序播放模式，避免 shuffle 模式触发大量请求
       if (usePlayerStore.getState().playMode !== 'sequential') {
@@ -313,8 +333,9 @@ export const VideosScreen = ({ route, navigation }: any) => {
 
         // 后台异步加载更多数据并追加到队列尾部
         usePlayerStore.getState().setQueueLoading(true);
-        loadMoreInBackground().catch(() => {
-          usePlayerStore.getState().setQueueLoading(false);
+        loadMoreInBackground(context.sourceKey).catch(() => {
+          const currentPlayer = usePlayerStore.getState();
+          if (currentPlayer.playContext?.sourceKey === context.sourceKey) currentPlayer.setQueueLoading(false);
         });
       });
     } catch (e: any) {
@@ -328,7 +349,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       // 发生错误时清除乐观加载状态
       usePlayerStore.getState().setResolving(false);
     }
-  }, [displayedList, mediaId, sortOption, searchQuery, loadMoreInBackground]);
+  }, [displayedList, mediaId, source, sortOption, searchQuery, loadMoreInBackground]);
 
   const playAll = useCallback(async () => {
     try {
@@ -341,7 +362,9 @@ export const VideosScreen = ({ route, navigation }: any) => {
       }
 
       const target = currentList[0];
-      const context = { folderId: mediaId, sortOption, searchQuery };
+      const context = source
+        ? { sourceKey: source.sourceKey, sortOption, searchQuery }
+        : { folderId: mediaId, sourceKey: `ownedFavorite:${mediaId}`, sortOption, searchQuery };
       setQueue(currentList, target.bvid, context);
       // 【P0防闪烁优化】跳转前清空旧播放上下文
       usePlayerStore.getState().setResolving(true);
@@ -356,8 +379,9 @@ export const VideosScreen = ({ route, navigation }: any) => {
         resolveCurrentTrack(version).catch(() => {});
 
         usePlayerStore.getState().setQueueLoading(true);
-        loadMoreInBackground().catch(() => {
-          usePlayerStore.getState().setQueueLoading(false);
+        loadMoreInBackground(context.sourceKey).catch(() => {
+          const currentPlayer = usePlayerStore.getState();
+          if (currentPlayer.playContext?.sourceKey === context.sourceKey) currentPlayer.setQueueLoading(false);
         });
       });
     } catch (e: any) {
@@ -370,16 +394,27 @@ export const VideosScreen = ({ route, navigation }: any) => {
       usePlayerStore.getState().setQueueLoading(false);
       usePlayerStore.getState().setResolving(false);
     }
-  }, [displayedList, playFrom]);
+  }, [displayedList, mediaId, source, sortOption, searchQuery]);
 
   const shuffle = useCallback(async () => {
     try {
       // 使用 O(1) 随机获取
-      const shuffled = await favoriteService.getRandomVideos(mediaId.toString(), 100);
+      let shuffled = source
+        ? [...displayedList]
+        : await favoriteService.getRandomVideos(mediaId.toString(), 100);
       if (shuffled.length === 0) return;
-      
+
+      if (source) {
+        for (let index = shuffled.length - 1; index > 0; index -= 1) {
+          const swapIndex = Math.floor(Math.random() * (index + 1));
+          [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+        }
+      }
+
       const target = shuffled[0];
-      const context = { folderId: mediaId, sortOption, searchQuery };
+      const context = source
+        ? { sourceKey: source.sourceKey, sortOption, searchQuery }
+        : { folderId: mediaId, sourceKey: `ownedFavorite:${mediaId}`, sortOption, searchQuery };
       
       usePlayerStore.getState().setPlayMode('shuffle');
       setQueue(shuffled, target.bvid, context);
@@ -404,7 +439,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       }
       usePlayerStore.getState().setResolving(false);
     }
-  }, [displayedList, playFrom]);
+  }, [displayedList, mediaId, source, sortOption, searchQuery]);
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background },
@@ -467,7 +502,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
     // 【性能优化】collapsable=false 确保 Android 上屏幕容器不被 View 融合优化
     <View style={s.container} {...(Platform.OS === 'android' ? { collapsable: false as any } : {})}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
-      <Header title={`${title}`} showBack />
+      <Header title={listTitle} showBack />
       {/* 搜索 + 排序栏 */}
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md}}>
         <View style={[s.searchBar, { flex: 1 }]}>
@@ -505,7 +540,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       ) : error && displayedList.length === 0 ? (
         <ErrorView message={error} onRetry={loadMore} />
       ) : displayedList.length === 0 ? (
-        <Empty title="收藏夹是空的" />
+        <Empty title="播放列表是空的" />
       ) : (
         <FlatList
           data={displayedList}

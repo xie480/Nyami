@@ -190,19 +190,28 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
 
   const handleLoadMore = useCallback(async () => {
     if (loadingMore) return;
-    if (!playContext || !playContext.folderId) return;
+    if (!playContext || (!playContext.folderId && !playContext.sourceKey)) return;
     if (usePlayerStore.getState().playMode !== 'sequential') return;
 
     const folderStore = useFolderDataStore.getState();
-    // 仅当当前播放的文件夹与全局 Store 的文件夹一致时才加载更多
-    if (folderStore.folderId !== playContext.folderId) return;
+    // 仅当当前播放来源与全局 Store 中的列表来源一致时才继续分页。
+    const matchesSource = playContext.sourceKey
+      ? folderStore.sourceKey === playContext.sourceKey
+      : folderStore.folderId === playContext.folderId;
+    if (!matchesSource) return;
     if (!folderStore.hasMore) return;
 
     setLoadingMore(true);
     try {
       const beforeList = folderStore.getDisplayedList();
       await folderStore.loadMore();
-      const afterList = folderStore.getDisplayedList();
+      const latestFolderStore = useFolderDataStore.getState();
+      const latestPlayContext = usePlayerStore.getState().playContext;
+      const stillMatchesSource = playContext.sourceKey
+        ? latestFolderStore.sourceKey === playContext.sourceKey && latestPlayContext?.sourceKey === playContext.sourceKey
+        : latestFolderStore.folderId === playContext.folderId && latestPlayContext?.folderId === playContext.folderId;
+      if (!stillMatchesSource) return;
+      const afterList = latestFolderStore.getDisplayedList();
 
       const newItems = afterList.slice(beforeList.length);
       if (newItems.length > 0) {

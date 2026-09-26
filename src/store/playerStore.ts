@@ -15,6 +15,7 @@ const mmkvStorage = {
 
 export interface PlayContext {
   folderId?: number;
+  sourceKey?: string;
   sortOption?: string;
   searchQuery?: string;
 }
