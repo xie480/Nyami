@@ -60,13 +60,24 @@ interface HomePlaylistItem {
   source?: ImportedPlaylist;
 }
 
+const EMPTY_IMPORTED_CATALOG: ImportedPlaylist[] = [];
+const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
+
 export const FoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
   const isGlass = !!t.glass;
   const uid = useAuthStore((s) => s.userId);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
-  const importedCatalog = useImportedPlaylistStore((s) => uid ? s.catalogByUid[uid] ?? [] : []);
-  const visibleSourceKeys = useImportedPlaylistStore((s) => uid ? s.visibleSourceKeysByUid[uid] ?? [] : []);
+  const importedCatalog = useImportedPlaylistStore(s =>
+    uid
+      ? s.catalogByUid[uid] ?? EMPTY_IMPORTED_CATALOG
+      : EMPTY_IMPORTED_CATALOG,
+  );
+  const visibleSourceKeys = useImportedPlaylistStore(s =>
+    uid
+      ? s.visibleSourceKeysByUid[uid] ?? EMPTY_VISIBLE_SOURCE_KEYS
+      : EMPTY_VISIBLE_SOURCE_KEYS,
+  );
   const setImportedCatalog = useImportedPlaylistStore((s) => s.setCatalog);
   const setQueue = usePlayerStore((s) => s.setQueue);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
