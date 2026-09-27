@@ -30,6 +30,7 @@ const ACCOUNT_INDEX_READY_POLL_MS = 100;
 
 interface PersonalizationContext {
   favorites: FavoriteVideo[];
+  favoriteVideoIds: string[];
   profile: TagProfile;
 }
 
@@ -60,9 +61,14 @@ async function waitForCurrentRecommendationAccount(uid: string, signal: AbortSig
 async function loadPersonalizationContext(
   uid: string,
   signal: AbortSignal,
+  importedSourcesPromise: Promise<ImportedPlaylist[]>,
 ): Promise<PersonalizationContext> {
   await waitForCurrentRecommendationAccount(uid, signal);
-  await loadGlobalIndexCache();
+  const [, importedSources] = await Promise.all([
+    loadGlobalIndexCache(),
+    importedSourcesPromise,
+  ]);
+  if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
 
   const settings = useSettingsStore.getState();
@@ -72,9 +78,15 @@ async function loadPersonalizationContext(
     settings.hiddenFolderIds,
     visibleSourceKeys,
   );
+  const allFavoriteVideoIds = Array.from(new Set(
+    favoriteService.getGlobalIndex(
+      [],
+      importedSources.map(source => source.sourceKey),
+    ).map(video => video.bvid),
+  ));
   const {profile} = await loadTagProfile(favorites);
   assertCurrentRecommendationAccount(uid);
-  return {favorites, profile};
+  return {favorites, favoriteVideoIds: allFavoriteVideoIds, profile};
 }
 
 function rankCollections(
@@ -113,9 +125,10 @@ export async function generateHomeFeed(
   if (!uid || useAuthStore.getState().userId !== uid) {
     throw new Error('B 站账号已变化，请刷新推荐');
   }
+  const importedSourcesPromise = importedPlaylistService.getCollectedPlaylists(uid, true, signal);
   const [context, sources] = await Promise.all([
-    loadPersonalizationContext(uid, signal),
-    importedPlaylistService.getCollectedPlaylists(uid, true, signal),
+    loadPersonalizationContext(uid, signal, importedSourcesPromise),
+    importedSourcesPromise,
   ]);
   if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
@@ -125,6 +138,7 @@ export async function generateHomeFeed(
     context.profile,
     context.favorites,
     signal,
+    {excludeVideoIds: context.favoriteVideoIds},
   );
   if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
@@ -147,13 +161,14 @@ export async function loadMorePersonalizedSongs(
   excludeVideoIds: string[],
   signal: AbortSignal,
 ): Promise<TagRecommendationSearchResult> {
-  const context = await loadPersonalizationContext(uid, signal);
+  const importedSourcesPromise = importedPlaylistService.getCollectedPlaylists(uid, false, signal);
+  const context = await loadPersonalizationContext(uid, signal, importedSourcesPromise);
   if (signal.aborted) throw new Error('个性化队列补充已取消');
   assertCurrentRecommendationAccount(uid);
   return searchTagRecommendations(
     context.profile,
     context.favorites,
     signal,
-    {page, excludeVideoIds},
+    {page, excludeVideoIds: [...context.favoriteVideoIds, ...excludeVideoIds]},
   );
 }

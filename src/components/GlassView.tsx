@@ -14,7 +14,7 @@ interface GlassViewProps {
   borderColor?: string;
   /** If true, renders without shadow (for flat headers etc) */
   noShadow?: boolean;
-  /** If true, renders without blur (fallback for Android issues) */
+  /** If true, skips the native backdrop blur for lightweight surfaces. */
   noBlur?: boolean;
 }
 
@@ -57,14 +57,20 @@ export const GlassView: React.FC<GlassViewProps> = ({
 
   const blurType = t.isDark ? ('dark' as const) : ('light' as const);
 
-  const [isAnimating, setIsAnimating] = useState(true);
+  const [isAnimating, setIsAnimating] = useState(!noBlur);
 
   useEffect(() => {
+    if (noBlur) {
+      setIsAnimating(false);
+      return;
+    }
+
+    setIsAnimating(true);
     const task = InteractionManager.runAfterInteractions(() => {
       setIsAnimating(false);
     });
     return () => task.cancel();
-  }, []);
+  }, [noBlur]);
 
   // ── Outer container: holds shadows + clips inner content ──────────
   const outerStyle: ViewStyle = {

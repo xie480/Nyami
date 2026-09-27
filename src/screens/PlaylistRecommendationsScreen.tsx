@@ -1,6 +1,7 @@
 import React, {useCallback} from 'react';
 import {
   ActivityIndicator,
+  RefreshControl,
   ScrollView,
   StatusBar,
   Text,
@@ -56,6 +57,13 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
       />
       <ScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={(
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void refresh('manual')}
+            tintColor={t.colors.primary}
+          />
+        )}
         contentContainerStyle={{paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.md, paddingBottom: Math.max(insets.bottom, t.spacing.xl)}}>
         <View style={{paddingHorizontal: t.spacing.xs, marginBottom: t.spacing.md}}>
           <Text style={{fontSize: t.fontSize.xxl, lineHeight: 34, fontWeight: '800', color: t.colors.text}}>

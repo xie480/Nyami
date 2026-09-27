@@ -166,7 +166,7 @@ export const DiscoverScreen = ({navigation}: any) => {
           activeOpacity={0.8}
           onPress={() => navigation.navigate('Search')}
           style={{marginBottom: t.spacing.md}}>
-          <GlassView borderRadius={22} backgroundColor={glassBackground} borderColor={glassBorder} noShadow>
+          <GlassView borderRadius={22} backgroundColor={glassBackground} borderColor={glassBorder} noShadow noBlur>
             <View style={{height: 54, flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.lg}}>
               <Icon name="magnify" size={22} color={t.colors.textSub} />
               <Text style={{flex: 1, marginLeft: t.spacing.md, color: t.colors.textHint, fontSize: t.fontSize.base}}>
@@ -177,7 +177,7 @@ export const DiscoverScreen = ({navigation}: any) => {
           </GlassView>
         </TouchableOpacity>
 
-        <GlassView borderRadius={22} backgroundColor={glassBackground} borderColor={glassBorder} noShadow style={{marginBottom: t.spacing.md}}>
+        <GlassView borderRadius={22} backgroundColor={glassBackground} borderColor={glassBorder} noShadow noBlur style={{marginBottom: t.spacing.md}}>
           <View style={{minHeight: 76, flexDirection: 'row', alignItems: 'center', padding: t.spacing.md}}>
             <View style={{width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: t.colors.primaryLight}}>
               <Icon name="creation" size={23} color={t.colors.primary} />
@@ -209,7 +209,7 @@ export const DiscoverScreen = ({navigation}: any) => {
           </View>
         )}
 
-        <GlassView borderRadius={24} backgroundColor={glassBackground} borderColor={glassBorder} noShadow style={{marginBottom: t.spacing.md}}>
+        <GlassView borderRadius={24} backgroundColor={glassBackground} borderColor={glassBorder} noShadow noBlur style={{marginBottom: t.spacing.md}}>
           <View style={{padding: t.spacing.md}}>
             <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: t.spacing.md}}>
               <View style={{width: 42, height: 42, borderRadius: 14, backgroundColor: t.colors.primaryLight, alignItems: 'center', justifyContent: 'center'}}>
@@ -239,7 +239,7 @@ export const DiscoverScreen = ({navigation}: any) => {
           </View>
         </GlassView>
 
-        <GlassView borderRadius={24} backgroundColor={glassBackground} borderColor={glassBorder} noShadow>
+        <GlassView borderRadius={24} backgroundColor={glassBackground} borderColor={glassBorder} noShadow noBlur>
           <View style={{padding: t.spacing.md}}>
             <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: t.spacing.xs}}>
               <TouchableOpacity

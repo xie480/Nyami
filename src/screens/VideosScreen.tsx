@@ -15,6 +15,7 @@ import {
   InteractionManager,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import TrackPlayer from 'react-native-track-player';
 import { IconButton } from '../components/IconButton';
@@ -42,7 +43,6 @@ interface VideoItemProps {
   index: number;
   onPlay: (index: number) => void;
   onMenu: (item: FavoriteVideo) => void;
-  coverColor: string;
   textColor: string;
   textHintColor: string;
   surfaceHighColor: string;
@@ -51,12 +51,13 @@ interface VideoItemProps {
   spacingSm: number;
   spacingMd: number;
   spacingLg: number;
+  surfaceColor: string;
 }
 
 const VideoItem = memo(function VideoItem({
   item, index, onPlay, onMenu,
-  coverColor, textColor, textHintColor, surfaceHighColor,
-  fontSizeBase, fontSizeSm, spacingSm, spacingMd, spacingLg,
+  textColor, textHintColor, surfaceHighColor,
+  fontSizeBase, fontSizeSm, spacingSm, spacingMd, spacingLg, surfaceColor,
 }: VideoItemProps) {
   return (
     <TouchableOpacity
@@ -65,20 +66,24 @@ const VideoItem = memo(function VideoItem({
         flexDirection: 'row',
         alignItems: 'center',
         paddingVertical: spacingSm,
-        paddingHorizontal: spacingLg,
+        paddingHorizontal: spacingSm,
+        marginHorizontal: spacingLg,
+        marginVertical: spacingSm,
+        borderRadius: 18,
+        backgroundColor: surfaceColor,
       }}
       onPress={() => onPlay(index)}
     >
-      <FastImage
-        source={{ uri: item.cover }}
-        style={{
-          width: 60,
-          height: 60,
-          borderRadius: 8,
-          backgroundColor: surfaceHighColor,
-        }}
-        resizeMode={FastImage.resizeMode.cover}
-      />
+      <View>
+        <FastImage
+          source={{uri: item.cover}}
+          style={{width: 116, height: 72, borderRadius: 12, backgroundColor: surfaceHighColor}}
+          resizeMode={FastImage.resizeMode.cover}
+        />
+        <View style={{position: 'absolute', bottom: 4, right: 4, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 7, backgroundColor: 'rgba(0,0,0,0.68)'}}>
+          <Text style={{color: '#fff', fontSize: 10}}>{formatDuration(item.duration)}</Text>
+        </View>
+      </View>
       <View style={{ flex: 1, marginLeft: spacingMd }}>
         <Text
           style={{
@@ -101,9 +106,6 @@ const VideoItem = memo(function VideoItem({
             numberOfLines={1}
           >
             {item.upper.name}
-          </Text>
-          <Text style={{ fontSize: fontSizeSm, color: textHintColor, marginLeft: spacingSm }}>
-            {formatDuration(item.duration)}
           </Text>
         </View>
       </View>
@@ -234,6 +236,11 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const MAX_QUEUE_SIZE = 200;
 
   const displayedList = getDisplayedList();
+  const totalVideoCount = source?.mediaCount ?? route.params.mediaCount ?? list.length;
+  const heroCover = source?.cover || route.params.cover || displayedList[0]?.cover;
+  const statusBarHeight = Platform.OS === 'android'
+    ? Math.max(insets.top, StatusBar.currentHeight ?? 0)
+    : insets.top;
 
   /** 后台异步加载更多分页数据并追加到播放队列尾部 */
   const loadMoreInBackground = useCallback(async (expectedSourceKey: string) => {
@@ -444,7 +451,6 @@ export const VideosScreen = ({ route, navigation }: any) => {
     container: { flex: 1, backgroundColor: t.colors.background },
     actions: {
       flexDirection: 'row',
-      padding: t.spacing.lg,
       gap: t.spacing.md,
     },
     actionBtn: { flex: 1 },
@@ -500,15 +506,66 @@ export const VideosScreen = ({ route, navigation }: any) => {
   return (
     // 【性能优化】collapsable=false 确保 Android 上屏幕容器不被 View 融合优化
     <View style={s.container} {...(Platform.OS === 'android' ? { collapsable: false as any } : {})}>
-      <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
-      <Header title={listTitle} showBack />
+      <StatusBar barStyle={source || t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
+      {source ? (
+        <View style={{height: 252, overflow: 'hidden', backgroundColor: t.colors.primaryDark}}>
+          {heroCover ? (
+            <FastImage source={{uri: heroCover}} style={StyleSheet.absoluteFillObject} resizeMode={FastImage.resizeMode.cover} />
+          ) : null}
+          <LinearGradient
+            pointerEvents="none"
+            colors={t.isDark ? ['rgba(8,8,12,0.08)', 'rgba(8,8,12,0.94)'] : ['rgba(12,10,22,0.02)', 'rgba(12,10,22,0.84)']}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="返回收藏夹"
+            onPress={() => navigation.goBack()}
+            style={{alignSelf: 'flex-start', marginTop: statusBarHeight + 5, marginLeft: t.spacing.md, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(12,10,22,0.32)'}}>
+            <Icon name="chevron-left" size={28} color="#fff" />
+          </TouchableOpacity>
+          <View style={{position: 'absolute', left: t.spacing.lg, right: t.spacing.lg, bottom: t.spacing.lg}}>
+            <View style={{alignSelf: 'flex-start', paddingHorizontal: t.spacing.sm, paddingVertical: 4, borderRadius: t.radius.full, backgroundColor: t.colors.primary}}>
+              <Text style={{fontSize: t.fontSize.xs, fontWeight: '600', color: t.colors.onPrimary}}>
+                {source.kind === 'subscribedSeason' ? '订阅合集' : '收藏夹'}
+              </Text>
+            </View>
+            <Text style={{fontSize: 25, lineHeight: 31, fontWeight: '700', color: '#fff', marginTop: t.spacing.sm}} numberOfLines={2}>{listTitle}</Text>
+            <Text style={{fontSize: t.fontSize.sm, color: 'rgba(255,255,255,0.88)', marginTop: t.spacing.xs}} numberOfLines={1}>
+              {source.ownerName ? `${source.ownerName} · ` : ''}{totalVideoCount} 个视频
+            </Text>
+            {source.description ? (
+              <Text style={{fontSize: t.fontSize.xs, lineHeight: 17, color: 'rgba(255,255,255,0.82)', marginTop: t.spacing.xs}} numberOfLines={2}>
+                {source.description}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      ) : (
+        <>
+          <Header title={listTitle} showBack noBorder />
+          <View style={{flexDirection: 'row', alignItems: 'center', marginHorizontal: t.spacing.lg, marginTop: t.spacing.sm, marginBottom: t.spacing.xs, padding: t.spacing.md, borderRadius: 20, backgroundColor: t.colors.primaryLight}}>
+            <View style={{width: 68, height: 68, borderRadius: 16, overflow: 'hidden', backgroundColor: t.colors.surfaceHigh, alignItems: 'center', justifyContent: 'center'}}>
+              {heroCover ? (
+                <FastImage source={{uri: heroCover}} style={{width: '100%', height: '100%'}} resizeMode={FastImage.resizeMode.cover} />
+              ) : (
+                <Icon name="folder-music-outline" size={30} color={t.colors.primary} />
+              )}
+            </View>
+            <View style={{flex: 1, marginLeft: t.spacing.md}}>
+              <Text style={{fontSize: t.fontSize.lg, color: t.colors.text, fontWeight: '700'}} numberOfLines={1}>{listTitle}</Text>
+              <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 5}}>我的收藏夹 · {totalVideoCount} 个视频</Text>
+            </View>
+          </View>
+        </>
+      )}
       {/* 搜索 + 排序栏 */}
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md}}>
-        <View style={[s.searchBar, { flex: 1 }]}>
+        <View style={[s.searchBar, { flex: 1, height: 46, marginHorizontal: 0, marginVertical: 0, borderRadius: t.radius.full }]}>
           <Icon name="magnify" size={20} color={t.colors.textHint} />
           <TextInput
             style={{ flex: 1, marginLeft: t.spacing.sm, color: isSearchDisabled ? t.colors.textHint : t.colors.text, fontSize: t.fontSize.base, padding: 0 }}
-            placeholder={isSyncing ? "索引同步中，暂不可搜索" : isGlobalIndexEmpty ? "全局索引为空，暂不可搜索" : "搜索收藏夹内歌曲"}
+            placeholder={isSyncing ? "索引同步中，暂不可搜索" : isGlobalIndexEmpty ? "全局索引为空，暂不可搜索" : source ? "搜索合集内视频" : "搜索收藏夹内视频"}
             placeholderTextColor={t.colors.textHint}
             value={searchQuery}
             onChangeText={setSearchQuery} editable={!isSearchDisabled}
@@ -543,6 +600,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       ) : (
         <FlatList
           data={displayedList}
+          contentContainerStyle={{paddingBottom: insets.bottom + 136}}
           keyExtractor={(it) => it.bvid}
           showsVerticalScrollIndicator={false}
           // ========== 性能优化参数 ==========
@@ -552,9 +610,19 @@ export const VideosScreen = ({ route, navigation }: any) => {
           initialNumToRender={10}
           // =================================
           ListHeaderComponent={
-            <View style={s.actions}>
-              <Button title="全部播放" onPress={playAll} style={s.actionBtn} />
-              <Button title="随机播放" variant="secondary" onPress={shuffle} style={s.actionBtn} />
+            <View style={{paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.sm, paddingBottom: t.spacing.xs}}>
+              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: t.spacing.md}}>
+                <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub}}>共 {totalVideoCount} 个视频</Text>
+                <TouchableOpacity onPress={() => setSortModalVisible(true)} style={{flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.sm, paddingVertical: 6, borderRadius: t.radius.full, backgroundColor: t.colors.surfaceHigh}}>
+                  <Icon name="sort" size={17} color={t.colors.textSub} />
+                  <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginLeft: 4}}>排序</Text>
+                  <Icon name="chevron-down" size={17} color={t.colors.textSub} />
+                </TouchableOpacity>
+              </View>
+              <View style={s.actions}>
+                <Button title="▶  全部播放" onPress={playAll} style={s.actionBtn} />
+                <Button title="⤨  随机播放" variant="secondary" onPress={shuffle} style={s.actionBtn} />
+              </View>
             </View>
           }
           renderItem={({ item, index }) => (
@@ -563,10 +631,10 @@ export const VideosScreen = ({ route, navigation }: any) => {
               index={index}
               onPlay={playFrom}
               onMenu={(v) => { setSelectedVideo(v); setModalVisible(true); }}
-              coverColor={t.colors.surfaceHigh}
               textColor={t.colors.text}
               textHintColor={t.colors.textHint}
               surfaceHighColor={t.colors.surfaceHigh}
+              surfaceColor={t.colors.surface}
               fontSizeBase={t.fontSize.base}
               fontSizeSm={t.fontSize.sm}
               spacingSm={t.spacing.sm}

@@ -92,6 +92,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   const [failedSearchCount, setFailedSearchCount] = useState(0);
   const [recommendationHasMore, setRecommendationHasMore] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
+  const [profileView, setProfileView] = useState<'tags' | 'listening'>('tags');
   const [error, setError] = useState<string | null>(null);
   const requestController = useRef<AbortController | null>(null);
   const loadedUid = useRef<string | null>(null);
@@ -312,6 +313,8 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
           ),
         )
       : 0;
+  const strongestTagCount = Math.max(1, ...(profile?.preferences.map(item => item.videoCount) ?? [1]));
+  const profileTags = profile?.preferences.slice(0, 12) ?? [];
 
   return (
     <View style={{flex: 1, backgroundColor: t.colors.background}}>
@@ -324,25 +327,37 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         style={{
           flexDirection: 'row',
           alignItems: 'center',
+          justifyContent: 'space-between',
           paddingTop: insets.top + t.spacing.sm,
           paddingHorizontal: t.spacing.lg,
-          paddingBottom: t.spacing.md,
+          paddingBottom: t.spacing.sm,
         }}>
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityLabel="返回收藏夹"
           onPress={() => navigation.goBack()}
-          style={{padding: t.spacing.sm, marginRight: t.spacing.sm}}>
+          style={{width: 40, height: 40, alignItems: 'center', justifyContent: 'center'}}>
           <Icon name="arrow-left" size={24} color={t.colors.text} />
         </TouchableOpacity>
         <Text
           style={{
+            position: 'absolute',
+            left: 58,
+            right: 58,
             color: t.colors.text,
             fontSize: t.fontSize.lg,
-            fontWeight: '600',
+            fontWeight: '700',
+            textAlign: 'center',
           }}>
-          收藏标签推荐
+          用户画像
         </Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="刷新用户画像"
+          onPress={loadSnapshot}
+          style={{width: 40, height: 40, alignItems: 'center', justifyContent: 'center'}}>
+          <Icon name="refresh" size={22} color={t.colors.text} />
+        </TouchableOpacity>
       </View>
 
       {initialLoading ? (
@@ -357,86 +372,89 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
           style={{flex: 1}}
           contentContainerStyle={{
             paddingHorizontal: t.spacing.lg,
-            paddingBottom: insets.bottom + t.spacing.xl,
+            paddingBottom: insets.bottom + 136,
           }}
           showsVerticalScrollIndicator={false}>
-          <Text
-            style={{
-              color: t.colors.textSub,
-              fontSize: t.fontSize.sm,
-              lineHeight: 21,
-            }}>
-            根据本机已同步的 {favorites.length} 个收藏视频统计兴趣标签，再到 B
-            站音乐分区寻找相似视频。画像在本机计算；查询会向 B 站发送单个视频
-            BVID 和兴趣标签。
+          <Text style={{color: t.colors.textSub, fontSize: t.fontSize.sm, lineHeight: 22}}>
+            根据本机已同步的 {favorites.length} 个收藏视频统计兴趣标签，再到 B 站音乐区寻找相似内容。
           </Text>
-          <Text
-            style={{
-              color: t.colors.textHint,
-              fontSize: t.fontSize.xs,
-              lineHeight: 18,
-              marginTop: t.spacing.xs,
-            }}>
-            索引同步后会在后台逐个补齐视频标签；手动生成推荐时，离开此页会中断本轮，已完成缓存会保留。
+          <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs, lineHeight: 18, marginTop: t.spacing.xs}}>
+            画像在本机计算；查询仅发送视频 BVID 和兴趣标签。离开页面会中断手动生成，已完成缓存会保留。
           </Text>
+
+          <View style={{flexDirection: 'row', padding: 4, marginTop: t.spacing.lg, borderRadius: t.radius.full, backgroundColor: t.colors.surfaceHigh}}>
+            {([
+              {key: 'tags', title: '兴趣标签'},
+              {key: 'listening', title: '听歌偏好'},
+            ] as const).map(tab => {
+              const selected = profileView === tab.key;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  accessibilityRole="button"
+                  accessibilityState={{selected}}
+                  onPress={() => setProfileView(tab.key)}
+                  style={{flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: t.radius.full, backgroundColor: selected ? t.colors.primary : 'transparent'}}>
+                  <Text style={{color: selected ? t.colors.onPrimary : t.colors.textSub, fontSize: t.fontSize.sm, fontWeight: selected ? '600' : '400'}}>{tab.title}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
 
           {profile && (
             <View
               style={{
                 marginTop: t.spacing.lg,
                 padding: t.spacing.lg,
-                borderRadius: t.radius.lg,
+                borderRadius: 24,
                 backgroundColor: t.colors.surface,
               }}>
-              <Text
-                style={{
-                  color: t.colors.text,
-                  fontSize: t.fontSize.md,
-                  fontWeight: '600',
-                }}>
-                兴趣画像
+              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+                <Text style={{color: t.colors.text, fontSize: t.fontSize.md, fontWeight: '700'}}>
+                  {profileView === 'tags' ? '兴趣标签' : '兴趣画像'}
+                </Text>
+                <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs}}>
+                  已读取 {profile.resolvedVideoCount}/{profile.totalVideoCount} 个视频
+                </Text>
+              </View>
+              <Text style={{color: t.colors.textSub, fontSize: t.fontSize.sm, marginTop: t.spacing.xs}}>
+                {profile.taggedVideoCount} 个视频含可用于画像的标签
               </Text>
-              <Text
-                style={{
-                  color: t.colors.textHint,
-                  fontSize: t.fontSize.xs,
-                  marginTop: t.spacing.xs,
-                }}>
-                已读取 {profile.resolvedVideoCount}/{profile.totalVideoCount}{' '}
-                个视频；其中 {profile.taggedVideoCount} 个视频含可用于画像的标签
-              </Text>
-              {profile.preferences.length > 0 ? (
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    flexWrap: 'wrap',
-                    marginTop: t.spacing.md,
-                  }}>
-                  {profile.preferences.slice(0, 12).map(preference => (
+              {profile.preferences.length > 0 ? profileView === 'tags' ? (
+                <View style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: t.spacing.md}}>
+                  {profileTags.map((preference, index) => (
                     <View
                       key={`${preference.tagId}:${preference.tagName}`}
-                      style={{
-                        paddingHorizontal: t.spacing.sm,
-                        paddingVertical: t.spacing.xs,
-                        borderRadius: t.radius.md,
-                        backgroundColor: t.colors.surfaceHigh,
-                        marginRight: t.spacing.xs,
-                        marginBottom: t.spacing.xs,
-                      }}>
-                      <Text
-                        style={{color: t.colors.text, fontSize: t.fontSize.xs}}>
+                      style={{paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.sm, borderRadius: t.radius.full, backgroundColor: index < 3 ? t.colors.primary : t.colors.primaryLight, marginRight: t.spacing.xs, marginBottom: t.spacing.xs}}>
+                      <Text style={{color: index < 3 ? t.colors.onPrimary : t.colors.text, fontSize: t.fontSize.sm, fontWeight: index < 3 ? '600' : '400'}}>
                         {preference.tagName} · {preference.videoCount}
                       </Text>
                     </View>
                   ))}
                 </View>
               ) : (
-                <Text
-                  style={{
-                    color: t.colors.textHint,
-                    fontSize: t.fontSize.sm,
-                    marginTop: t.spacing.md,
-                  }}>
+                <View style={{marginTop: t.spacing.lg}}>
+                  {profile.preferences.slice(0, 5).map(preference => {
+                    const relativeWidth = Math.max(6, Math.round((preference.videoCount / strongestTagCount) * 100));
+                    const coverage = profile.totalVideoCount > 0
+                      ? Math.round((preference.videoCount / profile.totalVideoCount) * 100)
+                      : 0;
+                    return (
+                      <View key={`${preference.tagId}:${preference.tagName}`} style={{flexDirection: 'row', alignItems: 'center', marginBottom: t.spacing.md}}>
+                        <Text style={{width: 88, color: t.colors.text, fontSize: t.fontSize.sm}} numberOfLines={1}>{preference.tagName}</Text>
+                        <View style={{flex: 1, height: 14, borderRadius: 7, overflow: 'hidden', backgroundColor: t.colors.surfaceHigh}}>
+                          <View style={{height: '100%', width: `${relativeWidth}%`, borderRadius: 7, backgroundColor: t.colors.primary}} />
+                        </View>
+                        <Text style={{width: 44, textAlign: 'right', color: t.colors.textSub, fontSize: t.fontSize.xs}}>{coverage}%</Text>
+                      </View>
+                    );
+                  })}
+                  <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: t.spacing.xs}}>
+                    百分比表示该标签覆盖的已同步收藏视频，横条长度按当前标签频次缩放。
+                  </Text>
+                </View>
+              ) : (
+                <Text style={{color: t.colors.textHint, fontSize: t.fontSize.sm, marginTop: t.spacing.md}}>
                   还没有可用的标签数据。点击下方按钮读取收藏视频 tag。
                 </Text>
               )}

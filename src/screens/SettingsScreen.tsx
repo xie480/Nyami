@@ -25,6 +25,7 @@ import { useTheme } from '../theme';
 import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
 import type { Quality } from '../types/domain';
 import ImageCropPicker from 'react-native-image-crop-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RNFS from 'react-native-fs';
 import { config } from '../config';
 
@@ -54,6 +55,7 @@ const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
 
 export const SettingsScreen = ({ navigation }: any) => {
   const t = useTheme();
+  const insets = useSafeAreaInsets();
   const {
     quality, autoCacheOnWifi, wifiOnly, hiddenFolderIds,
     expandMultiPart, themeMode, customBackgroundImage, glassBlurAmount,
@@ -261,12 +263,12 @@ export const SettingsScreen = ({ navigation }: any) => {
     container: { flex: 1, backgroundColor: t.colors.background },
     section: {
       fontSize: t.fontSize.sm, color: t.colors.textSub,
-      marginTop: t.spacing.xxl, marginBottom: t.spacing.sm,
+      marginTop: t.spacing.xl, marginBottom: t.spacing.sm,
       marginHorizontal: t.spacing.lg,
     },
     group: {
       marginHorizontal: t.spacing.lg,
-      borderRadius: t.radius.lg, overflow: 'hidden',
+      borderRadius: 22, overflow: 'hidden',
       backgroundColor: t.colors.surface,
     },
     sep: { height: 0.5, backgroundColor: t.colors.divider, marginLeft: t.spacing.lg },
@@ -278,7 +280,7 @@ export const SettingsScreen = ({ navigation }: any) => {
     },
     cookieHint: { fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: t.spacing.sm },
     saveText: {
-      color: t.colors.primary, marginTop: t.spacing.sm,
+      color: t.colors.primary,
       fontSize: t.fontSize.base, textAlign: 'right',
     },
     danger: { color: t.colors.error, fontSize: t.fontSize.base },
@@ -288,19 +290,21 @@ export const SettingsScreen = ({ navigation }: any) => {
     <View style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title="设置" showBack noBorder />
-      <ScrollView style={{flex: 1}} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{flex: 1}} contentContainerStyle={{paddingBottom: insets.bottom + 132}} showsVerticalScrollIndicator={false}>
       <Text style={s.section}>账户</Text>
       <View style={[s.group, s.cookieBox]}>
         {loggedIn && userInfo ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Image source={{ uri: userInfo.avatar }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: t.spacing.md }} />
+              <Image source={{ uri: userInfo.avatar }} style={{ width: 58, height: 58, borderRadius: 29, marginRight: t.spacing.md }} />
               <View>
-                <Text style={{ fontSize: t.fontSize.base, color: t.colors.text }}>{userInfo.name}</Text>
+                <Text style={{ fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '600' }}>{userInfo.name}</Text>
                 <Text style={{ fontSize: t.fontSize.sm, color: t.colors.textSub }}>UID: {userInfo.uid}</Text>
               </View>
             </View>
-            <Text style={s.saveText} onPress={handleLogout}>退出登录</Text>
+            <TouchableOpacity onPress={handleLogout} style={{paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.sm, borderRadius: t.radius.full, backgroundColor: t.colors.primaryLight}}>
+              <Text style={s.saveText}>退出登录</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <Text style={s.saveText} onPress={triggerLogin}>点击登录</Text>
@@ -308,13 +312,14 @@ export const SettingsScreen = ({ navigation }: any) => {
 
         
       </View>
-        <Text style={s.section}>UI</Text>
+        <Text style={s.section}>外观与界面</Text>
         {isGlass && (
           <>
             <View style={s.group}>
               <ListItem
                 title="自定义背景图"
                 subtitle={customBackgroundImage ? '已设置 · 点击更换' : '导入个性化背景图片'}
+                icon="image-outline"
                 onPress={handlePickBackground}
                 right={
                   customBackgroundImage ? (
@@ -334,6 +339,7 @@ export const SettingsScreen = ({ navigation }: any) => {
               {i > 0 && <View style={s.sep} />}
               <ListItem
                 title={opt.title}
+                icon="theme-light-dark"
                 onPress={() => setThemeMode(opt.key)}
                 right={
                   themeMode === opt.key ? (
@@ -439,23 +445,18 @@ export const SettingsScreen = ({ navigation }: any) => {
 
         <Text style={s.section}>推荐</Text>
         <View style={s.group}>
-          <View style={{padding: t.spacing.lg}}>
-            <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
-              <View style={{flex: 1, paddingRight: t.spacing.md}}>
-                <Text style={{fontSize: t.fontSize.base, color: t.colors.text, fontWeight: '500'}}>
-                  筛选推荐视频时长
-                </Text>
-                <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: 3}}>
-                  默认只推荐不超过设定时长的视频
-                </Text>
-              </View>
-              <Switch
-                value={recommendationDurationFilterEnabled}
-                onValueChange={setRecommendationDurationFilterEnabled}
-              />
-            </View>
-            <View style={{flexDirection: 'row', alignItems: 'center', marginTop: t.spacing.md, opacity: recommendationDurationFilterEnabled ? 1 : 0.55}}>
-              <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub}}>最长</Text>
+          <ListItem
+            title="推荐视频时长筛选"
+            subtitle="仅推荐时长不超过设置值的视频"
+            icon="clock-outline"
+            onPress={() => setRecommendationDurationFilterEnabled(!recommendationDurationFilterEnabled)}
+            right={<Text style={{fontSize: t.fontSize.sm, color: t.colors.primary, fontWeight: '600'}}>{recommendationDurationFilterEnabled ? `≤ ${recommendationDurationLimitMinutes} 分钟` : '已关闭'}</Text>}
+            showArrow
+          />
+          <View style={{height: 0.5, backgroundColor: t.colors.divider, marginLeft: 72}} />
+          <View style={{paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md, opacity: recommendationDurationFilterEnabled ? 1 : 0.55}}>
+            <View style={{flexDirection: 'row', alignItems: 'center'}}>
+              <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub}}>最长时长</Text>
               <TextInput
                 accessibilityLabel="推荐视频最长时长，分钟"
                 value={durationLimitInput}
@@ -471,67 +472,65 @@ export const SettingsScreen = ({ navigation }: any) => {
                   marginHorizontal: t.spacing.sm,
                   paddingHorizontal: t.spacing.sm,
                   color: t.colors.text,
-                  backgroundColor: t.colors.background,
-                  borderWidth: 1,
-                  borderColor: t.colors.divider,
-                  borderRadius: t.radius.md,
+                  backgroundColor: t.colors.surfaceHigh,
+                  borderRadius: t.radius.full,
                 }}
               />
               <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub}}>分钟</Text>
             </View>
           </View>
           <View style={s.sep} />
-          <View style={{padding: t.spacing.lg}}>
-            <Text style={{fontSize: t.fontSize.base, color: t.colors.text, fontWeight: '500'}}>
-              推荐 tag 黑名单
-            </Text>
-            <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: 3}}>
-              粘贴关键词后批量导入；推荐视频的 tag 包含关键词时会被过滤
-            </Text>
-            <TextInput
-              value={blacklistImportInput}
-              onChangeText={setBlacklistImportInput}
-              placeholder="支持换行、逗号、顿号或分号分隔"
-              placeholderTextColor={t.colors.textHint}
-              multiline
-              textAlignVertical="top"
-              style={[s.input, {minHeight: 74, marginTop: t.spacing.md}]}
+          <View>
+            <ListItem
+              title="推荐视频 tag 黑名单"
+              subtitle="屏蔽 tag 模糊匹配关键词的视频"
+              icon="tag-outline"
+              right={<Text style={{fontSize: t.fontSize.sm, color: t.colors.primary}}>{recommendationTagBlacklist.length} 个关键词</Text>}
             />
-            <Button
-              title="导入关键词"
-              variant="text"
-              onPress={importRecommendationTagBlacklist}
-              style={{alignSelf: 'flex-end', marginTop: t.spacing.xs}}
-            />
-            {recommendationTagBlacklist.length > 0 ? (
-              <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.xs, marginTop: t.spacing.xs}}>
-                {recommendationTagBlacklist.map(keyword => (
-                  <TouchableOpacity
-                    key={keyword.toLocaleLowerCase()}
-                    accessibilityRole="button"
-                    accessibilityLabel={`移除黑名单关键词 ${keyword}`}
-                    onPress={() => setRecommendationTagBlacklist(
-                      recommendationTagBlacklist.filter(item => item !== keyword),
-                    )}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingHorizontal: t.spacing.sm,
-                      paddingVertical: t.spacing.xs,
-                      borderRadius: t.radius.full,
-                      backgroundColor: t.colors.primaryLight,
-                    }}>
-                    <Text style={{fontSize: t.fontSize.xs, color: t.colors.primary}}>{keyword}</Text>
-                    <Text style={{fontSize: t.fontSize.xs, color: t.colors.primary, marginLeft: 5}}>×</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ) : (
-              <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: t.spacing.xs}}>
-                当前没有屏蔽关键词
-              </Text>
-            )}
+            <View style={{paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md}}>
+              <TextInput
+                value={blacklistImportInput}
+                onChangeText={setBlacklistImportInput}
+                placeholder="支持换行、逗号、顿号或分号分隔"
+                placeholderTextColor={t.colors.textHint}
+                multiline
+                textAlignVertical="top"
+                style={[s.input, {minHeight: 72, marginTop: t.spacing.xs, backgroundColor: t.colors.surfaceHigh, borderColor: 'transparent', borderRadius: 16}]}
+              />
+              <Button
+                title="导入关键词"
+                variant="text"
+                onPress={importRecommendationTagBlacklist}
+                style={{alignSelf: 'flex-end', marginTop: t.spacing.xs, paddingHorizontal: t.spacing.md}}
+              />
+              {recommendationTagBlacklist.length > 0 ? (
+                <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.xs, marginTop: t.spacing.xs}}>
+                  {recommendationTagBlacklist.map(keyword => (
+                    <TouchableOpacity
+                      key={keyword.toLocaleLowerCase()}
+                      accessibilityRole="button"
+                      accessibilityLabel={`移除黑名单关键词 ${keyword}`}
+                      onPress={() => setRecommendationTagBlacklist(recommendationTagBlacklist.filter(item => item !== keyword))}
+                      style={{flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.sm, paddingVertical: t.spacing.xs, borderRadius: t.radius.full, backgroundColor: t.colors.primaryLight}}>
+                      <Text style={{fontSize: t.fontSize.xs, color: t.colors.primary}}>{keyword}</Text>
+                      <Text style={{fontSize: t.fontSize.xs, color: t.colors.primary, marginLeft: 5}}>×</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: t.spacing.xs}}>
+                  当前没有屏蔽关键词
+                </Text>
+              )}
+            </View>
           </View>
+          <View style={s.sep} />
+          <ListItem
+            title="个性化播放缓存"
+            subtitle="默认关闭；开启后按现有规则缓存推荐视频"
+            icon="play-circle-outline"
+            right={<Switch value={cachePersonalizedRecommendations} onValueChange={setCachePersonalizedRecommendations} />}
+          />
         </View>
 
         <Text style={s.section}>音效</Text>
@@ -601,18 +600,8 @@ export const SettingsScreen = ({ navigation }: any) => {
         <Text style={s.section}>缓存</Text>
         <View style={s.group}>
           <ListItem
-            title="个性化播放自动缓存"
-            subtitle="默认关闭；开启后按现有 WiFi 自动缓存规则保存推荐歌曲"
-            right={
-              <Switch
-                value={cachePersonalizedRecommendations}
-                onValueChange={setCachePersonalizedRecommendations}
-              />
-            }
-          />
-          <View style={s.sep} />
-          <ListItem
             title="已缓存音频"
+            icon="download-outline"
             right={
               <Text style={{ color: t.colors.textSub, fontSize: t.fontSize.sm }}>
                 {cacheCount}首 / {formatBytes(cacheSize)}

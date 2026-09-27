@@ -1,9 +1,9 @@
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useDeferredValue, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Modal,
-  ScrollView,
   StatusBar,
   Text,
   TextInput,
@@ -52,6 +52,7 @@ export const SearchScreen = ({navigation}: any) => {
   const setQueue = usePlayerStore(state => state.setQueue);
   const [mode, setMode] = useState<SearchMode>('bilibili');
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
   const [tagFilter, setTagFilter] = useState('');
   const [onlineResults, setOnlineResults] = useState<OnlineVideoSearchResult[]>([]);
   const [favoriteIndex, setFavoriteIndex] = useState<FavoriteVideo[]>([]);
@@ -216,14 +217,22 @@ export const SearchScreen = ({navigation}: any) => {
     }
   }, [navigation, setQueue]);
 
+  const favoriteSearchIndex = useMemo(
+    () => favoriteIndex.map(video => ({
+      video,
+      normalizedTitle: video.title.toLocaleLowerCase(),
+      normalizedAuthor: (video.upper?.name ?? '').toLocaleLowerCase(),
+    })),
+    [favoriteIndex],
+  );
+
   const filteredFavorites = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase();
+    const normalized = deferredQuery.trim().toLocaleLowerCase();
     if (!normalized) return [];
-    return favoriteIndex.filter(video =>
-      video.title.toLocaleLowerCase().includes(normalized) ||
-      video.upper.name.toLocaleLowerCase().includes(normalized),
-    );
-  }, [favoriteIndex, query]);
+    return favoriteSearchIndex
+      .filter(item => item.normalizedTitle.includes(normalized) || item.normalizedAuthor.includes(normalized))
+      .map(item => item.video);
+  }, [deferredQuery, favoriteSearchIndex]);
 
   const sortedOnlineResults = useMemo(() => {
     const results = [...onlineResults];
@@ -238,13 +247,13 @@ export const SearchScreen = ({navigation}: any) => {
   const results: Array<OnlineVideoSearchResult | FavoriteVideo> = mode === 'bilibili'
     ? sortedOnlineResults
     : filteredFavorites;
-  const isLoadingResults = onlineLoading || (mode === 'favorites' && favoriteLoading);
+  const isLoadingResults = onlineLoading ||
+    (mode === 'favorites' && (favoriteLoading || query !== deferredQuery));
 
-  const resultItem = (item: OnlineVideoSearchResult | FavoriteVideo, index: number) => {
+  const resultItem = (item: OnlineVideoSearchResult | FavoriteVideo) => {
     const isOnline = mode === 'bilibili';
-    const bvid = item.bvid;
     return (
-      <View key={`${bvid}:${index}`} style={{flexDirection: 'row', alignItems: 'center', marginBottom: t.spacing.sm, padding: t.spacing.sm, borderRadius: 18, backgroundColor: glassBackground, borderWidth: 1, borderColor: glassBorder}}>
+      <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: t.spacing.sm, padding: t.spacing.sm, borderRadius: 18, backgroundColor: glassBackground, borderWidth: 1, borderColor: glassBorder}}>
         <TouchableOpacity
           accessibilityRole="button"
           activeOpacity={0.75}
@@ -262,7 +271,7 @@ export const SearchScreen = ({navigation}: any) => {
           style={{flex: 1, marginHorizontal: t.spacing.sm}}>
           <Text style={{fontSize: t.fontSize.sm, fontWeight: '700', color: t.colors.text, lineHeight: 20}} numberOfLines={2}>{item.title}</Text>
           <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 4}} numberOfLines={1}>
-            {isOnline ? (item as OnlineVideoSearchResult).author : (item as FavoriteVideo).upper.name}
+            {isOnline ? (item as OnlineVideoSearchResult).author : (item as FavoriteVideo).upper?.name || '未知 UP 主'}
             {' · '}{formatDuration(item.duration)}
           </Text>
           {isOnline && (item as OnlineVideoSearchResult).tags.length > 0 && (
@@ -383,28 +392,38 @@ export const SearchScreen = ({navigation}: any) => {
         )}
 
         {error && <Text style={{fontSize: t.fontSize.xs, color: t.colors.error, marginBottom: t.spacing.sm}}>{error}</Text>}
-        <ScrollView
+        <FlatList
+          style={{flex: 1}}
+          data={results}
+          keyExtractor={item => item.bvid}
+          renderItem={({item}) => resultItem(item)}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{paddingBottom: Math.max(insets.bottom, t.spacing.xl)}}>
-          {results.map(resultItem)}
-          {isLoadingResults && <ActivityIndicator color={t.colors.primary} style={{padding: t.spacing.lg}} />}
-          {mode === 'bilibili' && didSearch && onlineHasMore && !onlineLoading && (
-            <TouchableOpacity onPress={() => void runOnlineSearch(onlinePage + 1)} style={{alignItems: 'center', paddingVertical: t.spacing.md}}>
-              <Text style={{fontSize: t.fontSize.sm, color: t.colors.primary}}>加载更多 B 站结果</Text>
-            </TouchableOpacity>
-          )}
-          {!isLoadingResults && results.length === 0 && (
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          contentContainerStyle={{flexGrow: 1, paddingBottom: Math.max(insets.bottom, t.spacing.xl)}}
+          ListEmptyComponent={!isLoadingResults ? (
             <View style={{alignItems: 'center', paddingVertical: t.spacing.xxl}}>
-              <Icon name="music-note-search" size={38} color={t.colors.textHint} />
+              <Icon name="magnify" size={38} color={t.colors.textHint} />
               <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, textAlign: 'center', marginTop: t.spacing.md}}>
                 {mode === 'bilibili'
                   ? didSearch ? '没有符合当前 tag 与时长条件的视频' : '输入关键词或 tag，开始搜索 B 站全站内容'
                   : query.trim() ? '本地收藏中没有匹配内容' : '输入关键词搜索全收藏夹'}
               </Text>
             </View>
+          ) : null}
+          ListFooterComponent={(
+            <View>
+              {isLoadingResults && <ActivityIndicator color={t.colors.primary} style={{padding: t.spacing.lg}} />}
+              {mode === 'bilibili' && didSearch && onlineHasMore && !onlineLoading && (
+                <TouchableOpacity onPress={() => void runOnlineSearch(onlinePage + 1)} style={{alignItems: 'center', paddingVertical: t.spacing.md}}>
+                  <Text style={{fontSize: t.fontSize.sm, color: t.colors.primary}}>加载更多 B 站结果</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
-        </ScrollView>
+        />
       </View>
 
       <Modal visible={sortVisible} transparent animationType="fade" onRequestClose={() => setSortVisible(false)}>
