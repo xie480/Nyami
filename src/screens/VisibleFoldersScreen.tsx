@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, FlatList, RefreshControl, StyleSheet, TouchableOpacity, Text, StatusBar, Alert,
+  View, SectionList, RefreshControl, StyleSheet, TouchableOpacity, Text, StatusBar, Alert,
 } from 'react-native';
 import { Header } from '../components/Header';
 import { ListItem } from '../components/ListItem';
@@ -21,14 +21,30 @@ type PreferenceItem =
   | { key: string; kind: 'owned'; folder: FavoriteFolder }
   | { key: string; kind: 'imported'; source: ImportedPlaylist };
 
+interface PreferenceSection {
+  title: string;
+  data: PreferenceItem[];
+}
+
+const EMPTY_IMPORTED_SOURCES: ImportedPlaylist[] = [];
+const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
+
 export const VisibleFoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const uid = useAuthStore((s) => s.userId);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const setHiddenFolderIds = useSettingsStore((s) => s.setHiddenFolderIds);
-  const importedSources = useImportedPlaylistStore((s) => uid ? s.catalogByUid[uid] ?? [] : []);
-  const visibleSourceKeys = useImportedPlaylistStore((s) => uid ? s.visibleSourceKeysByUid[uid] ?? [] : []);
+  const importedSources = useImportedPlaylistStore(s =>
+    uid
+      ? s.catalogByUid[uid] ?? EMPTY_IMPORTED_SOURCES
+      : EMPTY_IMPORTED_SOURCES,
+  );
+  const visibleSourceKeys = useImportedPlaylistStore(s =>
+    uid
+      ? s.visibleSourceKeysByUid[uid] ?? EMPTY_VISIBLE_SOURCE_KEYS
+      : EMPTY_VISIBLE_SOURCE_KEYS,
+  );
   const setImportedCatalog = useImportedPlaylistStore((s) => s.setCatalog);
   const setVisibleSourceKeys = useImportedPlaylistStore((s) => s.setVisibleSourceKeys);
 
@@ -97,6 +113,18 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
       source,
     })),
   ];
+  const ownedItems = preferenceItems.filter(item => item.kind === 'owned');
+  const followedItems = preferenceItems.filter(
+    item => item.kind === 'imported',
+  );
+  const preferenceSections: PreferenceSection[] = [
+    ...(ownedItems.length > 0
+      ? [{title: '我创建的收藏夹', data: ownedItems}]
+      : []),
+    ...(followedItems.length > 0
+      ? [{title: '我追的合集/收藏夹', data: followedItems}]
+      : []),
+  ];
 
   const isItemVisible = (item: PreferenceItem) =>
     item.kind === 'owned'
@@ -135,6 +163,16 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
       borderBottomWidth: 0.5,
       borderColor: t.colors.divider,
     },
+    sectionHeader: {
+      paddingHorizontal: t.spacing.lg,
+      paddingVertical: t.spacing.xs,
+      backgroundColor: t.colors.background,
+    },
+    sectionTitle: {
+      color: t.colors.text,
+      fontSize: t.fontSize.md,
+      fontWeight: '600',
+    },
   });
 
   return (
@@ -153,6 +191,11 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
         <Loading />
       ) : error && preferenceItems.length === 0 ? (
         <ErrorView message={error} onRetry={() => load(true)} />
+      ) : sourceError && preferenceItems.length === 0 ? (
+        <ErrorView
+          message={`外部收藏来源同步失败：${sourceError}`}
+          onRetry={() => load(true)}
+        />
       ) : preferenceItems.length === 0 ? (
         <Empty title="没有可选择的播放列表" hint="登录 B 站后会自动导入已收藏的他人收藏夹和订阅合集" />
       ) : (
@@ -178,12 +221,17 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
               自有收藏夹读取失败：{error}
             </Text>
           )}
-          <FlatList
+          <SectionList
             contentContainerStyle={s.list}
-            data={preferenceItems}
+            sections={preferenceSections}
             showsVerticalScrollIndicator={false}
             keyExtractor={(it) => it.key}
             extraData={{ localHidden, localVisibleSources }}
+            renderSectionHeader={({section}) => (
+              <View style={s.sectionHeader}>
+                <Text style={s.sectionTitle}>{section.title}</Text>
+              </View>
+            )}
             ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={t.colors.primary} />
