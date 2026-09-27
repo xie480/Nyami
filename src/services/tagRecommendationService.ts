@@ -9,6 +9,7 @@ import {getVideoTagCacheEntries, upsertVideoTagCache} from '../db/operations';
 import {biliApi} from './biliApi';
 import {trimSearchVideo, trimVideoTags} from './transformers';
 import {useAuthStore} from '../store/authStore';
+import {useTagBackfillStore} from '../store/tagBackfillStore';
 import type {
   FavoriteVideo,
   TagProfile,
@@ -31,6 +32,23 @@ export interface TagRecommendationSearchResult {
   recommendations: TagRecommendation[];
   failedSearchCount: number;
 }
+
+interface BackgroundBackfillTask {
+  uid: string;
+  controller: AbortController;
+  scheduledVideoIds: Set<string>;
+  pendingVideos: Map<string, FavoriteVideo>;
+  promise: Promise<void>;
+  accepting: boolean;
+  completedVideoCount: number;
+  successfulVideoCount: number;
+  emptyVideoCount: number;
+  failedVideoCount: number;
+}
+
+let backgroundBackfillTask: BackgroundBackfillTask | null = null;
+let backgroundBackfillPaused = false;
+let backgroundBackfillEpoch = 0;
 
 function uniqueVideos(videos: FavoriteVideo[]): FavoriteVideo[] {
   const unique = new Map<string, FavoriteVideo>();
@@ -272,6 +290,160 @@ export async function backfillFavoriteTags(
     profile: buildTagProfile(unique, cacheEntries),
     progress: {...progress},
   };
+}
+
+/**
+ * 在全局索引完成后异步补齐标签。B 站请求沿用全局限速，因此不阻塞主同步，
+ * 且 syncStore 会在下次索引同步开始前中断本任务，避免与索引请求争用限速窗口。
+ */
+function enqueueFavoriteTagsBackfill(
+  expectedUid: string,
+  videos: FavoriteVideo[],
+  taskEpoch: number,
+): void {
+  if (backgroundBackfillPaused || taskEpoch !== backgroundBackfillEpoch) {
+    return;
+  }
+  const candidates = uniqueVideos(videos);
+  if (
+    !expectedUid ||
+    candidates.length === 0 ||
+    useAuthStore.getState().userId !== expectedUid
+  ) {
+    return;
+  }
+
+  const currentTask = backgroundBackfillTask;
+  if (currentTask) {
+    if (
+      currentTask.uid === expectedUid &&
+      currentTask.accepting &&
+      !currentTask.controller.signal.aborted
+    ) {
+      for (const video of candidates) {
+        if (!currentTask.scheduledVideoIds.has(video.bvid)) {
+          currentTask.scheduledVideoIds.add(video.bvid);
+          currentTask.pendingVideos.set(video.bvid, video);
+        }
+      }
+      useTagBackfillStore.getState().setTotalVideoCount(
+        expectedUid,
+        currentTask.scheduledVideoIds.size,
+      );
+      return;
+    }
+
+    if (currentTask.uid !== expectedUid) {
+      currentTask.controller.abort();
+    }
+    currentTask.promise.then(() =>
+      enqueueFavoriteTagsBackfill(expectedUid, candidates, taskEpoch),
+    );
+    return;
+  }
+
+  const controller = new AbortController();
+  const task: BackgroundBackfillTask = {
+    uid: expectedUid,
+    controller,
+    scheduledVideoIds: new Set(candidates.map(video => video.bvid)),
+    pendingVideos: new Map(candidates.map(video => [video.bvid, video])),
+    promise: Promise.resolve(),
+    accepting: true,
+    completedVideoCount: 0,
+    successfulVideoCount: 0,
+    emptyVideoCount: 0,
+    failedVideoCount: 0,
+  };
+  backgroundBackfillTask = task;
+  useTagBackfillStore.getState().begin(expectedUid, task.scheduledVideoIds.size);
+
+  task.promise = (async () => {
+    try {
+      while (!controller.signal.aborted && task.pendingVideos.size > 0) {
+        const batch = Array.from(task.pendingVideos.values());
+        task.pendingVideos.clear();
+        const result = await backfillFavoriteTags(
+          expectedUid,
+          batch,
+          controller.signal,
+          progress => {
+            useTagBackfillStore.getState().updateProgress(expectedUid, {
+              totalVideoCount: task.scheduledVideoIds.size,
+              completedVideoCount:
+                task.completedVideoCount + progress.completedVideoCount,
+              successfulVideoCount:
+                task.successfulVideoCount + progress.successfulVideoCount,
+              emptyVideoCount:
+                task.emptyVideoCount + progress.emptyVideoCount,
+              failedVideoCount:
+                task.failedVideoCount + progress.failedVideoCount,
+              paused: progress.paused,
+            });
+          },
+        );
+
+        task.completedVideoCount += result.progress.completedVideoCount;
+        task.successfulVideoCount += result.progress.successfulVideoCount;
+        task.emptyVideoCount += result.progress.emptyVideoCount;
+        task.failedVideoCount += result.progress.failedVideoCount;
+        const interrupted = controller.signal.aborted || result.progress.paused;
+        useTagBackfillStore.getState().updateProgress(expectedUid, {
+          totalVideoCount: task.scheduledVideoIds.size,
+          completedVideoCount: task.completedVideoCount,
+          successfulVideoCount: task.successfulVideoCount,
+          emptyVideoCount: task.emptyVideoCount,
+          failedVideoCount: task.failedVideoCount,
+          paused: interrupted,
+        });
+
+        if (interrupted) {
+          useTagBackfillStore.getState().finish(expectedUid, 'paused');
+          return;
+        }
+      }
+
+      const interrupted =
+        controller.signal.aborted || useAuthStore.getState().userId !== expectedUid;
+      useTagBackfillStore.getState().updateProgress(expectedUid, {
+        totalVideoCount: task.scheduledVideoIds.size,
+        completedVideoCount: task.completedVideoCount,
+        successfulVideoCount: task.successfulVideoCount,
+        emptyVideoCount: task.emptyVideoCount,
+        failedVideoCount: task.failedVideoCount,
+        paused: interrupted,
+      });
+      useTagBackfillStore.getState().finish(expectedUid, interrupted ? 'paused' : 'done');
+    } catch (error) {
+      useTagBackfillStore.getState().finish(
+        expectedUid,
+        'error',
+        error instanceof Error ? error.message : '后台读取兴趣标签失败',
+      );
+    } finally {
+      task.accepting = false;
+      if (backgroundBackfillTask === task) {
+        backgroundBackfillTask = null;
+      }
+    }
+  })();
+}
+
+/** 在索引同步完成后解除暂停闸门并安排当前索引的标签回填。 */
+export function resumeFavoriteTagsBackfill(
+  expectedUid: string,
+  videos: FavoriteVideo[],
+): void {
+  backgroundBackfillPaused = false;
+  backgroundBackfillEpoch += 1;
+  enqueueFavoriteTagsBackfill(expectedUid, videos, backgroundBackfillEpoch);
+}
+
+/** 索引同步开始时暂停后台标签请求，已写入 WatermelonDB 的缓存会保留。 */
+export function pauseFavoriteTagsBackfill(): void {
+  backgroundBackfillPaused = true;
+  backgroundBackfillEpoch += 1;
+  backgroundBackfillTask?.controller.abort();
 }
 
 /**

@@ -1,4 +1,4 @@
-import React, {useCallback, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import {useFocusEffect} from '@react-navigation/native';
+import {useFocusEffect, useIsFocused} from '@react-navigation/native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {BottomNavigationBar} from '../components/BottomNavigationBar';
 import {Button} from '../components/Button';
@@ -37,6 +37,7 @@ import {useImportedPlaylistStore} from '../store/importedPlaylistStore';
 import {storage} from '../core/storage';
 import {usePlayerStore} from '../store/playerStore';
 import {useProgressStore} from '../store/progressStore';
+import {useTagBackfillStore} from '../store/tagBackfillStore';
 import {useTheme} from '../theme';
 import type {
   FavoriteVideo,
@@ -65,7 +66,17 @@ const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
 export const TagRecommendationsScreen = ({navigation}: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
   const uid = useAuthStore(state => state.userId);
+  const backgroundBackfillStatus = useTagBackfillStore(state =>
+    state.uid === uid ? state.status : 'idle',
+  );
+  const backgroundBackfillProgress = useTagBackfillStore(state =>
+    state.uid === uid ? state.progress : EMPTY_PROGRESS,
+  );
+  const backgroundBackfillError = useTagBackfillStore(state =>
+    state.uid === uid ? state.error : null,
+  );
   const hiddenFolderIds = useSettingsStore(state => state.hiddenFolderIds);
   const visibleSourceKeys = useImportedPlaylistStore(state =>
     uid ? state.visibleSourceKeysByUid[uid] ?? EMPTY_VISIBLE_SOURCE_KEYS : EMPTY_VISIBLE_SOURCE_KEYS,
@@ -84,6 +95,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   const [error, setError] = useState<string | null>(null);
   const requestController = useRef<AbortController | null>(null);
   const loadedUid = useRef<string | null>(null);
+  const backgroundBackfillWasRunning = useRef(false);
 
   const loadSnapshot = useCallback(async () => {
     if (!uid) {
@@ -164,6 +176,19 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     }, [loadSnapshot]),
   );
 
+  useEffect(() => {
+    if (backgroundBackfillStatus === 'running') {
+      backgroundBackfillWasRunning.current = true;
+      return;
+    }
+    if (backgroundBackfillWasRunning.current) {
+      backgroundBackfillWasRunning.current = false;
+      if (isFocused) {
+        loadSnapshot();
+      }
+    }
+  }, [backgroundBackfillStatus, isFocused, loadSnapshot]);
+
   /** 读取未缓存标签并从已有在线搜索接口生成推荐。 */
   const handleBuildRecommendations = useCallback(async () => {
     if (!uid || favorites.length === 0 || initialLoading) {
@@ -174,6 +199,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     requestController.current?.abort();
     requestController.current = controller;
     setStage('tags');
+    useTagBackfillStore.getState().finish(requestUid, 'idle');
     setProgress(EMPTY_PROGRESS);
     setError(null);
     setRecommendations([]);
@@ -259,13 +285,22 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     [navigation, recommendations, setQueue],
   );
 
-  const isWorking = stage !== 'idle';
+  const isBackgroundBackfillActive = backgroundBackfillStatus === 'running';
+  const showBackgroundProgress =
+    isBackgroundBackfillActive ||
+    (backgroundBackfillStatus === 'paused' && stage === 'idle');
+  const displayedProgress = showBackgroundProgress
+    ? backgroundBackfillProgress
+    : progress;
+  const isWorking = stage !== 'idle' || isBackgroundBackfillActive;
   const progressPercent =
-    progress.totalVideoCount > 0
+    displayedProgress.totalVideoCount > 0
       ? Math.min(
           100,
           Math.round(
-            (progress.completedVideoCount / progress.totalVideoCount) * 100,
+            (displayedProgress.completedVideoCount /
+              displayedProgress.totalVideoCount) *
+              100,
           ),
         )
       : 0;
@@ -334,7 +369,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
               lineHeight: 18,
               marginTop: t.spacing.xs,
             }}>
-            首次读取会逐个请求视频标签；返回此页可中断，已完成的缓存会保留并可续读。
+            索引同步后会在后台逐个补齐视频标签；手动生成推荐时，离开此页会中断本轮，已完成缓存会保留。
           </Text>
 
           {profile && (
@@ -400,17 +435,22 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
             </View>
           )}
 
-          {stage === 'tags' && (
+          {(stage === 'tags' || showBackgroundProgress) && (
             <View style={{marginTop: t.spacing.md}}>
               <View
                 style={{flexDirection: 'row', justifyContent: 'space-between'}}>
                 <Text
                   style={{color: t.colors.textSub, fontSize: t.fontSize.sm}}>
-                  正在读取标签
+                  {isBackgroundBackfillActive
+                    ? '同步后正在后台读取标签'
+                    : backgroundBackfillStatus === 'paused' && stage !== 'tags'
+                      ? '后台读取已暂停'
+                      : '正在读取标签'}
                 </Text>
                 <Text
                   style={{color: t.colors.textHint, fontSize: t.fontSize.sm}}>
-                  {progress.completedVideoCount}/{progress.totalVideoCount}
+                  {displayedProgress.completedVideoCount}/
+                  {displayedProgress.totalVideoCount}
                 </Text>
               </View>
               <View
@@ -435,8 +475,9 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
                   fontSize: t.fontSize.xs,
                   marginTop: t.spacing.xs,
                 }}>
-                有标签 {progress.successfulVideoCount} · 无标签{' '}
-                {progress.emptyVideoCount} · 失败 {progress.failedVideoCount}
+                有标签 {displayedProgress.successfulVideoCount} · 无标签{' '}
+                {displayedProgress.emptyVideoCount} · 失败{' '}
+                {displayedProgress.failedVideoCount}
               </Text>
             </View>
           )}
@@ -449,6 +490,28 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
                 marginTop: t.spacing.sm,
               }}>
               采集因登录、网络或限流问题暂停，本轮未继续在线搜索。已读取标签会保留，稍后可重试。
+            </Text>
+          )}
+
+          {backgroundBackfillStatus === 'paused' && stage !== 'tags' && (
+            <Text
+              style={{
+                color: t.colors.textHint,
+                fontSize: t.fontSize.xs,
+                marginTop: t.spacing.sm,
+              }}>
+              后台提取已暂停，已写入的标签会保留；可以点击下方按钮继续生成推荐。
+            </Text>
+          )}
+
+          {backgroundBackfillStatus === 'error' && backgroundBackfillError && (
+            <Text
+              style={{
+                color: t.colors.error,
+                fontSize: t.fontSize.xs,
+                marginTop: t.spacing.sm,
+              }}>
+              后台提取失败：{backgroundBackfillError}
             </Text>
           )}
 
@@ -465,7 +528,9 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
 
           <Button
             title={
-              stage === 'tags'
+              isBackgroundBackfillActive
+                ? '后台正在读取兴趣标签'
+                : stage === 'tags'
                 ? '正在读取标签'
                 : stage === 'search'
                 ? '正在搜索音乐推荐'
@@ -473,7 +538,12 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
             }
             onPress={handleBuildRecommendations}
             loading={isWorking}
-            disabled={!uid || favorites.length === 0 || initialLoading}
+            disabled={
+              !uid ||
+              favorites.length === 0 ||
+              initialLoading ||
+              isBackgroundBackfillActive
+            }
             style={{marginTop: t.spacing.lg}}
           />
 

@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import FastImage from 'react-native-fast-image';
-import TrackPlayer, {
+import {
   useActiveTrack,
   usePlaybackState,
   State,
@@ -22,7 +22,12 @@ import {useUIStore} from '../store/uiStore';
 import {usePlayerStore} from '../store/playerStore';
 import {useProgressStore} from '../store/progressStore';
 
-export const MiniPlayer: React.FC = () => {
+interface MiniPlayerProps {
+  /** 在统一的底部播放/导航面板中使用时，MiniPlayer 不绘制自己的玻璃背景。 */
+  embedded?: boolean;
+}
+
+export const MiniPlayer: React.FC<MiniPlayerProps> = ({embedded = false}) => {
   const t = useTheme();
   const track = useActiveTrack();
   const playback = usePlaybackState();
@@ -82,70 +87,91 @@ export const MiniPlayer: React.FC = () => {
     actions: {flexDirection: 'row', alignItems: 'center'},
   });
 
-  const innerContent = (
-    <>
-      <View style={s.progress}>
-        {isGlass && t.glass && t.glass.colors.progress.fill ? (
-          <LinearGradient
-            colors={t.glass.colors.progress.fill}
-            start={{x: 0, y: 0}}
-            end={{x: 1, y: 0}}
-            style={[s.progressFill, {width: `${p * 100}%`}]}
+  const progressBar = (
+    <View
+      style={[
+        s.progress,
+        embedded && {
+          marginHorizontal: t.spacing.md,
+          marginBottom: t.spacing.xs,
+          borderRadius: 1,
+        },
+      ]}>
+      {isGlass && t.glass && t.glass.colors.progress.fill ? (
+        <LinearGradient
+          colors={t.glass.colors.progress.fill}
+          start={{x: 0, y: 0}}
+          end={{x: 1, y: 0}}
+          style={[s.progressFill, {width: `${p * 100}%`}]}
+        />
+      ) : (
+        <View style={[s.progressFill, {width: `${p * 100}%`}]} />
+      )}
+    </View>
+  );
+
+  const playerRow = (
+    <View style={s.row}>
+      <TouchableOpacity
+        onPress={() => nav.navigate('Player')}
+        activeOpacity={0.7}>
+        <FastImage source={{uri: track.artwork as string}} style={s.cover} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={s.info}
+        activeOpacity={0.7}
+        onPress={() => nav.navigate('Player')}>
+        <Text style={s.title} numberOfLines={1}>
+          {track.title}
+        </Text>
+        <Text style={s.artist} numberOfLines={1}>
+          {track.artist}
+        </Text>
+      </TouchableOpacity>
+      <View style={s.actions}>
+        {isBufferingOrResolving ? (
+          <ActivityIndicator
+            size="small"
+            color={t.colors.primary}
+            style={{marginRight: 12}}
           />
         ) : (
-          <View style={[s.progressFill, {width: `${p * 100}%`}]} />
-        )}
-      </View>
-      <View style={s.row}>
-        <TouchableOpacity
-          onPress={() => nav.navigate('Player')}
-          activeOpacity={0.7}>
-          <FastImage source={{uri: track.artwork as string}} style={s.cover} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={s.info}
-          activeOpacity={0.7}
-          onPress={() => nav.navigate('Player')}>
-          <Text style={s.title} numberOfLines={1}>
-            {track.title}
-          </Text>
-          <Text style={s.artist} numberOfLines={1}>
-            {track.artist}
-          </Text>
-        </TouchableOpacity>
-        <View style={s.actions}>
-          {isBufferingOrResolving ? (
-            <ActivityIndicator
-              size="small"
-              color={t.colors.primary}
-              style={{marginRight: 12}}
-            />
-          ) : (
-            <IconButton
-              name={isPlaying ? 'pause' : 'play'}
-              size={26}
-              color={t.colors.text}
-              onPress={() =>
-                isPlaying ? pausePlayback() : resumePlayback()
-              }
-            />
-          )}
           <IconButton
-            name="skip-next"
+            name={isPlaying ? 'pause' : 'play'}
             size={26}
             color={t.colors.text}
-            onPress={skipToNext}
+            onPress={() =>
+              isPlaying ? pausePlayback() : resumePlayback()
+            }
           />
-          <IconButton
-            name="playlist-music"
-            size={24}
-            color={t.colors.text}
-            onPress={() => useUIStore.getState().setPlaylistVisible(true)}
-          />
-        </View>
+        )}
+        <IconButton
+          name="skip-next"
+          size={26}
+          color={t.colors.text}
+          onPress={skipToNext}
+        />
+        <IconButton
+          name="playlist-music"
+          size={24}
+          color={t.colors.text}
+          onPress={() => useUIStore.getState().setPlaylistVisible(true)}
+        />
       </View>
+    </View>
+  );
+
+  const innerContent = (
+    <>
+      {!embedded && progressBar}
+      {playerRow}
+      {embedded && progressBar}
     </>
   );
+
+  if (embedded) {
+    return <View>{innerContent}</View>;
+  }
 
   if (isGlass) {
     return (
