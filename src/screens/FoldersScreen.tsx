@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   FlatList,
@@ -61,7 +61,7 @@ export const FoldersScreen = ({ navigation }: any) => {
   const toggle = useSelectionStore((s) => s.toggle);
   const clear = useSelectionStore((s) => s.clear);
   const [allFolders, setAllFolders] = useState<FavoriteFolder[] | null>(null);
-  const [globalIndexReady, setGlobalIndexReady] = useState(false);
+  const [, setGlobalIndexReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importedSyncError, setImportedSyncError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -105,23 +105,22 @@ export const FoldersScreen = ({ navigation }: any) => {
       ]
     : null;
 
-  // 统计可见视频总数（基于过滤后结果）
-  const totalCount = (filteredFolders ?? []).reduce(
-    (acc, f) => acc + f.mediaCount,
-    0
-  );
-  // Determine if we are performing a global search based on non-empty query
-  const isGlobalSearch = searchQuery.trim().length > 0;
-  const globalIndex = favoriteService.getGlobalIndex();
+  const globalIndex = favoriteService.getGlobalIndex(hiddenFolderIds);
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const isGlobalSearch = normalizedSearchQuery.length > 0;
   const isGlobalIndexEmpty = globalIndex.length === 0;
   const isSearchDisabled = isSyncing || isGlobalIndexEmpty;
-  const filteredVideos = isGlobalSearch ? globalIndex.filter((v) => {
-    if (searchMode === 'title') {
-      return v.title.toLowerCase().includes(searchQuery.toLowerCase());
-    } else {
-      return v.upper?.name?.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredVideos = useMemo(() => {
+    if (!isGlobalSearch) {
+      return [];
     }
-  }) : [];
+    return globalIndex.filter(video => {
+      const searchableText = searchMode === 'title'
+        ? video.title
+        : video.upper?.name || '';
+      return searchableText.toLowerCase().includes(normalizedSearchQuery);
+    });
+  }, [globalIndex, isGlobalSearch, normalizedSearchQuery, searchMode]);
 
   const load = useCallback(
     async (force = false) => {
@@ -184,7 +183,7 @@ export const FoldersScreen = ({ navigation }: any) => {
   });
 
   const handleRandomPlayAll = async () => {
-    const shuffled = await favoriteService.getRandomVideos(undefined, 100);
+    const shuffled = await favoriteService.getRandomVideos(undefined, 100, hiddenFolderIds);
     if (shuffled.length === 0) {
       if (Platform.OS === 'android') {
         ToastAndroid.show(
@@ -448,7 +447,7 @@ export const FoldersScreen = ({ navigation }: any) => {
                     fontWeight: '500',
                   }}
                 >
-                  随机播放已同步的自有收藏内容 ({totalCount})
+                  随机播放已同步的自有收藏内容 ({globalIndex.length})
                 </Text>
               </TouchableOpacity>
 

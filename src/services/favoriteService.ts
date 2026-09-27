@@ -40,6 +40,11 @@ export interface SyncProgressEvent {
 // 内存缓存，用于同步读取全局索引（UI 层渲染时需同步获取）
 let globalIndexCache: FavoriteVideo[] = [];
 
+let globalIndexCacheLoaded = false;
+let visibleGlobalIndexSource: FavoriteVideo[] | null = null;
+let visibleGlobalIndexKey = '';
+let visibleGlobalIndexCache: FavoriteVideo[] = [];
+
 // 互斥锁，防止同步任务并发执行
 const syncMutex = new Mutex();
 
@@ -57,6 +62,49 @@ function mapVideoMetaToFavoriteVideo(v: VideoMeta): FavoriteVideo {
     folderIds: [parseInt(v.playlistId, 10)],
     parts: v.extraJson ? JSON.parse(v.extraJson) : undefined,
   };
+}
+
+function getVisibleGlobalIndex(hiddenFolderIds: number[] = []): FavoriteVideo[] {
+  if (hiddenFolderIds.length === 0) {
+    return globalIndexCache;
+  }
+
+  const hiddenIds = Array.from(new Set(hiddenFolderIds)).sort((a, b) => a - b);
+  const cacheKey = hiddenIds.join(',');
+  if (visibleGlobalIndexSource === globalIndexCache && visibleGlobalIndexKey === cacheKey) {
+    return visibleGlobalIndexCache;
+  }
+
+  const hiddenIdSet = new Set(hiddenIds);
+  visibleGlobalIndexCache = globalIndexCache.filter(video =>
+    !video.folderIds?.length || video.folderIds.some(folderId => !hiddenIdSet.has(folderId)),
+  );
+  visibleGlobalIndexSource = globalIndexCache;
+  visibleGlobalIndexKey = cacheKey;
+  return visibleGlobalIndexCache;
+}
+
+function sampleWithoutReplacement<T>(items: readonly T[], limit: number): T[] {
+  const requestedCount = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
+  const sampleCount = Math.min(items.length, requestedCount);
+  if (sampleCount === 0) {
+    return [];
+  }
+
+  // Floyd 抽样只分配与结果数量相当的索引集合，避免复制或打乱整份曲库。
+  const selectedIndices = new Set<number>();
+  for (let index = items.length - sampleCount; index < items.length; index += 1) {
+    const candidate = Math.floor(Math.random() * (index + 1));
+    selectedIndices.add(selectedIndices.has(candidate) ? index : candidate);
+  }
+
+  const indices = Array.from(selectedIndices);
+  for (let index = indices.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [indices[index], indices[swapIndex]] = [indices[swapIndex], indices[index]];
+  }
+
+  return indices.map(index => items[index]);
 }
 
 /**
@@ -80,6 +128,7 @@ export async function loadGlobalIndexCache(): Promise<void> {
     }
   }
   globalIndexCache = Array.from(uniqueVideosMap.values());
+  globalIndexCacheLoaded = true;
 }
 
 /**
@@ -153,22 +202,31 @@ async function syncSingleFolder(
   // Step 3: 批量写入 WatermelonDB（upsertVideosBatch 内部区分 create / update）
   await upsertVideosBatch(playlistId, newVideos);
 
-  // Step 4: 直接追加合并至全局索引内存缓存 —— 绝不触发全量 DB 重读
-  const cacheBvids = new Set(globalIndexCache.map(v => v.bvid));
+  // 首次加载尚未完成时从数据库重建，避免缓存只包含本次增量。
+  if (!globalIndexCacheLoaded) {
+    await loadGlobalIndexCache();
+    return newVideos;
+  }
+
+  // 用 Map 合并同一 BVID 的收藏夹关系，并替换数组引用以便订阅方识别快照变化。
+  const updatedIndex = [...globalIndexCache];
+  const cachedVideoIndexes = new Map<string, number>();
+  updatedIndex.forEach((video, index) => cachedVideoIndexes.set(video.bvid, index));
   for (const video of newVideos) {
-    if (!cacheBvids.has(video.bvid)) {
-      // 纯新增视频，追加到缓存尾部
-      globalIndexCache.push(video);
-    } else {
-      // 该 BVID 已在缓存中（可能来自其他收藏夹），仅补充 folderIds
-      const cached = globalIndexCache.find(v => v.bvid === video.bvid);
-      if (cached && video.folderIds) {
-        cached.folderIds = [
-          ...new Set([...(cached.folderIds || []), ...video.folderIds]),
-        ];
-      }
+    const cachedIndex = cachedVideoIndexes.get(video.bvid);
+    if (cachedIndex === undefined) {
+      cachedVideoIndexes.set(video.bvid, updatedIndex.length);
+      updatedIndex.push(video);
+      continue;
+    }
+
+    const cached = updatedIndex[cachedIndex];
+    const folderIds = [...new Set([...(cached.folderIds || []), ...(video.folderIds || [])])];
+    if (folderIds.length !== cached.folderIds?.length) {
+      updatedIndex[cachedIndex] = { ...cached, folderIds };
     }
   }
+  globalIndexCache = updatedIndex;
 
   return newVideos;
 }
@@ -423,16 +481,19 @@ export const favoriteService = {
       }
 
     } finally {
-      syncMutex.release();
-      await loadGlobalIndexCache();
+      try {
+        await loadGlobalIndexCache();
+      } finally {
+        syncMutex.release();
+      }
     }
   },
 
   /**
-   * 获取全局索引（同步返回）
+   * 获取全局索引（同步返回）；隐藏的收藏夹不会贡献全局候选视频。
    */
-  getGlobalIndex(): FavoriteVideo[] {
-    return globalIndexCache;
+  getGlobalIndex(hiddenFolderIds: number[] = []): FavoriteVideo[] {
+    return getVisibleGlobalIndex(hiddenFolderIds);
   },
 
   /**
@@ -441,6 +502,7 @@ export const favoriteService = {
   async clearGlobalIndex() {
     await clearAllData();
     globalIndexCache = [];
+    globalIndexCacheLoaded = true;
   },
 
   /**
@@ -453,9 +515,20 @@ export const favoriteService = {
   },
 
   /**
-   * 随机获取一批视频（O(1) 复杂度）
+   * 按唯一 BVID 获取随机候选；全局播放从内存快照无放回抽样，单收藏夹沿用数据库查询。
    */
-  async getRandomVideos(playlistId?: string, limit: number = 50): Promise<FavoriteVideo[]> {
+  async getRandomVideos(
+    playlistId?: string,
+    limit: number = 50,
+    hiddenFolderIds: number[] = [],
+  ): Promise<FavoriteVideo[]> {
+    if (!playlistId) {
+      if (!globalIndexCacheLoaded) {
+        await loadGlobalIndexCache();
+      }
+      return sampleWithoutReplacement(getVisibleGlobalIndex(hiddenFolderIds), limit);
+    }
+
     const records = await getRandomVideosBatch(playlistId, limit);
     return records.map(mapVideoMetaToFavoriteVideo);
   },

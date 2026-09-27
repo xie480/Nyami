@@ -88,7 +88,6 @@ export default function App() {
   const uid = useAuthStore((s) => s.userId);
   const initAuth = useAuthStore((s) => s.initAuth);
   const authReady = useAuthStore((s) => s.authReady);
-  const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const playlistVisible = useUIStore(state => state.playlistVisible);
   const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
   const isGlassMode = themeMode === 'glass-light' || themeMode === 'glass-dark';
@@ -100,9 +99,6 @@ export default function App() {
     },
   };
   const startSync = useSyncStore(state => state.startSync);
-
-  // 记录上一次的 hiddenFolderIds，用于检测变化
-  const prevHiddenFolderIdsRef = useRef<number[]>(hiddenFolderIds);
 
   // Initialize player, network status listener, back handler, and Logger
   useEffect(() => {
@@ -172,7 +168,6 @@ export default function App() {
         
         // 先加载缓存，确保 globalIndex 有数据
         await loadGlobalIndexCache();
-        const globalIndex = favoriteService.getGlobalIndex();
         
         // 仅在切换账号时清理旧索引，用户需在设置页面手动同步
         if (lastUid !== uid) {
@@ -188,34 +183,6 @@ export default function App() {
     };
     init();
   }, [uid, authReady]);
-
-  // 监听 hiddenFolderIds 变化，自动触发全局索引重新同步
-  // 引入 hasMountedRef 以区分首次挂载（状态恢复）和后续用户交互导致的变化
-  const hasMountedRef = useRef(false);
-  useEffect(() => {
-    if (!uid) return;
-    // 第一次渲染后（或状态恢复完成）时不触发清空全局索引
-    if (!hasMountedRef.current) {
-      hasMountedRef.current = true;
-      // 同步前一次的 hiddenFolderIds，以便后续比较
-      prevHiddenFolderIdsRef.current = hiddenFolderIds;
-      return;
-    }
-    // 跳过因相同引用导致的无效触发
-    if (prevHiddenFolderIdsRef.current === hiddenFolderIds) {
-      prevHiddenFolderIdsRef.current = hiddenFolderIds;
-      return;
-    }
-    // 更新记录
-    prevHiddenFolderIdsRef.current = hiddenFolderIds;
-
-    // 用户修改了可见收藏夹偏好，重新加载全局索引缓存
-    // 注意：绝不能在这里调用 clearGlobalIndex()，否则会导致增量同步退化为全量覆盖
-    (async () => {
-      await loadGlobalIndexCache();
-    })();
-    // 自动同步已移除，用户可在设置页面手动同步
-  }, [hiddenFolderIds, uid]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

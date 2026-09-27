@@ -398,7 +398,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
 
   const shuffle = useCallback(async () => {
     try {
-      // 使用 O(1) 随机获取
+      // 自有收藏夹沿用数据库抽样；导入来源只打乱当前已加载列表。
       let shuffled = source
         ? [...displayedList]
         : await favoriteService.getRandomVideos(mediaId.toString(), 100);
