@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "android": "set \"PATH=%PATH%;E:\\AndroidSDK\\platform-tools\" && react-native run-android",
+    "android:phone": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-android-phone.ps1",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "postinstall": "patch-package",
