@@ -2,9 +2,8 @@ import { create } from 'zustand';
 import { favoriteService } from '../services/favoriteService';
 import type { SyncProgressEvent } from '../services/favoriteService';
 
-// Internal abort controller and timeout for sync operations
+// Active sync controller; identity checks prevent an older run from clearing a newer run.
 let syncAbortController: AbortController | null = null;
-let syncTimeoutId: NodeJS.Timeout | null = null;
 
 interface SyncState {
   syncStatus: 'idle' | 'syncing' | 'error' | 'done';
@@ -23,10 +22,9 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     if (get().syncStatus === 'syncing') return;
     
     // Setup abort controller (no hard timeout to allow long-running sync)
-    syncAbortController = new AbortController();
-    const abortSignal = syncAbortController.signal;
-    // Removed auto timeout; sync will run until completion or manual abort.
-    syncTimeoutId = null;
+    const controller = new AbortController();
+    syncAbortController = controller;
+    const abortSignal = controller.signal;
     
     set({ syncStatus: 'syncing', progressData: null, syncError: null });
     
@@ -35,32 +33,27 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       await favoriteService.syncGlobalIndex(uid, hiddenFolderIds, force, (event) => {
         set({ progressData: event });
       }, abortSignal);
-      set({ syncStatus: 'done' });
-      // 3秒后恢复 idle 状态
-      setTimeout(() => {
-        if (get().syncStatus === 'done') {
-          set({ syncStatus: 'idle' });
+      if (abortSignal.aborted) {
+        if (syncAbortController === controller && get().syncStatus === 'syncing') {
+          set({ syncStatus: 'idle', progressData: null, syncError: null });
         }
-      }, 3000);
-    } catch (e: any) {
-      set({ syncStatus: 'error', syncError: e.message || '未知错误' });
-    } finally {
-      // Cleanup abort controller and timeout
-      if (syncTimeoutId) {
-        clearTimeout(syncTimeoutId);
-        syncTimeoutId = null;
+        return;
       }
-      syncAbortController = null;
+      set({ syncStatus: 'done' });
+    } catch (e: any) {
+      if (!abortSignal.aborted) {
+        set({ syncStatus: 'error', syncError: e.message || '未知错误' });
+      }
+    } finally {
+      if (syncAbortController === controller) {
+        syncAbortController = null;
+      }
     }
   },
   abortSync: () => {
     // Abort any ongoing sync operation and reset state
     if (syncAbortController) {
       syncAbortController.abort();
-    }
-    if (syncTimeoutId) {
-      clearTimeout(syncTimeoutId);
-      syncTimeoutId = null;
     }
     syncAbortController = null;
     set({ syncStatus: 'idle', progressData: null, syncError: null });

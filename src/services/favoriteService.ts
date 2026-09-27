@@ -37,6 +37,7 @@ export interface SyncProgressEvent {
   totalTasks: number;
   processedVideos: number;
   totalVideos: number;
+  skippedTasks: number;
 }
 
 // 内存缓存，用于同步读取全局索引（UI 层渲染时需同步获取）
@@ -468,14 +469,23 @@ export const favoriteService = {
 
     await syncMutex.acquire();
     try {
-      let folders = await this.getFolders(uid, force, signal);
-      folders = folders.filter(f => !hiddenFolderIds.includes(f.id));
+      const allFolders = await this.getFolders(uid, true, signal);
+      const folders = allFolders.filter(f => !hiddenFolderIds.includes(f.id));
+      if (folders.length === 0) {
+        throw new Error(
+          allFolders.length === 0
+            ? '当前账号没有可同步的自有收藏夹。'
+            : '自有收藏夹当前均已在主页偏好中隐藏，请先显示至少一个收藏夹再同步。',
+        );
+      }
 
       let completedTasks = 0;
       let totalTasks = folders.length;
       let processedVideos = 0;
       let baseProcessedVideos = 0;
       let totalVideos = folders.reduce((sum, f) => sum + f.mediaCount, 0);
+      let skippedTasks = 0;
+      const failedFolders: string[] = [];
 
       const reportProgress = () => {
         if (onProgress) {
@@ -484,6 +494,7 @@ export const favoriteService = {
             totalTasks,
             processedVideos,
             totalVideos,
+            skippedTasks,
           });
         }
       };
@@ -511,6 +522,7 @@ export const favoriteService = {
 
         if (!needSync) {
           completedTasks++;
+          skippedTasks++;
           baseProcessedVideos += folder.mediaCount;
           processedVideos = baseProcessedVideos;
           reportProgress();
@@ -547,9 +559,6 @@ export const favoriteService = {
 
         try {
           while (hasMore && !isIncrementalDone && !signal?.aborted) {
-            // 抖动防限流
-            await new Promise(r => setTimeout(r, Math.floor(Math.random() * 2000) + 1000));
-            
             const pageRes = await this.getVideos(folder.id, page, 20, force, signal);
             
             if (pageRes.list.length === 0) {
@@ -619,18 +628,35 @@ export const favoriteService = {
           }
 
         } catch (err: any) {
-          LoggerService.warn('favoriteService', 'syncPlaylist', `文件夹 ${folder.id} 同步异常:`, err.message);
-          await finishSyncJob(jobId, 'failed', err.message);
-          await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, playlistSyncStatus: 'failed' });
-          if (err instanceof AuthRequiredError) {
-            throw err;
+          if (signal?.aborted) {
+            await finishSyncJob(jobId, 'cancelled');
+            await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, playlistSyncStatus: 'idle' });
+          } else {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            LoggerService.warn('favoriteService', 'syncPlaylist', `文件夹 ${folder.id} 同步异常:`, errorMessage);
+            await finishSyncJob(jobId, 'failed', errorMessage);
+            await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, playlistSyncStatus: 'failed' });
+            failedFolders.push(`${folder.title || folder.id}：${errorMessage}`);
+            if (err instanceof AuthRequiredError) {
+              throw err;
+            }
           }
         }
 
+        if (signal?.aborted) break;
         completedTasks++;
         baseProcessedVideos += folder.mediaCount;
         processedVideos = baseProcessedVideos;
         reportProgress();
+      }
+
+      if (failedFolders.length > 0) {
+        const visibleFailures = failedFolders.slice(0, 3).join('；');
+        const remainingFailures = failedFolders.length - 3;
+        throw new Error(
+          `有 ${failedFolders.length} 个收藏夹同步失败：${visibleFailures}` +
+          (remainingFailures > 0 ? `；另有 ${remainingFailures} 个失败` : ''),
+        );
       }
 
     } finally {

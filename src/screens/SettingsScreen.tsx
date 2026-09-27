@@ -211,7 +211,7 @@ export const SettingsScreen = ({ navigation }: any) => {
     }
     // 传入 hiddenFolderIds，仅同步用户选中的收藏夹
     // 默认进行增量同步，除非需要强制全量同步，传入 force 参数为 true
-    startSync(userId, hiddenFolderIds);
+    void startSync(userId, hiddenFolderIds);
   };
 
   const s = StyleSheet.create({
@@ -342,9 +342,11 @@ export const SettingsScreen = ({ navigation }: any) => {
                   ? `${progressData.completedTasks}/${progressData.totalTasks} 任务, ${progressData.processedVideos}/${progressData.totalVideos} 视频`
                   : '正在获取收藏夹列表...'
                 : syncStatus === 'error'
-                ? `同步失败: ${syncError}`
+                ? '同步失败，详情见下方'
                 : syncStatus === 'done'
-                ? `同步完成 (${globalIndexCount}/${progressData?.totalVideos ?? globalIndexCount} 视频)`
+                ? !!progressData && progressData.totalTasks > 0 && progressData.skippedTasks === progressData.totalTasks
+                  ? `索引已是最新 (${globalIndexCount} 个视频)`
+                  : `同步完成 (${globalIndexCount}/${progressData?.totalVideos ?? globalIndexCount} 个视频)`
                 : `当前已索引 ${globalIndexCount} 个视频`
             }
             onPress={syncStatus === 'syncing' ? undefined : onSyncGlobalIndex}
@@ -354,13 +356,24 @@ export const SettingsScreen = ({ navigation }: any) => {
                 {syncStatus === 'syncing' ? (
                   <Button title="取消" variant="text" onPress={abortSync} />
                 ) : syncStatus === 'error' ? (
-                  <Text style={{ color: t.colors.error, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>重试</Text>
+                  <Button title="重试" variant="text" onPress={onSyncGlobalIndex} />
+                ) : syncStatus === 'done' ? (
+                  <Text style={{ color: t.colors.success, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>
+                    {!!progressData && progressData.totalTasks > 0 && progressData.skippedTasks === progressData.totalTasks ? '已是最新' : '已完成'}
+                  </Text>
                 ) : (
                   <Text style={{ color: t.colors.primary, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>开始同步</Text>
                 )}
               </View>
             }
           />
+          {syncStatus === 'error' && syncError && (
+            <View style={{ paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md }}>
+              <Text style={{ color: t.colors.error, fontSize: t.fontSize.sm }} numberOfLines={3}>
+                {syncError}
+              </Text>
+            </View>
+          )}
           {syncStatus === 'syncing' && (
             <View style={{ paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md }}>
               <View style={{ height: 4, backgroundColor: t.colors.divider, borderRadius: 2, overflow: 'hidden' }}>

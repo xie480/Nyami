@@ -2,9 +2,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, SectionList, RefreshControl, StyleSheet, TouchableOpacity, Text, StatusBar, Alert,
 } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Header } from '../components/Header';
-import { ListItem } from '../components/ListItem';
-import { IconButton } from '../components/IconButton';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
@@ -164,16 +163,159 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
       borderColor: t.colors.divider,
     },
     sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
       paddingHorizontal: t.spacing.lg,
       paddingVertical: t.spacing.xs,
       backgroundColor: t.colors.background,
+      marginTop: t.spacing.sm,
     },
     sectionTitle: {
       color: t.colors.text,
       fontSize: t.fontSize.md,
       fontWeight: '600',
     },
+    sectionCount: {
+      color: t.colors.textHint,
+      fontSize: t.fontSize.xs,
+      paddingHorizontal: t.spacing.sm,
+      paddingVertical: 2,
+      borderRadius: t.radius.sm,
+      backgroundColor: t.colors.surfaceHigh,
+    },
+    card: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: 76,
+      paddingVertical: t.spacing.md,
+      paddingHorizontal: t.spacing.md,
+      backgroundColor: t.colors.surface,
+      borderRadius: t.radius.lg,
+      borderWidth: 1,
+      borderColor: t.colors.divider,
+    },
+    cardSelected: {
+      borderColor: t.colors.primary,
+      backgroundColor: t.colors.primaryLight,
+    },
+    iconBox: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: t.radius.md,
+      backgroundColor: t.colors.surfaceHigh,
+    },
+    cardContent: {
+      flex: 1,
+      minWidth: 0,
+      marginLeft: t.spacing.md,
+    },
+    cardTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    cardTitle: {
+      flex: 1,
+      flexShrink: 1,
+      color: t.colors.text,
+      fontSize: t.fontSize.base,
+      fontWeight: '600',
+    },
+    kindBadge: {
+      marginLeft: t.spacing.sm,
+      paddingHorizontal: t.spacing.sm,
+      paddingVertical: 3,
+      borderRadius: t.radius.sm,
+      backgroundColor: t.colors.surfaceHigh,
+    },
+    kindBadgeText: {
+      color: t.colors.textSub,
+      fontSize: t.fontSize.xs,
+    },
+    cardMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: t.spacing.xs,
+    },
+    ownerName: {
+      flex: 1,
+      flexShrink: 1,
+      color: t.colors.textSub,
+      fontSize: t.fontSize.sm,
+    },
+    videoCount: {
+      color: t.colors.textHint,
+      fontSize: t.fontSize.xs,
+      marginLeft: t.spacing.sm,
+    },
+    videoCountLeading: {
+      marginLeft: 0,
+    },
+    selectionIcon: {
+      marginLeft: t.spacing.md,
+    },
   });
+
+  const renderPreferenceItem = ({ item }: { item: PreferenceItem }) => {
+    const isVisible = isItemVisible(item);
+    const title = item.kind === 'owned' ? item.folder.title : item.source.title;
+    const kindLabel = item.kind === 'owned'
+      ? '我的收藏夹'
+      : item.source.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹';
+    const iconName = item.kind === 'owned'
+      ? 'folder-music-outline'
+      : item.source.kind === 'subscribedSeason' ? 'view-grid-outline' : 'folder-heart-outline';
+    const ownerName = item.kind === 'imported'
+      ? item.source.ownerName || `UP主 UID ${item.source.ownerMid}`
+      : null;
+    const mediaCount = item.kind === 'owned' ? item.folder.mediaCount : item.source.mediaCount;
+
+    return (
+      <TouchableOpacity
+        accessibilityRole="checkbox"
+        accessibilityLabel={`${title}，${kindLabel}`}
+        accessibilityState={{ checked: isVisible }}
+        activeOpacity={0.82}
+        onPress={() => {
+          if (item.kind === 'owned') {
+            toggleFolder(item.folder.id);
+          } else {
+            setLocalVisibleSources(previous => {
+              const next = new Set(previous);
+              if (next.has(item.source.sourceKey)) next.delete(item.source.sourceKey);
+              else next.add(item.source.sourceKey);
+              return next;
+            });
+          }
+        }}
+        style={[s.card, isVisible && s.cardSelected]}
+      >
+        <View style={s.iconBox}>
+          <Icon name={iconName} size={23} color={isVisible ? t.colors.primary : t.colors.textSub} />
+        </View>
+        <View style={s.cardContent}>
+          <View style={s.cardTitleRow}>
+            <Text style={s.cardTitle} numberOfLines={1}>{title}</Text>
+            <View style={s.kindBadge}>
+              <Text style={s.kindBadgeText} numberOfLines={1}>{kindLabel}</Text>
+            </View>
+          </View>
+          <View style={s.cardMeta}>
+            {ownerName && <Text style={s.ownerName} numberOfLines={1}>{ownerName}</Text>}
+            <Text style={[s.videoCount, !ownerName && s.videoCountLeading]}>{mediaCount} 个视频</Text>
+          </View>
+        </View>
+        <Icon
+          name={isVisible ? 'check-circle' : 'checkbox-blank-circle-outline'}
+          size={23}
+          color={isVisible ? t.colors.primary : t.colors.textHint}
+          style={s.selectionIcon}
+        />
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={s.container}>
@@ -230,54 +372,14 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
             renderSectionHeader={({section}) => (
               <View style={s.sectionHeader}>
                 <Text style={s.sectionTitle}>{section.title}</Text>
+                <Text style={s.sectionCount}>{section.data.length}</Text>
               </View>
             )}
             ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={t.colors.primary} />
             }
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                onPress={() => {
-                  if (item.kind === 'owned') {
-                    toggleFolder(item.folder.id);
-                  } else {
-                    setLocalVisibleSources(previous => {
-                      const next = new Set(previous);
-                      if (next.has(item.source.sourceKey)) next.delete(item.source.sourceKey);
-                      else next.add(item.source.sourceKey);
-                      return next;
-                    });
-                  }
-                }}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingVertical: t.spacing.md,
-                  paddingHorizontal: t.spacing.lg,
-                  backgroundColor: t.colors.surface,
-                  borderRadius: t.radius.md,
-                }}
-              >
-                <IconButton
-                  name={isItemVisible(item) ? 'checkbox-marked' : 'checkbox-blank-outline'}
-                  size={24}
-                  color={isItemVisible(item) ? t.colors.primary : t.colors.textHint}
-                />
-                <View style={{ flex: 1, marginLeft: t.spacing.md }}>
-                  <ListItem
-                    title={item.kind === 'owned' ? item.folder.title : item.source.title}
-                    subtitle={item.kind === 'owned'
-                      ? `${item.folder.mediaCount} 个视频 · 我的收藏夹`
-                      : `${item.source.ownerName || `UP主 UID ${item.source.ownerMid}`} · ${item.source.mediaCount} 个视频 · ${item.source.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹'}`}
-                    icon={item.kind === 'owned'
-                      ? 'folder-music-outline'
-                      : item.source.kind === 'subscribedSeason' ? 'view-grid-outline' : 'folder-heart-outline'}
-                    showArrow={false}
-                  />
-                </View>
-              </TouchableOpacity>
-            )}
+            renderItem={renderPreferenceItem}
           />
         </>
       )}

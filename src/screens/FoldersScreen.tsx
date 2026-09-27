@@ -864,7 +864,7 @@ export const FoldersScreen = ({ navigation }: any) => {
                     fontWeight: '500',
                   }}
                 >
-                  随机播放已同步的自有收藏内容 ({globalIndex.length})
+                  全局随机播放
                 </Text>
               </TouchableOpacity>
 
