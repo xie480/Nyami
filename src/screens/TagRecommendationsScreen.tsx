@@ -90,6 +90,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   const [stage, setStage] = useState<ScreenStage>('idle');
   const [initialLoading, setInitialLoading] = useState(true);
   const [failedSearchCount, setFailedSearchCount] = useState(0);
+  const [recommendationHasMore, setRecommendationHasMore] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestController = useRef<AbortController | null>(null);
@@ -103,6 +104,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       setProfile(null);
       setRecommendations([]);
       setFailedSearchCount(0);
+      setRecommendationHasMore(false);
       setHasGenerated(false);
       setInitialLoading(false);
       return;
@@ -118,6 +120,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       loadedUid.current = requestUid;
       setRecommendations([]);
       setFailedSearchCount(0);
+      setRecommendationHasMore(false);
       setHasGenerated(false);
     }
 
@@ -203,6 +206,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     setError(null);
     setRecommendations([]);
     setFailedSearchCount(0);
+    setRecommendationHasMore(false);
     setHasGenerated(false);
 
     try {
@@ -245,6 +249,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       }
       setRecommendations(searchResult.recommendations);
       setFailedSearchCount(searchResult.failedSearchCount);
+      setRecommendationHasMore(searchResult.hasMore);
       setHasGenerated(true);
       setStage('idle');
     } catch (buildError) {
@@ -266,7 +271,11 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     async (video: TagRecommendation) => {
       try {
         const queueVideos = recommendations.map(searchVideoToFavoriteVideo);
-        setQueue(queueVideos, video.bvid);
+        setQueue(queueVideos, video.bvid, {
+          isPersonalized: true,
+          recommendationPage: 1,
+          recommendationHasMore,
+        });
         usePlayerStore.getState().setResolving(true);
         useProgressStore.getState().resetProgress();
         prefetchAudioUrl(video.bvid).catch(() => {});
@@ -281,7 +290,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         usePlayerStore.getState().setResolving(false);
       }
     },
-    [navigation, recommendations, setQueue],
+    [navigation, recommendationHasMore, recommendations, setQueue],
   );
 
   const isBackgroundBackfillActive = backgroundBackfillStatus === 'running';

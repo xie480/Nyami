@@ -32,6 +32,9 @@ import { useSyncStore } from './store/syncStore';
 import { GlassBackground } from './components/GlassBackground';
 import { BottomNavigationBar } from './components/BottomNavigationBar';
 import { startProgressPolling, stopProgressPolling } from './store/progressStore';
+import { DiscoverScreen } from './screens/DiscoverScreen';
+import { SearchScreen } from './screens/SearchScreen';
+import { PlaylistRecommendationsScreen } from './screens/PlaylistRecommendationsScreen';
 
 const Stack = createStackNavigator();
 
@@ -48,6 +51,9 @@ const withBackground = (Component: React.ComponentType<any>) => {
 };
 
 const HomeScreenWithBg = withBackground(HomeScreen);
+const DiscoverScreenWithBg = withBackground(DiscoverScreen);
+const SearchScreenWithBg = withBackground(SearchScreen);
+const PlaylistRecommendationsScreenWithBg = withBackground(PlaylistRecommendationsScreen);
 const FoldersScreenWithBg = withBackground(FoldersScreen);
 const VideosScreenWithBg = withBackground(VideosScreen);
 const PlayerScreenWithBg = withBackground(PlayerScreen);
@@ -97,7 +103,9 @@ export default function App() {
     currentRouteName !== null &&
     !['Splash', 'Home', 'Player'].includes(currentRouteName);
   const activeDockTab =
-    currentRouteName === 'Settings'
+    ['Discover', 'Search', 'PlaylistRecommendations'].includes(currentRouteName ?? '')
+      ? 'home'
+      : currentRouteName === 'Settings'
       ? 'settings'
       : currentRouteName === 'TagRecommendations'
         ? 'profile'
@@ -230,6 +238,9 @@ export default function App() {
                   }}>
                   <Stack.Screen name="Splash" component={SplashScreenWithBg} />
                   <Stack.Screen name="Home" component={HomeScreenWithBg} />
+                  <Stack.Screen name="Discover" component={DiscoverScreenWithBg} />
+                  <Stack.Screen name="Search" component={SearchScreenWithBg} />
+                  <Stack.Screen name="PlaylistRecommendations" component={PlaylistRecommendationsScreenWithBg} />
                   <Stack.Screen name="Folders" component={FoldersScreenWithBg} />
                   <Stack.Screen name="Videos" component={VideosScreenWithBg} />
                   <Stack.Screen

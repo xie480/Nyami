@@ -22,6 +22,9 @@ import {storage} from '../core/storage';
 import {useProgressStore} from '../store/progressStore';
 import {getCachedUrl, setCachedUrl, invalidateUrl} from './urlCache';
 import {persistVideoPartsToDb} from '../db/operations';
+import {useAuthStore} from '../store/authStore';
+import {loadMorePersonalizedSongs} from './homeRecommendationService';
+import {searchVideoToFavoriteVideo} from './transformers';
 
 let _ready = false;
 
@@ -34,11 +37,15 @@ let queueEndRecoveryPromise: Promise<void> | null = null;
 let nativeQueueMutation: Promise<void> = Promise.resolve();
 let playbackIntent = false;
 let userPauseRevision = 0;
+let personalizedPageController: AbortController | null = null;
 const playbackErrorAttempts = new Map<string, number>();
 const playbackErrorRecoveries = new Map<string, Promise<void>>();
 
 function advanceQueueRevision(): number {
   queueRevision += 1;
+  personalizedPageController?.abort();
+  personalizedPageController = null;
+  usePlayerStore.getState().setQueueLoading(false);
   playbackErrorAttempts.clear();
   return queueRevision;
 }
@@ -197,10 +204,14 @@ async function hydrateVideo(
       targetCid ?? (v.parts && v.parts.length > 0 ? v.parts[0].cid : undefined);
 
     const cacheKey = cid ? `${v.bvid}-${cid}` : v.bvid;
-    const isNoCache =
-      v.folderIds?.some(id =>
-        useSettingsStore.getState().noCacheFolderIds?.includes(id),
-      ) ?? false;
+    const playContext = usePlayerStore.getState().playContext;
+    const isPersonalizedNoCache =
+      !!playContext?.isPersonalized &&
+      !useSettingsStore.getState().cachePersonalizedRecommendations;
+    const isNoCacheFolder = v.folderIds?.some(id =>
+      useSettingsStore.getState().noCacheFolderIds?.includes(id),
+    ) ?? false;
+    const shouldCacheAudio = !isNoCacheFolder && !isPersonalizedNoCache;
 
     let url = '';
     let headers: Record<string, string> | undefined;
@@ -208,7 +219,7 @@ async function hydrateVideo(
     let title = v.title;
     let partsToExpand: any[] = [];
 
-    const cachedPath = !isNoCache
+    const cachedPath = !isNoCacheFolder
       ? await audioCache.has(cacheKey, quality)
       : null;
     if (cachedPath) {
@@ -226,7 +237,7 @@ async function hydrateVideo(
         effectiveCid = cid ?? info.cid;
         setCachedUrl(v.bvid, url, headers, effectiveCid);
 
-        if (!isNoCache) {
+        if (shouldCacheAudio) {
           audioCache.download(cacheKey, quality, url, headers).catch(() => {});
         }
 
@@ -292,7 +303,7 @@ async function hydrateVideo(
 }
 
 async function maintainQueueBufferOnce(revision: number): Promise<void> {
-  const logicalQueue = usePlayerStore.getState().queue;
+  let logicalQueue = usePlayerStore.getState().queue;
   const nativeQueue = await TrackPlayer.getQueue();
   const activeIndex = await TrackPlayer.getActiveTrackIndex();
 
@@ -320,6 +331,76 @@ async function maintainQueueBufferOnce(revision: number): Promise<void> {
   const logicalIndex = logicalQueue.findIndex(v => v.bvid === activeTrack.id);
   if (logicalIndex === -1) {
     return;
+  }
+
+  const playerState = usePlayerStore.getState();
+  const playContext = playerState.playContext;
+  const logicalRemaining = logicalQueue.length - logicalIndex - 1;
+  if (
+    playContext?.isPersonalized &&
+    playContext.recommendationHasMore !== false &&
+    logicalRemaining < need &&
+    !playerState.queueLoading
+  ) {
+    const uid = useAuthStore.getState().userId;
+    if (uid) {
+      const page = (playContext.recommendationPage ?? 1) + 1;
+      const controller = new AbortController();
+      personalizedPageController = controller;
+      playerState.setQueueLoading(true);
+      try {
+        const result = await loadMorePersonalizedSongs(
+          uid,
+          page,
+          logicalQueue.map(video => video.bvid),
+          controller.signal,
+        );
+        if (
+          revision !== queueRevision ||
+          controller.signal.aborted ||
+          useAuthStore.getState().userId !== uid
+        ) {
+          return;
+        }
+
+        const latestState = usePlayerStore.getState();
+        if (!latestState.playContext?.isPersonalized) return;
+        const knownVideoIds = new Set(latestState.queue.map(video => video.bvid));
+        const nextVideos = result.recommendations
+          .filter(video => !knownVideoIds.has(video.bvid))
+          .map(searchVideoToFavoriteVideo);
+        const nextContext = {
+          ...latestState.playContext,
+          recommendationPage: page,
+          recommendationHasMore: result.hasMore,
+        };
+        if (nextVideos.length > 0) {
+          const combinedQueue = [...latestState.queue, ...nextVideos];
+          usePlayerStore.setState({
+            queue: combinedQueue,
+            originalQueue: [...latestState.originalQueue, ...nextVideos],
+            playContext: nextContext,
+          });
+          logicalQueue = combinedQueue;
+        } else {
+          latestState.setPlayContext(nextContext);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          LoggerService.warn(
+            'maintainQueueBuffer',
+            'personalizedRecommendations',
+            '个性化推荐续页失败；当前队列继续播放',
+            error,
+          );
+        }
+      } finally {
+        if (personalizedPageController === controller) {
+          personalizedPageController = null;
+        }
+        usePlayerStore.getState().setQueueLoading(false);
+      }
+    }
   }
 
   const nativeIds = new Set(nativeQueue.map(t => t.id));
@@ -665,6 +746,10 @@ export async function appendQueue(
 
 async function autoCache(bvid: string, cid?: number) {
   const s = useSettingsStore.getState();
+  const playContext = usePlayerStore.getState().playContext;
+  if (playContext?.isPersonalized && !s.cachePersonalizedRecommendations) {
+    return;
+  }
   if (!s.autoCacheOnWifi || !netStatus.isWifi()) {
     return;
   }

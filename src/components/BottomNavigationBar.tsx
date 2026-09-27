@@ -7,7 +7,7 @@ import {MiniPlayer} from './MiniPlayer';
 import {useTheme} from '../theme';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-type ActiveTab = 'folders' | 'profile' | 'settings' | null;
+type ActiveTab = 'home' | 'folders' | 'profile' | 'settings' | null;
 
 interface BottomNavigationBarProps {
   navigation: any;
@@ -20,7 +20,7 @@ const NAV_ITEMS: Array<{
   icon: string;
   route?: string;
 }> = [
-  {key: 'home', title: '首页', icon: 'home-variant-outline'},
+  {key: 'home', title: '首页', icon: 'home-variant-outline', route: 'Discover'},
   {key: 'folders', title: '收藏夹', icon: 'playlist-music-outline', route: 'Folders'},
   {key: 'profile', title: '用户画像', icon: 'account-circle-outline', route: 'TagRecommendations'},
   {key: 'settings', title: '设置', icon: 'cog-outline', route: 'Settings'},

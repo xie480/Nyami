@@ -25,6 +25,7 @@ export function trimFolder(f: BiliFolder): FavoriteFolder {
 export function trimFavoriteVideo(m: BiliFavoriteVideoMedia): FavoriteVideo {
   return {
     bvid: m.bvid,
+    aid: m.aid,
     title: m.title,
     cover: m.cover,
     duration: m.duration,
@@ -112,6 +113,7 @@ export function searchVideoToFavoriteVideo(
 ): FavoriteVideo {
   return {
     bvid: video.bvid,
+    aid: video.aid,
     title: video.title,
     cover: video.cover,
     duration: video.duration,

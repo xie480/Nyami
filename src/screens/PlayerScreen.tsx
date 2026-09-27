@@ -30,6 +30,8 @@ import {
 import {useNavigation, useFocusEffect} from '@react-navigation/native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {IconButton} from '../components/IconButton';
+import {FavoriteFolderPickerSheet} from '../components/FavoriteFolderPickerSheet';
+import {Switch} from '../components/Switch';
 import {useUIStore} from '../store/uiStore';
 // import { PlaylistPanel } from '../components/PlaylistPanel'; // removed to avoid duplicate modal rendering
 import {ProgressBar} from '../components/ProgressBar';
@@ -41,6 +43,7 @@ import {netStatus} from '../services/netStatus';
 import {usePlayerStore} from '../store/playerStore';
 import {useSyncStore} from '../store/syncStore';
 import {useProgressStore} from '../store/progressStore';
+import type {OnlineVideoSearchResult} from '../types/domain';
 
 // ======== 【性能优化】静态样式移至组件外部，避免每次渲染重复创建 ========
 const STATIC_STYLES = StyleSheet.create({
@@ -216,10 +219,14 @@ export const PlayerScreen = () => {
   );
 
   const quality = useSettingsStore(s => s.quality);
+  const cachePersonalizedRecommendations = useSettingsStore(s => s.cachePersonalizedRecommendations);
+  const setCachePersonalizedRecommendations = useSettingsStore(s => s.setCachePersonalizedRecommendations);
   const syncStatus = useSyncStore(s => s.syncStatus);
+  const isPersonalized = usePlayerStore(s => !!s.playContext?.isPersonalized);
   const activeTrack = useActiveTrack();
   const playback = usePlaybackState();
   const [isPartsModalVisible, setIsPartsModalVisible] = useState(false);
+  const [favoritePickerVisible, setFavoritePickerVisible] = useState(false);
 
   /**
    * 【防闪烁修复 v2】轨道来源优先级策略
@@ -245,6 +252,17 @@ export const PlayerScreen = () => {
       trackId ? s.queue.find(v => v.bvid === trackId) : undefined,
     ),
   );
+  const favoriteTarget = useMemo<OnlineVideoSearchResult | null>(() => currentVideo ? ({
+    aid: currentVideo.aid ?? 0,
+    bvid: currentVideo.bvid,
+    title: currentVideo.title,
+    cover: currentVideo.cover,
+    duration: currentVideo.duration,
+    pubtime: currentVideo.pubtime,
+    authorId: currentVideo.upper.mid,
+    author: currentVideo.upper.name,
+    tags: [],
+  }) : null, [currentVideo]);
 
   const duration = progressDuration || fallbackDuration;
 
@@ -479,6 +497,15 @@ export const PlayerScreen = () => {
                 {track.artist || '未知歌手'}
               </Text>
             </View>
+            {isPersonalized && currentVideo && (
+              <IconButton
+                name="heart-outline"
+                size={25}
+                color={themeColors.accentPrimary}
+                accessibilityLabel="收藏当前推荐歌曲"
+                onPress={() => setFavoritePickerVisible(true)}
+              />
+            )}
             <IconButton
               name="chevron-down"
               size={28}
@@ -525,6 +552,34 @@ export const PlayerScreen = () => {
                 {formatDuration(progressDuration)}
               </Text>
             </View>
+            {isPersonalized && (
+              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: t.spacing.md, paddingHorizontal: t.spacing.xs}}>
+                <View style={{flex: 1, flexDirection: 'row', alignItems: 'center', paddingRight: t.spacing.sm}}>
+                  <IconButton
+                    name="infinity"
+                    size={20}
+                    color={themeColors.accentPrimary}
+                  />
+                  <View style={{flex: 1}}>
+                    <Text style={{fontSize: t.fontSize.xs, color: themeColors.textPrimary, fontWeight: '600'}}>
+                      个性化推荐 · 无限预加载
+                    </Text>
+                    <Text style={{fontSize: 10, color: themeColors.textTertiary, marginTop: 2}}>
+                      按当前画像持续补充队列
+                    </Text>
+                  </View>
+                </View>
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                  <Text style={{fontSize: t.fontSize.xs, color: themeColors.textSecondary, marginRight: t.spacing.xs}}>
+                    缓存
+                  </Text>
+                  <Switch
+                    value={cachePersonalizedRecommendations}
+                    onValueChange={setCachePersonalizedRecommendations}
+                  />
+                </View>
+              </View>
+            )}
           </View>
           {playbackError ? (
             <TouchableOpacity
@@ -671,6 +726,11 @@ export const PlayerScreen = () => {
           </View>
         </Modal>
       )}
+      <FavoriteFolderPickerSheet
+        visible={favoritePickerVisible}
+        video={favoriteTarget}
+        onClose={() => setFavoritePickerVisible(false)}
+      />
     </View>
   );
 };

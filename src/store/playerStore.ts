@@ -18,6 +18,10 @@ export interface PlayContext {
   sourceKey?: string;
   sortOption?: string;
   searchQuery?: string;
+  /** 标识个性化队列，以便独立控制自动缓存与按画像续页。 */
+  isPersonalized?: boolean;
+  recommendationPage?: number;
+  recommendationHasMore?: boolean;
 }
 
 interface PlayerState {
@@ -157,6 +161,9 @@ export const usePlayerStore = create<PlayerState>()(
     {
       name: 'playerStore',
       storage: createJSONStorage(() => mmkvStorage),
+      onRehydrateStorage: () => state => {
+        state?.setQueueLoading(false);
+      },
     },
   ),
 );

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, StatusBar, Image, Dimensions, Linking, Alert, Platform, ToastAndroid } from 'react-native';
+import { View, StatusBar, Image, Dimensions, Linking, Alert, Platform, ToastAndroid, TextInput, TouchableOpacity } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   Text, ScrollView, StyleSheet,
@@ -26,6 +26,7 @@ import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
 import type { Quality } from '../types/domain';
 import ImageCropPicker from 'react-native-image-crop-picker';
 import RNFS from 'react-native-fs';
+import { config } from '../config';
 
 const QUALITY_OPTIONS: Array<{
   key: Quality;
@@ -57,10 +58,14 @@ export const SettingsScreen = ({ navigation }: any) => {
     quality, autoCacheOnWifi, wifiOnly, hiddenFolderIds,
     expandMultiPart, themeMode, customBackgroundImage, glassBlurAmount,
     mixWithOthers,
+    recommendationDurationFilterEnabled, recommendationDurationLimitMinutes,
+    recommendationTagBlacklist, cachePersonalizedRecommendations,
     setQuality, setAutoCacheOnWifi,
     setWifiOnly, setExpandMultiPart, setThemeMode,
     setCustomBackgroundImage, setGlassBlurAmount,
     setMixWithOthers,
+    setRecommendationDurationFilterEnabled, setRecommendationDurationLimitMinutes,
+    setRecommendationTagBlacklist, setCachePersonalizedRecommendations,
   } = useSettingsStore();
   // UID management moved to authStore (userId, userInfo)
 
@@ -68,6 +73,8 @@ export const SettingsScreen = ({ navigation }: any) => {
 
   const [cacheSize, setCacheSize] = useState(0);
   const [cacheCount, setCacheCount] = useState(0);
+  const [durationLimitInput, setDurationLimitInput] = useState(String(recommendationDurationLimitMinutes));
+  const [blacklistImportInput, setBlacklistImportInput] = useState('');
   const { syncStatus, progressData, syncError, startSync, abortSync, resetSyncState } = useSyncStore();
   const [globalIndexCount, setGlobalIndexCount] = useState(0);
 
@@ -97,6 +104,38 @@ export const SettingsScreen = ({ navigation }: any) => {
   const logout = useAuthStore((s) => s.logout);
   const setUserInfo = useAuthStore((s) => s.setUserInfo);
   const setLoginModalVisible = useUIStore((s) => s.setLoginModalVisible);
+
+  useEffect(() => {
+    setDurationLimitInput(String(recommendationDurationLimitMinutes));
+  }, [recommendationDurationLimitMinutes]);
+
+  const importRecommendationTagBlacklist = useCallback(() => {
+    const importedKeywords = blacklistImportInput
+      .split(/[\n,，、;；\t]+/)
+      .map(keyword => keyword.trim())
+      .filter(Boolean);
+    if (importedKeywords.length === 0) {
+      showDialog('提示', '请先粘贴要屏蔽的 tag 关键词，支持换行或逗号分隔');
+      return;
+    }
+    setRecommendationTagBlacklist([...recommendationTagBlacklist, ...importedKeywords]);
+    setBlacklistImportInput('');
+  }, [blacklistImportInput, recommendationTagBlacklist, setRecommendationTagBlacklist, showDialog]);
+
+  const commitDurationLimit = useCallback(() => {
+    const parsedMinutes = Number(durationLimitInput.trim());
+    if (!Number.isFinite(parsedMinutes) || parsedMinutes < 1) {
+      setDurationLimitInput(String(recommendationDurationLimitMinutes));
+      showDialog('时长设置无效', '请输入大于 0 的分钟数');
+      return;
+    }
+    const normalizedMinutes = Math.min(
+      config.recommendations.maxDurationLimitMinutes,
+      Math.floor(parsedMinutes),
+    );
+    setRecommendationDurationLimitMinutes(normalizedMinutes);
+    setDurationLimitInput(String(normalizedMinutes));
+  }, [durationLimitInput, recommendationDurationLimitMinutes, setRecommendationDurationLimitMinutes, showDialog]);
 
   // 音质选择逻辑（VIP 验证）
   const handleQualitySelect = useCallback((opt: typeof QUALITY_OPTIONS[number]) => {
@@ -398,6 +437,103 @@ export const SettingsScreen = ({ navigation }: any) => {
           )}
         </View>
 
+        <Text style={s.section}>推荐</Text>
+        <View style={s.group}>
+          <View style={{padding: t.spacing.lg}}>
+            <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+              <View style={{flex: 1, paddingRight: t.spacing.md}}>
+                <Text style={{fontSize: t.fontSize.base, color: t.colors.text, fontWeight: '500'}}>
+                  筛选推荐视频时长
+                </Text>
+                <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: 3}}>
+                  默认只推荐不超过设定时长的视频
+                </Text>
+              </View>
+              <Switch
+                value={recommendationDurationFilterEnabled}
+                onValueChange={setRecommendationDurationFilterEnabled}
+              />
+            </View>
+            <View style={{flexDirection: 'row', alignItems: 'center', marginTop: t.spacing.md, opacity: recommendationDurationFilterEnabled ? 1 : 0.55}}>
+              <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub}}>最长</Text>
+              <TextInput
+                accessibilityLabel="推荐视频最长时长，分钟"
+                value={durationLimitInput}
+                onChangeText={setDurationLimitInput}
+                onEndEditing={commitDurationLimit}
+                keyboardType="number-pad"
+                maxLength={4}
+                editable={recommendationDurationFilterEnabled}
+                style={{
+                  width: 72,
+                  minHeight: 40,
+                  textAlign: 'center',
+                  marginHorizontal: t.spacing.sm,
+                  paddingHorizontal: t.spacing.sm,
+                  color: t.colors.text,
+                  backgroundColor: t.colors.background,
+                  borderWidth: 1,
+                  borderColor: t.colors.divider,
+                  borderRadius: t.radius.md,
+                }}
+              />
+              <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub}}>分钟</Text>
+            </View>
+          </View>
+          <View style={s.sep} />
+          <View style={{padding: t.spacing.lg}}>
+            <Text style={{fontSize: t.fontSize.base, color: t.colors.text, fontWeight: '500'}}>
+              推荐 tag 黑名单
+            </Text>
+            <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: 3}}>
+              粘贴关键词后批量导入；推荐视频的 tag 包含关键词时会被过滤
+            </Text>
+            <TextInput
+              value={blacklistImportInput}
+              onChangeText={setBlacklistImportInput}
+              placeholder="支持换行、逗号、顿号或分号分隔"
+              placeholderTextColor={t.colors.textHint}
+              multiline
+              textAlignVertical="top"
+              style={[s.input, {minHeight: 74, marginTop: t.spacing.md}]}
+            />
+            <Button
+              title="导入关键词"
+              variant="text"
+              onPress={importRecommendationTagBlacklist}
+              style={{alignSelf: 'flex-end', marginTop: t.spacing.xs}}
+            />
+            {recommendationTagBlacklist.length > 0 ? (
+              <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.xs, marginTop: t.spacing.xs}}>
+                {recommendationTagBlacklist.map(keyword => (
+                  <TouchableOpacity
+                    key={keyword.toLocaleLowerCase()}
+                    accessibilityRole="button"
+                    accessibilityLabel={`移除黑名单关键词 ${keyword}`}
+                    onPress={() => setRecommendationTagBlacklist(
+                      recommendationTagBlacklist.filter(item => item !== keyword),
+                    )}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingHorizontal: t.spacing.sm,
+                      paddingVertical: t.spacing.xs,
+                      borderRadius: t.radius.full,
+                      backgroundColor: t.colors.primaryLight,
+                    }}>
+                    <Text style={{fontSize: t.fontSize.xs, color: t.colors.primary}}>{keyword}</Text>
+                    <Text style={{fontSize: t.fontSize.xs, color: t.colors.primary, marginLeft: 5}}>×</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: t.spacing.xs}}>
+                当前没有屏蔽关键词
+              </Text>
+            )}
+          </View>
+        </View>
+
         <Text style={s.section}>音效</Text>
         <View style={s.group}>
           <ListItem
@@ -464,6 +600,17 @@ export const SettingsScreen = ({ navigation }: any) => {
 
         <Text style={s.section}>缓存</Text>
         <View style={s.group}>
+          <ListItem
+            title="个性化播放自动缓存"
+            subtitle="默认关闭；开启后按现有 WiFi 自动缓存规则保存推荐歌曲"
+            right={
+              <Switch
+                value={cachePersonalizedRecommendations}
+                onValueChange={setCachePersonalizedRecommendations}
+              />
+            }
+          />
+          <View style={s.sep} />
           <ListItem
             title="已缓存音频"
             right={

@@ -23,6 +23,14 @@ export interface ImportedPlaylist {
   title: string;
   cover: string;
   mediaCount: number;
+  /** B 站目录若提供简介则保留；页面不自行伪造来源简介。 */
+  description?: string;
+}
+
+/** 带有兴趣画像匹配信息的外部收藏夹/合集推荐条目。 */
+export interface CollectionRecommendation extends ImportedPlaylist {
+  score: number;
+  matchedTags: string[];
 }
 
 /** 视频分段（P）信息 */
@@ -36,6 +44,8 @@ export interface VideoPart {
 /** 收藏夹中的视频条目（精简后）*/
 export interface FavoriteVideo {
   bvid: string;
+  /** 有来源搜索结果时可直接用于 B 站收藏写入；缺失时由服务端按 BVID 回读。 */
+  aid?: number;
   title: string;
   cover: string;
   duration: number;
@@ -126,4 +136,6 @@ export interface PageResult<T> {
   hasMore: boolean;
   /** 原始返回的记录数（在过滤失效视频前） */
   rawCount: number;
+  /** 来源接口首屏响应可携带的简介；缺失时由调用方说明 B 站未提供简介。 */
+  description?: string;
 }

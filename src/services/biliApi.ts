@@ -20,7 +20,7 @@ interface FolderListResp {
 }
 
 interface FavoriteListResp {
-  info: {id: number; title: string; media_count: number};
+  info: {id: number; title: string; media_count: number; intro?: string};
   medias: BiliFavoriteVideoMedia[];
   has_more: boolean;
 }

@@ -52,6 +52,8 @@ export interface BiliCollectedPlaylist {
   media_count?: number;
   total?: number;
   type_name?: string;
+  intro?: string;
+  description?: string;
   upper?: { mid?: number; name?: string; face?: string };
 }
 
@@ -76,9 +78,11 @@ export interface BiliSeasonArchive {
 export interface BiliSeasonArchivesPage {
   archives?: BiliSeasonArchive[];
   page?: { page_num?: number; page_size?: number; total?: number };
+  meta?: { description?: string; intro?: string; name?: string; title?: string };
 }
 
 export interface BiliFavoriteVideoMedia {
+  aid?: number;
   bvid: string;
   title: string;
   cover: string;
@@ -103,6 +107,7 @@ export interface BiliVideoPage {
 
 export interface BiliVideoInfo {
   bvid: string;
+  aid?: number;
   cid: number;
   title: string;
   pic: string;

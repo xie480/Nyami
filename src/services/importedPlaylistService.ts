@@ -20,6 +20,11 @@ function normalizeImportedPlaylist(
   if (!ownerMid || !remoteId) return null;
 
   const kind = isSeason ? 'subscribedSeason' : 'collectedFavorite';
+  const description = typeof item.intro === 'string'
+    ? item.intro
+    : typeof item.description === 'string'
+      ? item.description
+      : '';
   return {
     sourceKey: `${kind}:${ownerMid}:${remoteId}`,
     kind,
@@ -29,6 +34,7 @@ function normalizeImportedPlaylist(
     title: item.title ?? item.name ?? '未命名列表',
     cover: item.cover ?? '',
     mediaCount: Number(item.media_count ?? item.total ?? 0),
+    description: description.trim(),
   };
 }
 
@@ -39,6 +45,7 @@ function normalizeSeasonArchive(
   if (!archive.bvid) return null;
   return {
     bvid: archive.bvid,
+    aid: archive.aid,
     title: archive.title,
     cover: archive.pic ?? archive.cover ?? '',
     duration: archive.duration ?? 0,
@@ -132,6 +139,7 @@ export const importedPlaylistService = {
             list: medias.filter(media => media.attr === 0).map(trimFavoriteVideo),
             hasMore: response.has_more ?? medias.length === IMPORTED_VIDEO_PAGE_SIZE,
             rawCount: medias.length,
+            description: response.info?.intro?.trim() ?? '',
           };
         }
 
@@ -156,6 +164,7 @@ export const importedPlaylistService = {
             .filter((video): video is FavoriteVideo => video !== null),
           hasMore,
           rawCount: archives.length,
+          description: response.meta?.description?.trim() ?? response.meta?.intro?.trim() ?? '',
         };
       },
       true,

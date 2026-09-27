@@ -17,7 +17,7 @@ export const HomeScreen = ({ navigation }: any) => {
 
   useEffect(() => {
     if (loggedIn) {
-      navigation.replace('Folders');
+      navigation.replace('Discover');
     }
   }, [loggedIn, navigation]);
 

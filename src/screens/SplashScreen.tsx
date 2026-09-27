@@ -16,7 +16,7 @@ export const SplashScreen = ({ navigation }: any) => {
       const elapsed = Date.now() - launchTime.current;
       const remaining = Math.max(0, 1000 - elapsed);
       const timer = setTimeout(() => {
-        navigation.replace(loggedIn ? 'Folders' : 'Home');
+        navigation.replace(loggedIn ? 'Discover' : 'Home');
       }, remaining);
       return () => clearTimeout(timer);
     }

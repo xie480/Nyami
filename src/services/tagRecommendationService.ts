@@ -9,6 +9,7 @@ import {getVideoTagCacheEntries, upsertVideoTagCache} from '../db/operations';
 import {biliApi} from './biliApi';
 import {trimSearchVideo, trimVideoTags} from './transformers';
 import {useAuthStore} from '../store/authStore';
+import {useSettingsStore} from '../store/settingsStore';
 import {useTagBackfillStore} from '../store/tagBackfillStore';
 import type {
   FavoriteVideo,
@@ -31,6 +32,16 @@ export interface TagBackfillProgress {
 export interface TagRecommendationSearchResult {
   recommendations: TagRecommendation[];
   failedSearchCount: number;
+  hasMore: boolean;
+}
+
+export interface TagRecommendationSearchOptions {
+  page?: number;
+  excludeVideoIds?: string[];
+  /** Null disables the duration ceiling; omitted values use the persisted app preference. */
+  durationLimitSeconds?: number | null;
+  tagBlacklist?: string[];
+  maxRecommendations?: number;
 }
 
 interface BackgroundBackfillTask {
@@ -453,9 +464,27 @@ export async function searchTagRecommendations(
   profile: TagProfile,
   favoriteVideos: FavoriteVideo[],
   signal: AbortSignal,
+  options: TagRecommendationSearchOptions = {},
 ): Promise<TagRecommendationSearchResult> {
+  const page = options.page ?? 1;
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new Error('推荐页码无效');
+  }
   const favorites = uniqueVideos(favoriteVideos);
   const favoriteIds = new Set(favorites.map(video => video.bvid));
+  for (const videoId of options.excludeVideoIds ?? []) {
+    if (videoId) favoriteIds.add(videoId);
+  }
+  const settings = useSettingsStore.getState();
+  const durationLimitSeconds = options.durationLimitSeconds === undefined
+    ? settings.recommendationDurationFilterEnabled
+      ? settings.recommendationDurationLimitMinutes * 60
+      : null
+    : options.durationLimitSeconds;
+  const normalizedBlacklist = (options.tagBlacklist ?? settings.recommendationTagBlacklist)
+    .map(normalizedTagKey)
+    .filter(Boolean);
+  const maxRecommendations = options.maxRecommendations ?? config.tagRecommendations.maxRecommendations;
   const preferences = profile.preferences.slice(
     0,
     config.tagRecommendations.maxProfileTags,
@@ -468,6 +497,7 @@ export async function searchTagRecommendations(
   );
   const recommendationById = new Map<string, TagRecommendation>();
   let failedSearchCount = 0;
+  let hasMore = false;
 
   for (const preference of preferences) {
     if (signal.aborted) {
@@ -476,10 +506,11 @@ export async function searchTagRecommendations(
     try {
       const response = await biliApi.searchVideos(
         preference.tagName,
-        1,
+        page,
         signal,
         config.tagRecommendations.musicTid,
       );
+      hasMore ||= (response.numPages ?? page) > page;
       for (const searchItem of response.result ?? []) {
         if (
           !searchItem.aid ||
@@ -489,6 +520,20 @@ export async function searchTagRecommendations(
           continue;
         }
         const video = trimSearchVideo(searchItem);
+        if (
+          durationLimitSeconds !== null &&
+          (video.duration <= 0 || video.duration > durationLimitSeconds)
+        ) {
+          continue;
+        }
+        if (
+          video.tags.some(tag => {
+            const normalizedTag = normalizedTagKey(tag);
+            return normalizedBlacklist.some(keyword => normalizedTag.includes(keyword));
+          })
+        ) {
+          continue;
+        }
         const matchedTags = Array.from(
           new Set(
             video.tags
@@ -543,7 +588,7 @@ export async function searchTagRecommendations(
         right.pubtime - left.pubtime ||
         left.title.localeCompare(right.title, 'zh-CN'),
     )
-    .slice(0, config.tagRecommendations.maxRecommendations);
+    .slice(0, Math.max(0, maxRecommendations));
 
-  return {recommendations, failedSearchCount};
+  return {recommendations, failedSearchCount, hasMore};
 }

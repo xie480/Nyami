@@ -381,6 +381,13 @@ export const favoriteService = {
     folderIds: number[],
   ): Promise<FavoriteWriteResult> {
     await assertCurrentAccount(uid);
+    const aid = Number.isSafeInteger(video.aid) && video.aid > 0
+      ? video.aid
+      : (await biliApi.getVideoInfo(video.bvid)).aid ?? 0;
+    if (!Number.isSafeInteger(aid) || aid <= 0) {
+      throw new Error('无法确认视频 AID，未发送收藏请求');
+    }
+    const writableVideo = {...video, aid};
     const uniqueFolderIds = [...new Set(folderIds)];
     if (uniqueFolderIds.length === 0) {
       throw new Error('请至少选择一个收藏夹');
@@ -398,7 +405,7 @@ export const favoriteService = {
 
     let writeError: unknown = null;
     try {
-      await biliApi.addVideoToFavoriteFolders(uid, video.aid, uniqueFolderIds);
+      await biliApi.addVideoToFavoriteFolders(uid, aid, uniqueFolderIds);
     } catch (error) {
       // 11201 表示至少有一个目标已收藏；仍以状态回读判断每个目标。
       writeError = error;
@@ -407,7 +414,7 @@ export const favoriteService = {
     let folderList;
     try {
       await assertCurrentAccount(uid);
-      folderList = await biliApi.getFavoriteFolders(uid, undefined, video.aid);
+      folderList = await biliApi.getFavoriteFolders(uid, undefined, aid);
       await assertCurrentAccount(uid);
     } catch (error) {
       this.invalidateFolderList(uid);
@@ -433,7 +440,7 @@ export const favoriteService = {
 
     if (confirmedFolderIds.length > 0) {
       const indexedVideo: FavoriteVideo = {
-        ...video,
+        ...writableVideo,
         page: 1,
         favTime: Math.floor(Date.now() / 1000),
         upper: {mid: video.authorId, name: video.author},

@@ -10,15 +10,18 @@ interface Props {
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
   disabled?: boolean;
+  accessibilityLabel?: string;
 }
 
 export const IconButton: React.FC<Props> = ({
-  name, size = 24, color, onPress, style, disabled,
+  name, size = 24, color, onPress, style, disabled, accessibilityLabel,
 }) => {
   const t = useTheme();
   return (
     <TouchableOpacity
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       onPress={onPress}
       disabled={disabled}
