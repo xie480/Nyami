@@ -11,6 +11,27 @@ export interface BiliFolder {
   mid: number;
   title: string;
   media_count: number;
+  /** 查询指定稿件时，1 表示该稿件已在此收藏夹。 */
+  fav_state?: number;
+}
+
+export interface BiliVideoSearchItem {
+  aid: number;
+  bvid: string;
+  title: string;
+  pic: string;
+  duration: string;
+  author?: string;
+  mid?: number;
+  pubdate?: number;
+  tag?: string;
+}
+
+export interface BiliVideoSearchPage {
+  result?: BiliVideoSearchItem[];
+  page?: number;
+  numPages?: number;
+  numResults?: number;
 }
 
 /** 收藏关系目录接口中的条目；fid 为 0 的条目表示视频合集。 */

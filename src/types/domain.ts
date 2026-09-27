@@ -49,6 +49,19 @@ export interface FavoriteVideo {
   parts?: VideoPart[];
 }
 
+/** B 站在线搜索结果，保留 AID 与 tag 供收藏和筛选使用。 */
+export interface OnlineVideoSearchResult {
+  aid: number;
+  bvid: string;
+  title: string;
+  cover: string;
+  duration: number;
+  pubtime: number;
+  authorId: number;
+  author: string;
+  tags: string[];
+}
+
 /** 音频流信息 */
 export interface AudioInfo {
   bvid: string;

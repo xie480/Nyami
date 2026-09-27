@@ -28,7 +28,10 @@ function createInstance(): AxiosInstance {
   ins.interceptors.request.use(async cfg => {
     await adaptiveBucket.acquire();
     const cookie = await cookieService.get();
-    if (cookie) {
+    const headers = cfg.headers as any;
+    const suppliedCookie =
+      headers?.get?.('Cookie') ?? headers?.Cookie ?? headers?.cookie;
+    if (cookie && !suppliedCookie) {
       // 统一使用字符串赋值，避免 axios headers.set 可能引入的编码问题
       cfg.headers.Cookie = cookie;
     }
@@ -181,4 +184,35 @@ export async function biliGet<T>(
     }
   }
   throw lastError;
+}
+
+/**
+ * 执行一次表单 POST 并校验 B 站业务码。
+ * 收藏/建夹属于有副作用的写操作，因此不自动重试，也不在登录完成后自动重放。
+ */
+export async function biliPost<T>(
+  url: string,
+  body: string,
+  options: AxiosRequestConfig & {silent?: boolean} = {},
+): Promise<T> {
+  const {silent, ...requestOptions} = options;
+  const res = await http.post<BiliResponse<T>>(url, body, {
+    ...requestOptions,
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+      ...requestOptions.headers,
+    },
+  });
+  const {code, data, message} = res.data;
+  if (code !== 0) {
+    try {
+      mapBusinessError(code, message);
+    } catch (error) {
+      if (error instanceof AuthRequiredError && !silent) {
+        useUIStore.getState().setLoginModalVisible(true);
+      }
+      throw error;
+    }
+  }
+  return data;
 }

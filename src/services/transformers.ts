@@ -1,9 +1,14 @@
 import type {
   BiliFolder,
   BiliFavoriteVideoMedia,
+  BiliVideoSearchItem,
   BiliDashAudio,
 } from '../types/bili';
-import type { FavoriteFolder, FavoriteVideo } from '../types/domain';
+import type {
+  FavoriteFolder,
+  FavoriteVideo,
+  OnlineVideoSearchResult,
+} from '../types/domain';
 
 export function trimFolder(f: BiliFolder): FavoriteFolder {
   return {
@@ -29,6 +34,74 @@ export function trimFavoriteVideo(m: BiliFavoriteVideoMedia): FavoriteVideo {
       name: m.upper?.name ?? '未知UP主',
     },
     attr: m.attr,
+  };
+}
+
+function parseSearchDuration(duration: string): number {
+  const parts = duration.split(':').map(value => Number(value));
+  if (
+    parts.length < 2 ||
+    parts.some(value => !Number.isFinite(value) || value < 0)
+  ) {
+    return 0;
+  }
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  }
+  if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  return 0;
+}
+
+export function trimSearchVideo(
+  video: BiliVideoSearchItem,
+): OnlineVideoSearchResult {
+  const cover = video.pic || '';
+  return {
+    aid: video.aid,
+    bvid: video.bvid,
+    title: (video.title || '').replace(/<[^>]*>/g, ''),
+    cover: cover.startsWith('//') ? `https:${cover}` : cover,
+    duration: parseSearchDuration(video.duration || ''),
+    pubtime: video.pubdate ?? 0,
+    authorId: video.mid ?? 0,
+    author: video.author || '未知UP主',
+    tags: (video.tag || '')
+      .split(',')
+      .map(tag => tag.trim())
+      .filter(Boolean),
+  };
+}
+
+export function matchesOnlineVideoSearch(
+  video: OnlineVideoSearchResult,
+  keyword: string,
+  field: 'title' | 'tag',
+): boolean {
+  const normalized = keyword.trim().toLocaleLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  if (field === 'title') {
+    return video.title.toLocaleLowerCase().includes(normalized);
+  }
+  return video.tags.some(tag => tag.toLocaleLowerCase().includes(normalized));
+}
+
+export function searchVideoToFavoriteVideo(
+  video: OnlineVideoSearchResult,
+): FavoriteVideo {
+  return {
+    bvid: video.bvid,
+    title: video.title,
+    cover: video.cover,
+    duration: video.duration,
+    page: 1,
+    pubtime: video.pubtime,
+    favTime: Math.floor(Date.now() / 1000),
+    upper: {mid: video.authorId, name: video.author},
+    attr: 0,
   };
 }
 

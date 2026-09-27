@@ -199,6 +199,14 @@ export const cookieService = {
     return m ? m[1] : null;
   },
 
+  /** 从 Cookie 中提取收藏写入所需的 CSRF Token。 */
+  extractCsrf(cookie: string): string | null {
+    const m = cookie.match(
+      new RegExp(`(?:^|;\\s*)${BILIBILI_COOKIE_NAMES.csrf}=([^;]+)`),
+    );
+    return m ? m[1] : null;
+  },
+
   /** 判断当前是否已登录（依据本地存储的 Cookie） */
   async isLoggedIn(): Promise<boolean> {
     const ck = await this.get();

@@ -2,9 +2,11 @@ import { biliApi } from './biliApi';
 import { cache } from '../core/cache';
 import { config } from '../config';
 import { trimFolder, trimFavoriteVideo } from './transformers';
+import { BiliApiError } from '../core/errors';
 import type {
   FavoriteFolder,
   FavoriteVideo,
+  OnlineVideoSearchResult,
   PageResult,
 } from '../types/domain';
 import {
@@ -23,7 +25,7 @@ import {
   getPlaylistVideoCount,
   getVideosByPlaylistId,
 } from '../db/operations';
-import { database, videoMetaCollection } from '../db/database';
+import { videoMetaCollection } from '../db/database';
 import { Q } from '@nozbe/watermelondb';
 import { Mutex } from '../utils/mutex';
 import { AuthRequiredError } from '../core/errors';
@@ -40,6 +42,31 @@ export interface SyncProgressEvent {
 // 内存缓存，用于同步读取全局索引（UI 层渲染时需同步获取）
 let globalIndexCache: FavoriteVideo[] = [];
 
+export class FavoriteStateReadbackError extends Error {
+  constructor(message: string, public readonly causeValue?: unknown) {
+    super(message);
+    this.name = 'FavoriteStateReadbackError';
+  }
+}
+
+export interface FavoriteWriteResult {
+  confirmedFolderIds: number[];
+  unconfirmedFolderIds: number[];
+  writeErrorMessage: string | null;
+}
+
+async function assertCurrentAccount(uid: string) {
+  await biliApi.assertWriteAccount(uid);
+}
+
+function cacheFolderSnapshot(uid: string, folders: Parameters<typeof trimFolder>[0][]) {
+  cache.set(
+    `folders:${uid}`,
+    folders.map(trimFolder),
+    config.cacheTTL.folders,
+    true,
+  );
+}
 let globalIndexCacheLoaded = false;
 let visibleGlobalIndexSource: FavoriteVideo[] | null = null;
 let visibleGlobalIndexKey = '';
@@ -298,6 +325,132 @@ export const favoriteService = {
   /** 失效某用户的收藏夹列表缓存 */
   invalidateFolderList(uid: string) {
     cache.delete(`folders:${uid}`);
+  },
+
+  /** 新建收藏夹后从 B 站目录回读，以远端目录为准更新本地缓存。 */
+  async createFavoriteFolder(
+    uid: string,
+    title: string,
+    privacy: 0 | 1,
+  ): Promise<FavoriteFolder> {
+    await assertCurrentAccount(uid);
+    const created = await biliApi.createFavoriteFolder(uid, title, privacy);
+    this.invalidateFolderList(uid);
+
+    let folderList;
+    try {
+      await assertCurrentAccount(uid);
+      folderList = await biliApi.getFavoriteFolders(uid);
+      await assertCurrentAccount(uid);
+    } catch (error) {
+      throw new FavoriteStateReadbackError(
+        '收藏夹创建请求已发送，但回读失败；请刷新 B 站收藏夹确认，避免重复创建。',
+        error,
+      );
+    }
+    const remoteFolders = folderList.list || [];
+    cacheFolderSnapshot(uid, remoteFolders);
+    const confirmedFolder = remoteFolders.find(
+      folder => folder.id === created.id && String(folder.mid) === uid,
+    );
+    if (!confirmedFolder) {
+      throw new FavoriteStateReadbackError(
+        '收藏夹创建请求已发送，但 B 站目录尚未确认；请刷新后再试。',
+      );
+    }
+    return trimFolder(confirmedFolder);
+  },
+
+  /** 写入 B 站收藏后按 AID 回读实际状态，并仅索引远端确认的目标目录。 */
+  async addSearchResultToFolders(
+    uid: string,
+    video: OnlineVideoSearchResult,
+    folderIds: number[],
+  ): Promise<FavoriteWriteResult> {
+    await assertCurrentAccount(uid);
+    const uniqueFolderIds = [...new Set(folderIds)];
+    if (uniqueFolderIds.length === 0) {
+      throw new Error('请至少选择一个收藏夹');
+    }
+
+    const knownFolders = await this.getFolders(uid);
+    const ownedFolderIds = new Set(
+      knownFolders
+        .filter(folder => String(folder.mid) === uid)
+        .map(folder => folder.id),
+    );
+    if (uniqueFolderIds.some(folderId => !ownedFolderIds.has(folderId))) {
+      throw new Error('收藏目标已失效或不属于当前账号，请重新选择');
+    }
+
+    let writeError: unknown = null;
+    try {
+      await biliApi.addVideoToFavoriteFolders(uid, video.aid, uniqueFolderIds);
+    } catch (error) {
+      // 11201 表示至少有一个目标已收藏；仍以状态回读判断每个目标。
+      writeError = error;
+    }
+
+    let folderList;
+    try {
+      await assertCurrentAccount(uid);
+      folderList = await biliApi.getFavoriteFolders(uid, undefined, video.aid);
+      await assertCurrentAccount(uid);
+    } catch (error) {
+      this.invalidateFolderList(uid);
+      throw new FavoriteStateReadbackError(
+        '收藏请求已发送，但 B 站状态回读失败；未自动重发，请刷新收藏夹确认。',
+        error,
+      );
+    }
+
+    const remoteFolders = folderList.list || [];
+    cacheFolderSnapshot(uid, remoteFolders);
+    const confirmedFolderIds = uniqueFolderIds.filter(folderId =>
+      remoteFolders.some(
+        folder =>
+          folder.id === folderId &&
+          String(folder.mid) === uid &&
+          folder.fav_state === 1,
+      ),
+    );
+    const unconfirmedFolderIds = uniqueFolderIds.filter(
+      folderId => !confirmedFolderIds.includes(folderId),
+    );
+
+    if (confirmedFolderIds.length > 0) {
+      const indexedVideo: FavoriteVideo = {
+        ...video,
+        page: 1,
+        favTime: Math.floor(Date.now() / 1000),
+        upper: {mid: video.authorId, name: video.author},
+        attr: 0,
+      };
+      try {
+        for (const folderId of confirmedFolderIds) {
+          this.invalidateFolder(folderId);
+          await upsertVideosBatch(folderId.toString(), [indexedVideo]);
+        }
+        await loadGlobalIndexCache();
+      } catch (error) {
+        throw new Error(
+          `B 站已确认收藏，但本地索引更新失败：${error instanceof Error ? error.message : '未知错误'}`,
+        );
+      }
+    }
+
+    return {
+      confirmedFolderIds,
+      unconfirmedFolderIds,
+      writeErrorMessage:
+        writeError instanceof BiliApiError
+          ? writeError.message
+          : writeError instanceof Error
+            ? writeError.message
+            : writeError
+              ? '收藏写入未返回成功'
+              : null,
+    };
   },
 
   /**

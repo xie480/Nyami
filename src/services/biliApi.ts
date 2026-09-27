@@ -1,10 +1,12 @@
-﻿import {biliGet} from '../core/http';
+﻿import {biliGet, biliPost} from '../core/http';
 import {encWbi, getWbiKeys} from '../core/wbi';
+import {cookieService} from './cookieService';
 import type {
   BiliFolder,
   BiliCollectedPlaylistList,
   BiliSeasonArchivesPage,
   BiliFavoriteVideoMedia,
+  BiliVideoSearchPage,
   BiliVideoInfo,
   BiliPlayUrlData,
 } from '../types/bili';
@@ -20,17 +22,130 @@ interface FavoriteListResp {
   has_more: boolean;
 }
 
+function encodeForm(values: Record<string, string | number>) {
+  return Object.entries(values)
+    .map(([key, value]) =>
+      `${encodeURIComponent(key)}=${encodeURIComponent(String(value)).replace(/%20/g, '+')}`,
+    )
+    .join('&');
+}
+
+async function getWriteCredentials(expectedUid: string) {
+  if (!expectedUid) {
+    throw new Error('当前账号未登录，无法修改 B 站收藏');
+  }
+  const cookie = await cookieService.get();
+  if (
+    !cookieService.extractSessdata(cookie) ||
+    cookieService.extractUid(cookie) !== expectedUid
+  ) {
+    throw new Error('B 站登录账号已变化，请刷新页面后重试');
+  }
+  const csrf = cookieService.extractCsrf(cookie);
+  if (!csrf) {
+    throw new Error('登录 Cookie 缺少 bili_jct，请重新登录后重试');
+  }
+  return {cookie, csrf};
+}
+
 export const biliApi = {
   /** 获取用户全部收藏夹（后台静默请求，鉴权失败时不唤起 Webview 登录弹窗） */
-  getFavoriteFolders(upMid: string, signal?: AbortSignal) {
+  getFavoriteFolders(upMid: string, signal?: AbortSignal, rid?: number) {
     if (!upMid) {
       return Promise.reject(new Error('upMid 不能为空'));
     }
+    const params: Record<string, string | number> = {up_mid: upMid};
+    if (rid !== undefined) {
+      params.type = 2;
+      params.rid = rid;
+    }
     return biliGet<FolderListResp>('/x/v3/fav/folder/created/list-all', {
-      params: {up_mid: upMid},
+      params,
       signal,
       silent: true,
     });
+  },
+
+  /** 写操作前复核 Cookie 归属与 CSRF 是否仍属于当前账号。 */
+  async assertWriteAccount(expectedUid: string) {
+    await getWriteCredentials(expectedUid);
+  },
+
+  /** B 站网页端视频搜索；每页 20 条，响应数据包含标题与 tag。 */
+  async searchVideos(keyword: string, page = 1, signal?: AbortSignal) {
+    const normalizedKeyword = keyword.trim();
+    if (!normalizedKeyword) {
+      throw new Error('搜索关键词不能为空');
+    }
+    if (!Number.isInteger(page) || page < 1) {
+      throw new Error('搜索页码无效');
+    }
+    const {imgKey, subKey} = await getWbiKeys();
+    const signedQuery = encWbi(
+      {
+        search_type: 'video',
+        keyword: normalizedKeyword,
+        order: 'totalrank',
+        duration: 0,
+        tids: 0,
+        page,
+      },
+      imgKey,
+      subKey,
+    );
+    return biliGet<BiliVideoSearchPage>(
+      `/x/web-interface/wbi/search/type?${signedQuery}`,
+      {signal, silent: true},
+      1,
+    );
+  },
+
+  /** 新建自有收藏夹；明确绑定当前账号 Cookie 与 CSRF。 */
+  async createFavoriteFolder(
+    expectedUid: string,
+    title: string,
+    privacy: 0 | 1,
+  ) {
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      throw new Error('收藏夹名称不能为空');
+    }
+    const {cookie, csrf} = await getWriteCredentials(expectedUid);
+    return biliPost<BiliFolder>(
+      '/x/v3/fav/folder/add',
+      encodeForm({title: normalizedTitle, intro: '', privacy, csrf}),
+      {headers: {Cookie: cookie}},
+    );
+  },
+
+  /** 将单个视频写入一个或多个自有收藏夹。 */
+  async addVideoToFavoriteFolders(
+    expectedUid: string,
+    aid: number,
+    folderIds: number[],
+  ) {
+    if (!Number.isSafeInteger(aid) || aid <= 0) {
+      throw new Error('视频 AID 无效，无法收藏');
+    }
+    const uniqueFolderIds = [...new Set(folderIds)];
+    if (
+      uniqueFolderIds.length === 0 ||
+      uniqueFolderIds.some(id => !Number.isSafeInteger(id) || id <= 0)
+    ) {
+      throw new Error('请选择有效的自有收藏夹');
+    }
+    const {cookie, csrf} = await getWriteCredentials(expectedUid);
+    return biliPost<unknown>(
+      '/x/v3/fav/resource/deal',
+      encodeForm({
+        rid: aid,
+        type: 2,
+        add_media_ids: uniqueFolderIds.join(','),
+        del_media_ids: '',
+        csrf,
+      }),
+      {headers: {Cookie: cookie}},
+    );
   },
 
   /** 获取当前账号收藏的他人收藏夹及视频合集目录（B 站网页端接口）。 */
