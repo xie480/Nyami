@@ -22,7 +22,7 @@ export const BILIBILI_AUTH_TIMING = {
   qrLifetimeMs: 180000,
   qrPollIntervalMs: 2000,
   cookieWaitIntervalMs: 250,
-  cookieWaitAttempts: 5,
+  cookieWaitAttempts: 12,
   refreshTokenCaptureWaitMs: 900,
 } as const;
 

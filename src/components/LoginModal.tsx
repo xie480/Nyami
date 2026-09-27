@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Modal,
   Platform,
+  ScrollView,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -54,6 +55,8 @@ type RefreshResultMessage = {
   taskId?: string;
 };
 
+const HTTPS_URL_HOST_PATTERN = /^https:\/\/([a-z0-9.-]+)(?::443)?(?:[/?#]|$)/i;
+
 const REFRESH_TOKEN_CAPTURE_SCRIPT = `
 (function () {
   try {
@@ -74,26 +77,41 @@ const REFRESH_TOKEN_CAPTURE_SCRIPT = `
 })();
 `;
 
+/** 只解析标准 HTTPS 主机，避免将外站地址或非标准端口视为 B 站页面。 */
+function getHttpsUrlHost(value: string): string | null {
+  const match = HTTPS_URL_HOST_PATTERN.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+
+  const host = match[1].toLowerCase();
+  const labels = host.split('.');
+  if (
+    labels.some(
+      label =>
+        !label ||
+        label.length > 63 ||
+        !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
+    )
+  ) {
+    return null;
+  }
+  return host;
+}
+
 /** 判断跳转是否仍处于允许的 B 站网页域名，防止桥接凭证进入外站。 */
 function isTrustedBiliUrl(value: string): boolean {
-  try {
-    const host = new URL(value).hostname.toLowerCase();
-    return BILIBILI_AUTH_HOSTS.some(
-      root => host === root || host.endsWith(`.${root}`),
-    );
-  } catch {
-    return false;
-  }
+  const host = getHttpsUrlHost(value);
+  return (
+    !!host &&
+    BILIBILI_AUTH_HOSTS.some(root => host === root || host.endsWith(`.${root}`))
+  );
 }
 
 /** 判断当前页面是否位于承载续期脚本的 B 站主站 origin。 */
 function isMainBiliUrl(value: string): boolean {
-  try {
-    const host = new URL(value).hostname.toLowerCase();
-    return BILIBILI_MAIN_HOSTS.some(mainHost => mainHost === host);
-  } catch {
-    return false;
-  }
+  const host = getHttpsUrlHost(value);
+  return !!host && BILIBILI_MAIN_HOSTS.some(mainHost => mainHost === host);
 }
 
 /** 将 CookieManager 返回的 Cookie map 转为请求头格式。 */
@@ -143,6 +161,9 @@ async function readBilibiliCookie(): Promise<string> {
 /** 等待 WebView 的 Set-Cookie 到达原生 CookieManager 后再读取。 */
 async function waitForBilibiliCookie(): Promise<string> {
   let cookie = '';
+  if (Platform.OS === 'android') {
+    await CookieManager.flush();
+  }
   for (
     let attempt = 0;
     attempt < BILIBILI_AUTH_TIMING.cookieWaitAttempts;
@@ -320,6 +341,10 @@ export const LoginModal = () => {
   const [qrBusy, setQrBusy] = useState(false);
   const [qrGeneration, setQrGeneration] = useState(0);
   const [loginError, setLoginError] = useState('');
+  const [loginChecking, setLoginChecking] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordReloadKey, setPasswordReloadKey] = useState(0);
   const [refreshStatus, setRefreshStatus] =
     useState('正在安全续期 B 站登录状态…');
 
@@ -330,6 +355,9 @@ export const LoginModal = () => {
       setWebViewUri(null);
       setQrUrl('');
       setLoginError('');
+      setLoginChecking(false);
+      setPasswordLoading(false);
+      setPasswordError('');
       refreshTokenRef.current = null;
     }
   }, [loginModalVisible]);
@@ -392,7 +420,12 @@ export const LoginModal = () => {
           return;
         }
         if (!isTrustedBiliUrl(qr.url)) {
-          throw new Error('B 站返回了不受信任的二维码地址');
+          const qrHost = getHttpsUrlHost(qr.url);
+          throw new Error(
+            qrHost
+              ? `B 站返回了不受信任的二维码地址（${qrHost}）`
+              : 'B 站返回的二维码地址格式无效',
+          );
         }
         setQrUrl(qr.url);
         const expiresAt = Date.now() + BILIBILI_AUTH_TIMING.qrLifetimeMs;
@@ -416,6 +449,7 @@ export const LoginModal = () => {
             continue;
           }
           if (result.code === BILIBILI_QR_STATUS.expired) {
+            setQrUrl('');
             setQrStatus('二维码已过期，请重新生成');
             setQrBusy(false);
             return;
@@ -437,12 +471,18 @@ export const LoginModal = () => {
           throw new Error('B 站返回了未知扫码状态');
         }
         if (!cancelled) {
+          setQrUrl('');
           setQrStatus('二维码已过期，请重新生成');
           setQrBusy(false);
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setQrStatus('暂时无法获取扫码状态，请检查网络后重试');
+          setQrUrl('');
+          setQrStatus(
+            error instanceof Error
+              ? error.message
+              : '无法连接 B 站二维码服务，请检查网络后重试',
+          );
           setQrBusy(false);
         }
       }
@@ -514,6 +554,7 @@ export const LoginModal = () => {
       return;
     }
     completingLoginRef.current = true;
+    setLoginChecking(true);
     setQrStatus('正在验证 B 站登录状态…');
     setLoginError('');
     try {
@@ -559,6 +600,8 @@ export const LoginModal = () => {
         setQrStatus('请先在下方 B 站页面完成验证，再点击检查登录');
       }
       setLoginError(message);
+    } finally {
+      setLoginChecking(false);
     }
   };
 
@@ -678,6 +721,11 @@ export const LoginModal = () => {
       setWebViewPurpose(null);
       return;
     }
+    if (webViewPurpose === 'password') {
+      setPasswordLoading(false);
+      setPasswordError('无法连接 B 站登录页面，请检查网络后重试。');
+      return;
+    }
     if (webViewPurpose === 'qr-ticket') {
       completingLoginRef.current = false;
       setQrStatus('无法打开 B 站登录回调，请重新扫码');
@@ -685,6 +733,24 @@ export const LoginModal = () => {
       setWebViewUri(null);
       setWebViewPurpose(null);
     }
+  };
+
+  const handlePasswordHttpError = (statusCode: number) => {
+    setPasswordLoading(false);
+    setPasswordError(
+      `B 站登录页面暂时无法加载（HTTP ${statusCode}），请稍后重试。`,
+    );
+  };
+
+  const handlePasswordLoadEnd = (url: string) => {
+    setPasswordLoading(false);
+    handleLoadEnd(url);
+  };
+
+  const retryPasswordPage = () => {
+    setPasswordError('');
+    setPasswordLoading(true);
+    setPasswordReloadKey(value => value + 1);
   };
 
   const selectMode = (nextMode: LoginMode) => {
@@ -697,6 +763,12 @@ export const LoginModal = () => {
     setQrUrl('');
     setQrStatus('正在生成二维码…');
     setQrBusy(false);
+    setLoginChecking(false);
+    setPasswordLoading(nextMode === 'password');
+    setPasswordError('');
+    if (nextMode === 'password') {
+      setPasswordReloadKey(value => value + 1);
+    }
     completingLoginRef.current = false;
     refreshTokenRef.current = null;
   };
@@ -713,69 +785,172 @@ export const LoginModal = () => {
   const styles = StyleSheet.create({
     root: {flex: 1, backgroundColor: theme.colors.background},
     header: {
-      minHeight: 58,
+      minHeight: 82,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 20,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.colors.divider,
+      paddingHorizontal: 22,
+      paddingVertical: 12,
     },
-    title: {color: theme.colors.text, fontSize: 17, fontWeight: '600'},
-    close: {paddingVertical: 8, paddingHorizontal: 6},
-    closeText: {color: theme.colors.textSub, fontSize: 15},
+    headerIdentity: {flex: 1, flexDirection: 'row', alignItems: 'center'},
+    brandBadge: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 15,
+      backgroundColor: theme.colors.primary,
+    },
+    brandBadgeText: {color: '#FFFFFF', fontSize: 25, fontWeight: '800'},
+    headerCopy: {flex: 1, marginLeft: 12},
+    title: {color: theme.colors.text, fontSize: 19, fontWeight: '700'},
+    subtitle: {marginTop: 3, color: theme.colors.textSub, fontSize: 12},
+    close: {
+      width: 38,
+      height: 38,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 19,
+      backgroundColor: theme.colors.surface,
+    },
+    closeText: {color: theme.colors.textSub, fontSize: 24, lineHeight: 28},
     tabs: {
       flexDirection: 'row',
       padding: 4,
-      marginHorizontal: 20,
-      marginTop: 16,
-      borderRadius: 10,
+      marginHorizontal: 22,
+      marginTop: 8,
+      borderRadius: 14,
       backgroundColor: theme.colors.surface,
     },
     tab: {
       flex: 1,
-      minHeight: 40,
+      minHeight: 44,
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: 8,
+      borderRadius: 11,
     },
     activeTab: {backgroundColor: theme.colors.primary},
     tabText: {color: theme.colors.textSub, fontSize: 14, fontWeight: '500'},
     activeTabText: {color: '#FFFFFF'},
-    qrPanel: {alignItems: 'center', paddingHorizontal: 24, paddingTop: 30},
-    qrFrame: {
-      width: 252,
-      height: 252,
+    qrScroll: {flex: 1},
+    qrScrollContent: {
+      flexGrow: 1,
       alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: '#FFFFFF',
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: theme.colors.divider,
+      paddingHorizontal: 22,
+      paddingTop: 24,
+      paddingBottom: 30,
     },
-    qrHint: {
-      marginTop: 20,
+    qrPanel: {width: '100%', maxWidth: 440, alignItems: 'center'},
+    qrIntroTitle: {
       color: theme.colors.text,
-      fontSize: 15,
-      fontWeight: '500',
+      fontSize: 21,
+      fontWeight: '700',
       textAlign: 'center',
     },
-    help: {
-      marginTop: 8,
+    qrIntroHint: {
+      marginTop: 6,
       color: theme.colors.textSub,
       fontSize: 13,
       lineHeight: 20,
       textAlign: 'center',
     },
+    qrCard: {
+      width: '100%',
+      alignItems: 'center',
+      marginTop: 18,
+      paddingHorizontal: 18,
+      paddingVertical: 20,
+      borderRadius: 24,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.divider,
+      backgroundColor: theme.colors.surface,
+      shadowColor: '#000000',
+      shadowOpacity: 0.06,
+      shadowRadius: 14,
+      shadowOffset: {width: 0, height: 6},
+      elevation: 2,
+    },
+    qrFrame: {
+      width: 236,
+      height: 236,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#FFFFFF',
+      borderRadius: 19,
+    },
+    qrUnavailable: {alignItems: 'center', paddingHorizontal: 24},
+    qrUnavailableMark: {
+      color: theme.colors.error,
+      fontSize: 32,
+      fontWeight: '700',
+    },
+    qrUnavailableText: {
+      marginTop: 6,
+      color: theme.colors.textSub,
+      fontSize: 13,
+      textAlign: 'center',
+    },
+    qrHint: {
+      marginTop: 17,
+      color: theme.colors.text,
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    help: {
+      marginTop: 7,
+      color: theme.colors.textSub,
+      fontSize: 12,
+      lineHeight: 20,
+      textAlign: 'center',
+    },
     statusRow: {
-      minHeight: 36,
+      width: '100%',
+      minHeight: 38,
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'center',
       gap: 8,
+      marginTop: 10,
+    },
+    status: {
+      flexShrink: 1,
+      color: theme.colors.textSub,
+      fontSize: 12,
+      lineHeight: 18,
+      textAlign: 'center',
+    },
+    recoveryActions: {
+      width: '100%',
+      flexDirection: 'row',
+      gap: 10,
       marginTop: 12,
     },
-    status: {color: theme.colors.textSub, fontSize: 13},
-    action: {marginTop: 16, paddingVertical: 10, paddingHorizontal: 16},
+    recoveryButton: {
+      flex: 1,
+      minHeight: 42,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 8,
+      borderRadius: 12,
+      backgroundColor: theme.colors.background,
+    },
+    recoveryButtonPrimary: {backgroundColor: theme.colors.primary},
+    recoveryButtonText: {
+      color: theme.colors.primary,
+      fontSize: 13,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    recoveryButtonTextPrimary: {color: '#FFFFFF'},
+    action: {
+      alignSelf: 'center',
+      marginTop: 14,
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      backgroundColor: theme.colors.surface,
+    },
     actionText: {color: theme.colors.primary, fontSize: 14, fontWeight: '600'},
     error: {
       marginTop: 12,
@@ -783,8 +958,82 @@ export const LoginModal = () => {
       fontSize: 13,
       textAlign: 'center',
     },
-    webView: {flex: 1, marginTop: 12},
-    passwordHelp: {marginHorizontal: 22, marginTop: 12},
+    passwordHelp: {
+      marginHorizontal: 22,
+      marginTop: 12,
+      padding: 12,
+      borderRadius: 14,
+      backgroundColor: theme.colors.surface,
+    },
+    passwordHelpText: {
+      color: theme.colors.textSub,
+      fontSize: 12,
+      lineHeight: 19,
+    },
+    passwordCheckButton: {
+      alignSelf: 'flex-start',
+      minHeight: 42,
+      justifyContent: 'center',
+      marginTop: 10,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: theme.colors.primary,
+    },
+    passwordCheckContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+    },
+    passwordCheckText: {color: '#FFFFFF', fontSize: 13, fontWeight: '600'},
+    disabledAction: {opacity: 0.7},
+    webViewShell: {
+      flex: 1,
+      marginHorizontal: 12,
+      marginTop: 10,
+      marginBottom: 12,
+      overflow: 'hidden',
+      borderRadius: 18,
+      backgroundColor: theme.colors.background,
+    },
+    webView: {flex: 1, backgroundColor: theme.colors.background},
+    webViewOverlay: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+      backgroundColor: theme.colors.background,
+    },
+    webViewLoadingText: {
+      marginTop: 12,
+      color: theme.colors.textSub,
+      fontSize: 13,
+    },
+    webViewErrorTitle: {
+      color: theme.colors.text,
+      fontSize: 17,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    webViewErrorText: {
+      marginTop: 8,
+      color: theme.colors.textSub,
+      fontSize: 13,
+      lineHeight: 20,
+      textAlign: 'center',
+    },
+    webViewRetry: {
+      marginTop: 18,
+      paddingHorizontal: 18,
+      paddingVertical: 11,
+      borderRadius: 12,
+      backgroundColor: theme.colors.primary,
+    },
+    webViewRetryText: {color: '#FFFFFF', fontSize: 14, fontWeight: '600'},
     ticketPanel: {paddingHorizontal: 20, paddingVertical: 10},
     refreshPanel: {
       flex: 1,
@@ -830,17 +1079,26 @@ export const LoginModal = () => {
         ) : (
           <>
             <View style={styles.header}>
-              <Text style={styles.title}>登录哔哩哔哩</Text>
+              <View style={styles.headerIdentity}>
+                <View style={styles.brandBadge}>
+                  <Text style={styles.brandBadgeText}>B</Text>
+                </View>
+                <View style={styles.headerCopy}>
+                  <Text style={styles.title}>登录 BiliMusic</Text>
+                  <Text style={styles.subtitle}>安全连接哔哩哔哩账号</Text>
+                </View>
+              </View>
               <TouchableOpacity
                 onPress={closeLogin}
                 style={styles.close}
                 accessibilityRole="button">
-                <Text style={styles.closeText}>关闭</Text>
+                <Text style={styles.closeText}>×</Text>
               </TouchableOpacity>
             </View>
             <View style={styles.tabs}>
               <TouchableOpacity
                 onPress={() => selectMode('qr')}
+                disabled={loginChecking}
                 style={[styles.tab, mode === 'qr' && styles.activeTab]}
                 accessibilityRole="button">
                 <Text
@@ -853,6 +1111,7 @@ export const LoginModal = () => {
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => selectMode('password')}
+                disabled={loginChecking}
                 style={[styles.tab, mode === 'password' && styles.activeTab]}
                 accessibilityRole="button">
                 <Text
@@ -865,67 +1124,169 @@ export const LoginModal = () => {
               </TouchableOpacity>
             </View>
             {mode === 'qr' && !webViewUri ? (
-              <View style={styles.qrPanel}>
-                <View style={styles.qrFrame}>
-                  {qrUrl ? (
-                    <QRCode value={qrUrl} size={220} ecl="M" />
-                  ) : (
-                    <ActivityIndicator
-                      size="large"
-                      color={theme.colors.primary}
-                    />
-                  )}
+              <ScrollView
+                style={styles.qrScroll}
+                contentContainerStyle={styles.qrScrollContent}
+                keyboardShouldPersistTaps="handled">
+                <View style={styles.qrPanel}>
+                  <Text style={styles.qrIntroTitle}>扫码快速登录</Text>
+                  <Text style={styles.qrIntroHint}>
+                    使用哔哩哔哩 App 扫描二维码并确认
+                  </Text>
+                  <View style={styles.qrCard}>
+                    <View style={styles.qrFrame}>
+                      {qrUrl ? (
+                        <QRCode value={qrUrl} size={204} ecl="M" />
+                      ) : qrBusy ? (
+                        <ActivityIndicator
+                          size="large"
+                          color={theme.colors.primary}
+                        />
+                      ) : (
+                        <View style={styles.qrUnavailable}>
+                          <Text style={styles.qrUnavailableMark}>!</Text>
+                          <Text style={styles.qrUnavailableText}>
+                            暂时没有可用的二维码
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.qrHint}>
+                      请用另一台已登录 B 站的设备扫码
+                    </Text>
+                    <Text style={styles.help}>
+                      登录状态会安全保存在本机。若 B
+                      站要求手机号验证，请按页面提示完成。
+                    </Text>
+                    <View style={styles.statusRow}>
+                      {qrBusy && (
+                        <ActivityIndicator
+                          size="small"
+                          color={theme.colors.primary}
+                        />
+                      )}
+                      <Text style={styles.status}>{qrStatus}</Text>
+                    </View>
+                    {!qrBusy &&
+                      (qrStatus.includes('过期') ||
+                        (!qrUrl && qrStatus !== '正在生成二维码…') ||
+                        !!loginError) && (
+                        <View style={styles.recoveryActions}>
+                          <TouchableOpacity
+                            onPress={() => setQrGeneration(value => value + 1)}
+                            style={styles.recoveryButton}
+                            accessibilityRole="button">
+                            <Text style={styles.recoveryButtonText}>
+                              重新生成
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => selectMode('password')}
+                            style={[
+                              styles.recoveryButton,
+                              styles.recoveryButtonPrimary,
+                            ]}
+                            accessibilityRole="button">
+                            <Text
+                              style={[
+                                styles.recoveryButtonText,
+                                styles.recoveryButtonTextPrimary,
+                              ]}>
+                              打开 B 站网页登录
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    {!!loginError && (
+                      <Text style={styles.error}>{loginError}</Text>
+                    )}
+                  </View>
                 </View>
-                <Text style={styles.qrHint}>
-                  使用另一台已登录 B 站的设备扫码
-                </Text>
-                <Text style={styles.help}>
-                  扫码确认后，本应用会安全保存登录状态。若 B
-                  站要求手机号验证，仍需按 B 站页面完成验证。
-                </Text>
-                <View style={styles.statusRow}>
-                  {qrBusy && (
-                    <ActivityIndicator
-                      size="small"
-                      color={theme.colors.primary}
-                    />
-                  )}
-                  <Text style={styles.status}>{qrStatus}</Text>
-                </View>
-                {(qrStatus.includes('过期') ||
-                  qrStatus.includes('无法') ||
-                  !!loginError) && (
-                  <TouchableOpacity
-                    onPress={() => setQrGeneration(value => value + 1)}
-                    style={styles.action}
-                    accessibilityRole="button">
-                    <Text style={styles.actionText}>重新生成二维码</Text>
-                  </TouchableOpacity>
-                )}
-                {!!loginError && <Text style={styles.error}>{loginError}</Text>}
-              </View>
+              </ScrollView>
             ) : mode === 'password' && webViewUri ? (
               <>
-                <Text style={[styles.help, styles.passwordHelp]}>
-                  请在 B
-                  站页面完成登录和必要的安全验证；若收不到短信，可返回尝试扫码登录。
-                </Text>
-                <WebView
-                  ref={webViewRef}
-                  source={{uri: webViewUri}}
-                  onLoadEnd={event => handleLoadEnd(event.nativeEvent.url)}
-                  onNavigationStateChange={() => {}}
-                  onMessage={handleMessage}
-                  onError={handleWebViewError}
-                  onShouldStartLoadWithRequest={request =>
-                    isTrustedBiliUrl(request.url)
-                  }
-                  injectedJavaScript={REFRESH_TOKEN_CAPTURE_SCRIPT}
-                  sharedCookiesEnabled
-                  thirdPartyCookiesEnabled
-                  style={styles.webView}
-                />
-                {!!loginError && <Text style={styles.error}>{loginError}</Text>}
+                <View style={styles.passwordHelp}>
+                  <Text style={styles.passwordHelpText}>
+                    请在 B
+                    站官方页面完成扫码、账密或人机验证。若验证完成后未自动登录，点击下方确认；应用不会读取密码或验证码。
+                  </Text>
+                  <TouchableOpacity
+                    onPress={completeWebLogin}
+                    disabled={loginChecking}
+                    style={[
+                      styles.passwordCheckButton,
+                      loginChecking && styles.disabledAction,
+                    ]}
+                    accessibilityRole="button">
+                    <View style={styles.passwordCheckContent}>
+                      {loginChecking && (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      )}
+                      <Text style={styles.passwordCheckText}>
+                        {loginChecking
+                          ? '正在确认登录…'
+                          : '我已完成验证，检查登录'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  {!!loginError && (
+                    <Text style={styles.error}>{loginError}</Text>
+                  )}
+                </View>
+                <View style={styles.webViewShell}>
+                  <WebView
+                    key={passwordReloadKey}
+                    ref={webViewRef}
+                    source={{uri: webViewUri}}
+                    userAgent={config.userAgent}
+                    onLoadStart={() => {
+                      setPasswordLoading(true);
+                      setPasswordError('');
+                    }}
+                    onLoadEnd={event =>
+                      handlePasswordLoadEnd(event.nativeEvent.url)
+                    }
+                    onHttpError={event =>
+                      handlePasswordHttpError(event.nativeEvent.statusCode)
+                    }
+                    onMessage={handleMessage}
+                    onError={handleWebViewError}
+                    onShouldStartLoadWithRequest={request =>
+                      isTrustedBiliUrl(request.url)
+                    }
+                    injectedJavaScript={REFRESH_TOKEN_CAPTURE_SCRIPT}
+                    sharedCookiesEnabled
+                    thirdPartyCookiesEnabled
+                    style={styles.webView}
+                  />
+                  {passwordLoading && !passwordError && (
+                    <View pointerEvents="none" style={styles.webViewOverlay}>
+                      <ActivityIndicator
+                        size="large"
+                        color={theme.colors.primary}
+                      />
+                      <Text style={styles.webViewLoadingText}>
+                        正在安全加载 B 站登录页面…
+                      </Text>
+                    </View>
+                  )}
+                  {!!passwordError && (
+                    <View style={styles.webViewOverlay}>
+                      <Text style={styles.webViewErrorTitle}>
+                        暂时无法显示登录页面
+                      </Text>
+                      <Text style={styles.webViewErrorText}>
+                        {passwordError}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={retryPasswordPage}
+                        style={styles.webViewRetry}
+                        accessibilityRole="button">
+                        <Text style={styles.webViewRetryText}>重新加载</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
               </>
             ) : webViewPurpose === 'qr-ticket' ? (
               <>
@@ -936,11 +1297,22 @@ export const LoginModal = () => {
                   </Text>
                   <TouchableOpacity
                     onPress={completeWebLogin}
+                    disabled={loginChecking}
                     style={styles.action}
                     accessibilityRole="button">
-                    <Text style={styles.actionText}>
-                      我已完成验证，检查登录
-                    </Text>
+                    <View style={styles.passwordCheckContent}>
+                      {loginChecking && (
+                        <ActivityIndicator
+                          size="small"
+                          color={theme.colors.primary}
+                        />
+                      )}
+                      <Text style={styles.actionText}>
+                        {loginChecking
+                          ? '正在确认登录…'
+                          : '我已完成验证，检查登录'}
+                      </Text>
+                    </View>
                   </TouchableOpacity>
                   {!!loginError && (
                     <Text style={styles.error}>{loginError}</Text>

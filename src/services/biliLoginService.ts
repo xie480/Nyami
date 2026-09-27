@@ -26,6 +26,29 @@ type BiliEnvelope<T> = {
   data: T;
 };
 
+/** 将二维码请求异常映射为可展示的提示，不携带响应体或请求参数。 */
+async function requestQrApi<T>(
+  action: string,
+  request: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await request();
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+        throw new Error(`连接 B 站${action}服务超时，请检查网络后重试`);
+      }
+      if (!error.response) {
+        throw new Error(`无法连接 B 站${action}服务，请检查网络后重试`);
+      }
+      throw new Error(
+        `B 站${action}服务暂不可用（HTTP ${error.response.status}），请稍后重试`,
+      );
+    }
+    throw error;
+  }
+}
+
 export type QrCodeData = {
   url: string;
   qrcode_key: string;
@@ -46,9 +69,11 @@ export type CookieRefreshInfo = {
 export const biliLoginService = {
   /** 申请网页登录二维码；异常时返回不含原始响应内容的可读错误。 */
   async generateQrCode(): Promise<QrCodeData> {
-    const response = await axios.get<BiliEnvelope<QrCodeData>>(
-      BILIBILI_AUTH_ENDPOINTS.qrGenerate,
-      {headers: LOGIN_HEADERS, timeout: 15000},
+    const response = await requestQrApi('二维码生成', () =>
+      axios.get<BiliEnvelope<QrCodeData>>(BILIBILI_AUTH_ENDPOINTS.qrGenerate, {
+        headers: LOGIN_HEADERS,
+        timeout: 15000,
+      }),
     );
     if (
       response.data.code !== BILIBILI_API_STATUS.success ||
@@ -62,16 +87,15 @@ export const biliLoginService = {
 
   /** 查询二维码状态；二维码密钥仅通过本地请求参数传递。 */
   async pollQrCode(qrcodeKey: string): Promise<QrPollData> {
-    const response = await axios.get<BiliEnvelope<QrPollData>>(
-      BILIBILI_AUTH_ENDPOINTS.qrPoll,
-      {
+    const response = await requestQrApi('扫码状态查询', () =>
+      axios.get<BiliEnvelope<QrPollData>>(BILIBILI_AUTH_ENDPOINTS.qrPoll, {
         params: {
           [BILIBILI_QR_QUERY_PARAMETER.key]: qrcodeKey,
           [BILIBILI_QR_QUERY_PARAMETER.source]: BILIBILI_QR_REQUEST_SOURCE,
         },
         headers: LOGIN_HEADERS,
         timeout: 15000,
-      },
+      }),
     );
     if (!response.data.data) {
       throw new Error('B 站暂时无法查询扫码状态');
