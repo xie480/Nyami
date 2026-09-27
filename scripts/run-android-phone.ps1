@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$DeviceId
 )
@@ -36,8 +36,18 @@ $env:ANDROID_HOME = $sdkRoot
 $env:ANDROID_SDK_ROOT = $sdkRoot
 $env:PATH = "$(Join-Path $sdkRoot 'platform-tools');$env:PATH"
 
-$deviceLines = @(& $adb devices 2>&1)
-if ($LASTEXITCODE -ne 0) {
+$previousErrorActionPreference = $ErrorActionPreference
+try {
+    # Windows PowerShell 5.1 treats native stderr as an error record; adb writes
+    # normal daemon startup messages there, so rely on its exit code instead.
+    $ErrorActionPreference = 'Continue'
+    $deviceLines = @(& $adb devices 2>&1)
+    $adbDevicesExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
+
+if ($adbDevicesExitCode -ne 0) {
     throw "adb devices 执行失败：$($deviceLines -join [Environment]::NewLine)"
 }
 
@@ -78,18 +88,33 @@ if ($DeviceId) {
 }
 
 Write-Host "使用设备：$($selectedDevice.Id)"
-& $adb -s $selectedDevice.Id reverse tcp:8081 tcp:8081
-if ($LASTEXITCODE -ne 0) {
+$previousErrorActionPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'Continue'
+    & $adb -s $selectedDevice.Id reverse tcp:8081 tcp:8081
+    $adbReverseExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
+
+if ($adbReverseExitCode -ne 0) {
     throw 'adb reverse 失败。请确认手机仍在线且 USB 调试已授权。'
 }
 
 Write-Host '正在构建并安装调试版；React Native CLI 会启动 Metro。'
 Push-Location $repoRoot
 try {
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & $reactNativeCli run-android --deviceId $selectedDevice.Id
-    if ($LASTEXITCODE -ne 0) {
-        throw "Android 构建或安装失败，退出码：$LASTEXITCODE"
+    $runAndroidExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorActionPreference
+    if ($runAndroidExitCode -ne 0) {
+        throw "Android 构建或安装失败，退出码：$runAndroidExitCode"
     }
 } finally {
+    if ($null -ne $previousErrorActionPreference) {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     Pop-Location
 }
