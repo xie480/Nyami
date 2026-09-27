@@ -12,6 +12,7 @@ import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useFocusEffect} from '@react-navigation/native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {BottomNavigationBar} from '../components/BottomNavigationBar';
 import {Button} from '../components/Button';
 import {
   favoriteService,
@@ -31,6 +32,8 @@ import {
   resolveCurrentTrack,
 } from '../services/trackPlayer';
 import {useAuthStore} from '../store/authStore';
+import {useSettingsStore} from '../store/settingsStore';
+import {useImportedPlaylistStore} from '../store/importedPlaylistStore';
 import {storage} from '../core/storage';
 import {usePlayerStore} from '../store/playerStore';
 import {useProgressStore} from '../store/progressStore';
@@ -53,6 +56,8 @@ const EMPTY_PROGRESS: TagBackfillProgress = {
   paused: false,
 };
 
+const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
+
 /**
  * 展示当前本地收藏视频的 tag 画像，并按兴趣 tag 搜索音乐视频。
  * 画像只在设备本地计算，视频 tag 快照复用收藏账号切换时的数据库清理生命周期。
@@ -61,6 +66,10 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const uid = useAuthStore(state => state.userId);
+  const hiddenFolderIds = useSettingsStore(state => state.hiddenFolderIds);
+  const visibleSourceKeys = useImportedPlaylistStore(state =>
+    uid ? state.visibleSourceKeysByUid[uid] ?? EMPTY_VISIBLE_SOURCE_KEYS : EMPTY_VISIBLE_SOURCE_KEYS,
+  );
   const setQueue = usePlayerStore(state => state.setQueue);
   const [favorites, setFavorites] = useState<FavoriteVideo[]>([]);
   const [profile, setProfile] = useState<TagProfile | null>(null);
@@ -116,7 +125,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       ) {
         return;
       }
-      const localFavorites = favoriteService.getGlobalIndex();
+      const localFavorites = favoriteService.getGlobalIndex(hiddenFolderIds, visibleSourceKeys);
       setFavorites(localFavorites);
       const {profile: cachedProfile} = await loadTagProfile(localFavorites);
       if (
@@ -142,7 +151,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         setStage(current => (current === 'search' ? 'idle' : current));
       }
     }
-  }, [uid]);
+  }, [uid, hiddenFolderIds, visibleSourceKeys]);
 
   useFocusEffect(
     useCallback(() => {
@@ -302,6 +311,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         </View>
       ) : (
         <ScrollView
+          style={{flex: 1}}
           contentContainerStyle={{
             paddingHorizontal: t.spacing.lg,
             paddingBottom: insets.bottom + t.spacing.xl,
@@ -594,6 +604,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
           )}
         </ScrollView>
       )}
+      <BottomNavigationBar navigation={navigation} activeTab="profile" />
     </View>
   );
 };

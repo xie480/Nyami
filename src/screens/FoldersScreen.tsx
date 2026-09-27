@@ -25,6 +25,7 @@ import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
+import { BottomNavigationBar } from '../components/BottomNavigationBar';
 import { Button } from '../components/Button';
 import { favoriteService, loadGlobalIndexCache } from '../services/favoriteService';
 import { biliApi } from '../services/biliApi';
@@ -144,7 +145,7 @@ export const FoldersScreen = ({ navigation }: any) => {
       ]
     : null;
 
-  const globalIndex = favoriteService.getGlobalIndex(hiddenFolderIds);
+  const globalIndex = favoriteService.getGlobalIndex(hiddenFolderIds, visibleSourceKeys);
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const isOnlineSearch = searchMode === 'online';
   const isGlobalSearch = !isOnlineSearch && normalizedSearchQuery.length > 0;
@@ -393,7 +394,7 @@ export const FoldersScreen = ({ navigation }: any) => {
   });
 
   const handleRandomPlayAll = async () => {
-    const shuffled = await favoriteService.getRandomVideos(undefined, 100, hiddenFolderIds);
+    const shuffled = await favoriteService.getRandomVideos(undefined, 100, hiddenFolderIds, visibleSourceKeys);
     if (shuffled.length === 0) {
       if (Platform.OS === 'android') {
         ToastAndroid.show(
@@ -512,21 +513,6 @@ export const FoldersScreen = ({ navigation }: any) => {
             }}
           />
         </View>
-        <IconButton
-          name="cog-outline"
-          size={24}
-          color={t.colors.text}
-          style={{ marginLeft: t.spacing.md }}
-          onPress={() => navigation.navigate('Settings')}
-        />
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="打开收藏标签推荐"
-          onPress={() => navigation.navigate('TagRecommendations')}
-          style={{padding: 6, marginLeft: t.spacing.xs}}
-        >
-          <Icon name="tag-heart-outline" size={24} color={t.colors.primary} />
-        </TouchableOpacity>
       </View>
 
       {isOnlineSearch && (
@@ -576,6 +562,7 @@ export const FoldersScreen = ({ navigation }: any) => {
           <Empty title="搜索 B 站视频" hint="输入视频名称或 tag，再点击搜索按钮" />
         ) : (
           <FlatList
+            style={{flex: 1}}
             contentContainerStyle={s.list}
             showsVerticalScrollIndicator={false}
             data={onlineResults}
@@ -714,6 +701,7 @@ export const FoldersScreen = ({ navigation }: any) => {
         />
       ) : isGlobalSearch ? (
         <FlatList
+          style={{flex: 1}}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
           data={filteredVideos}
@@ -827,6 +815,7 @@ export const FoldersScreen = ({ navigation }: any) => {
         />
       ) : (
         <FlatList
+          style={{flex: 1}}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
           data={playlistItems}
@@ -866,11 +855,19 @@ export const FoldersScreen = ({ navigation }: any) => {
                 >
                   全局随机播放
                 </Text>
+                <Text
+                  style={{
+                    marginLeft: t.spacing.xs,
+                    fontSize: t.fontSize.sm,
+                    color: t.colors.textHint,
+                  }}
+                >
+                  {globalIndex.length} 首
+                </Text>
               </TouchableOpacity>
 
               {/* 右侧按钮组 */}
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                {/* 设置按钮已在右上角保留，此处已移除 */}
                 <IconButton
                   name={isMultiSelectMode ? 'checkbox-marked' : 'checkbox-blank-outline'}
                   size={24}
@@ -1210,6 +1207,7 @@ export const FoldersScreen = ({ navigation }: any) => {
         </View>
       </Modal>
       <MiniPlayer />
+      <BottomNavigationBar navigation={navigation} activeTab="folders" />
     </View>
   );
 };

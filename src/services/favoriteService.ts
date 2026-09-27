@@ -6,6 +6,7 @@ import { BiliApiError } from '../core/errors';
 import type {
   FavoriteFolder,
   FavoriteVideo,
+  ImportedPlaylist,
   OnlineVideoSearchResult,
   PageResult,
 } from '../types/domain';
@@ -31,6 +32,8 @@ import { Mutex } from '../utils/mutex';
 import { AuthRequiredError } from '../core/errors';
 import LoggerService from './LoggerService';
 import type { VideoMeta } from '../db/models/VideoMeta';
+import { importedPlaylistService } from './importedPlaylistService';
+import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
 
 export interface SyncProgressEvent {
   completedTasks: number;
@@ -77,6 +80,7 @@ let visibleGlobalIndexCache: FavoriteVideo[] = [];
 const syncMutex = new Mutex();
 
 function mapVideoMetaToFavoriteVideo(v: VideoMeta): FavoriteVideo {
+  const isOwnedPlaylist = /^\d+$/.test(v.playlistId);
   return {
     bvid: v.videoId,
     title: v.title,
@@ -87,26 +91,32 @@ function mapVideoMetaToFavoriteVideo(v: VideoMeta): FavoriteVideo {
     favTime: v.favTime || 0,
     upper: { mid: 0, name: v.author || '' },
     attr: 0,
-    folderIds: [parseInt(v.playlistId, 10)],
+    folderIds: isOwnedPlaylist ? [Number(v.playlistId)] : undefined,
+    sourceKeys: isOwnedPlaylist ? undefined : [v.playlistId],
     parts: v.extraJson ? JSON.parse(v.extraJson) : undefined,
   };
 }
 
-function getVisibleGlobalIndex(hiddenFolderIds: number[] = []): FavoriteVideo[] {
-  if (hiddenFolderIds.length === 0) {
-    return globalIndexCache;
-  }
-
+function getVisibleGlobalIndex(
+  hiddenFolderIds: number[] = [],
+  visibleSourceKeys: string[] = [],
+): FavoriteVideo[] {
   const hiddenIds = Array.from(new Set(hiddenFolderIds)).sort((a, b) => a - b);
-  const cacheKey = hiddenIds.join(',');
+  const sourceKeys = Array.from(new Set(visibleSourceKeys)).sort();
+  const cacheKey = `folders:${hiddenIds.join(',')}|sources:${sourceKeys.join(',')}`;
   if (visibleGlobalIndexSource === globalIndexCache && visibleGlobalIndexKey === cacheKey) {
     return visibleGlobalIndexCache;
   }
 
   const hiddenIdSet = new Set(hiddenIds);
-  visibleGlobalIndexCache = globalIndexCache.filter(video =>
-    !video.folderIds?.length || video.folderIds.some(folderId => !hiddenIdSet.has(folderId)),
-  );
+  const visibleSourceKeySet = new Set(sourceKeys);
+  visibleGlobalIndexCache = globalIndexCache.filter(video => {
+    const hasOwnedSource = !!video.folderIds?.length;
+    const hasImportedSource = !!video.sourceKeys?.length;
+    if (!hasOwnedSource && !hasImportedSource) return true;
+    return !!video.folderIds?.some(folderId => !hiddenIdSet.has(folderId)) ||
+      !!video.sourceKeys?.some(sourceKey => visibleSourceKeySet.has(sourceKey));
+  });
   visibleGlobalIndexSource = globalIndexCache;
   visibleGlobalIndexKey = cacheKey;
   return visibleGlobalIndexCache;
@@ -147,12 +157,10 @@ export async function loadGlobalIndexCache(): Promise<void> {
     if (!uniqueVideosMap.has(v.videoId)) {
       uniqueVideosMap.set(v.videoId, mapVideoMetaToFavoriteVideo(v));
     } else {
-      // 合并 folderIds
       const existing = uniqueVideosMap.get(v.videoId)!;
-      const folderId = parseInt(v.playlistId, 10);
-      if (!existing.folderIds!.includes(folderId)) {
-        existing.folderIds!.push(folderId);
-      }
+      const playlistVideo = mapVideoMetaToFavoriteVideo(v);
+      existing.folderIds = Array.from(new Set([...(existing.folderIds ?? []), ...(playlistVideo.folderIds ?? [])]));
+      existing.sourceKeys = Array.from(new Set([...(existing.sourceKeys ?? []), ...(playlistVideo.sourceKeys ?? [])]));
     }
   }
   globalIndexCache = Array.from(uniqueVideosMap.values());
@@ -250,8 +258,12 @@ async function syncSingleFolder(
 
     const cached = updatedIndex[cachedIndex];
     const folderIds = [...new Set([...(cached.folderIds || []), ...(video.folderIds || [])])];
-    if (folderIds.length !== cached.folderIds?.length) {
-      updatedIndex[cachedIndex] = { ...cached, folderIds };
+    const sourceKeys = [...new Set([...(cached.sourceKeys || []), ...(video.sourceKeys || [])])];
+    if (
+      folderIds.length !== cached.folderIds?.length ||
+      sourceKeys.length !== cached.sourceKeys?.length
+    ) {
+      updatedIndex[cachedIndex] = { ...cached, folderIds, sourceKeys };
     }
   }
   globalIndexCache = updatedIndex;
@@ -471,21 +483,61 @@ export const favoriteService = {
     try {
       const allFolders = await this.getFolders(uid, true, signal);
       const folders = allFolders.filter(f => !hiddenFolderIds.includes(f.id));
-      if (folders.length === 0) {
+      const importedStore = useImportedPlaylistStore.getState();
+      const selectedSourceKeys = importedStore.visibleSourceKeysByUid[uid] ?? [];
+      let selectedImportedSources: ImportedPlaylist[] = [];
+      const failedPlaylists: string[] = [];
+      if (selectedSourceKeys.length > 0) {
+        const latestCatalog = await importedPlaylistService.getCollectedPlaylists(uid, true, signal);
+        if (!signal?.aborted) {
+          importedStore.setCatalog(uid, latestCatalog);
+        }
+        const selectedSourceKeySet = new Set(selectedSourceKeys);
+        selectedImportedSources = latestCatalog.filter(source => selectedSourceKeySet.has(source.sourceKey));
+        const resolvedSourceKeys = new Set(selectedImportedSources.map(source => source.sourceKey));
+        const unresolvedCount = selectedSourceKeys.filter(sourceKey => !resolvedSourceKeys.has(sourceKey)).length;
+        if (unresolvedCount > 0) {
+          failedPlaylists.push(
+            `有 ${unresolvedCount} 个已选外部来源已不在当前账号的目录中，请刷新主页播放列表偏好`,
+          );
+        }
+      }
+
+      type SyncTarget =
+        | { kind: 'owned'; playlistId: string; title: string; mediaCount: number; folder: FavoriteFolder }
+        | { kind: 'imported'; playlistId: string; title: string; mediaCount: number; source: ImportedPlaylist };
+      const syncTargets: SyncTarget[] = [
+        ...folders.map(folder => ({
+          kind: 'owned' as const,
+          playlistId: folder.id.toString(),
+          title: folder.title,
+          mediaCount: folder.mediaCount,
+          folder,
+        })),
+        ...selectedImportedSources.map(source => ({
+          kind: 'imported' as const,
+          playlistId: source.sourceKey,
+          title: source.title,
+          mediaCount: source.mediaCount,
+          source,
+        })),
+      ];
+      if (syncTargets.length === 0) {
         throw new Error(
-          allFolders.length === 0
-            ? '当前账号没有可同步的自有收藏夹。'
-            : '自有收藏夹当前均已在主页偏好中隐藏，请先显示至少一个收藏夹再同步。',
+          selectedSourceKeys.length > 0
+            ? '所选外部收藏夹或合集已不在当前账号的来源目录中，请刷新主页播放列表偏好后再同步。'
+            : allFolders.length === 0
+              ? '当前账号没有可同步的自有收藏夹或已选外部收藏夹/合集。'
+              : '当前没有已选且可见的播放列表，请在主页播放列表偏好中显示至少一个自有收藏夹或选择外部收藏夹/合集后再同步。',
         );
       }
 
       let completedTasks = 0;
-      let totalTasks = folders.length;
+      const totalTasks = syncTargets.length;
       let processedVideos = 0;
       let baseProcessedVideos = 0;
-      let totalVideos = folders.reduce((sum, f) => sum + f.mediaCount, 0);
+      const totalVideos = syncTargets.reduce((sum, target) => sum + target.mediaCount, 0);
       let skippedTasks = 0;
-      const failedFolders: string[] = [];
 
       const reportProgress = () => {
         if (onProgress) {
@@ -501,10 +553,10 @@ export const favoriteService = {
 
       reportProgress();
 
-      for (const folder of folders) {
+      for (const target of syncTargets) {
         if (signal?.aborted) break;
 
-        const playlistId = folder.id.toString();
+        const playlistId = target.playlistId;
         let localMeta = await getPlaylistMeta(playlistId);
 
         // 1. 判断是否需要同步
@@ -512,7 +564,7 @@ export const favoriteService = {
         if (force || !localMeta) {
           needSync = true;
         } else if (
-          localMeta.localSyncedCount < folder.mediaCount ||
+          localMeta.localSyncedCount < target.mediaCount ||
           localMeta.needResync ||
           localMeta.playlistSyncStatus === 'failed' ||
           localMeta.playlistSyncStatus === 'running' // 上次崩溃
@@ -523,7 +575,7 @@ export const favoriteService = {
         if (!needSync) {
           completedTasks++;
           skippedTasks++;
-          baseProcessedVideos += folder.mediaCount;
+          baseProcessedVideos += target.mediaCount;
           processedVideos = baseProcessedVideos;
           reportProgress();
           continue;
@@ -532,8 +584,8 @@ export const favoriteService = {
         // 2. 初始化或更新 Meta
         await upsertPlaylistMeta({
           playlistId,
-          title: folder.title,
-          remoteVideoCount: folder.mediaCount,
+          title: target.title,
+          remoteVideoCount: target.mediaCount,
           playlistSyncStatus: 'syncing',
           needResync: force ? true : (localMeta?.needResync || false),
         });
@@ -559,7 +611,9 @@ export const favoriteService = {
 
         try {
           while (hasMore && !isIncrementalDone && !signal?.aborted) {
-            const pageRes = await this.getVideos(folder.id, page, 20, force, signal);
+            const pageRes = target.kind === 'owned'
+              ? await this.getVideos(target.folder.id, page, 20, force, signal)
+              : await importedPlaylistService.getVideos(target.source, page, force, signal);
             
             if (pageRes.list.length === 0) {
               break;
@@ -624,19 +678,19 @@ export const favoriteService = {
             await markPlaylistSyncSuccess(playlistId);
           } else {
             await finishSyncJob(jobId, 'cancelled');
-            await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, playlistSyncStatus: 'idle' });
+            await upsertPlaylistMeta({ playlistId, remoteVideoCount: target.mediaCount, playlistSyncStatus: 'idle' });
           }
 
         } catch (err: any) {
           if (signal?.aborted) {
             await finishSyncJob(jobId, 'cancelled');
-            await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, playlistSyncStatus: 'idle' });
+            await upsertPlaylistMeta({ playlistId, remoteVideoCount: target.mediaCount, playlistSyncStatus: 'idle' });
           } else {
             const errorMessage = err instanceof Error ? err.message : String(err);
-            LoggerService.warn('favoriteService', 'syncPlaylist', `文件夹 ${folder.id} 同步异常:`, errorMessage);
+            LoggerService.warn('favoriteService', 'syncPlaylist', `播放列表 ${target.title} 同步异常:`, errorMessage);
             await finishSyncJob(jobId, 'failed', errorMessage);
-            await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, playlistSyncStatus: 'failed' });
-            failedFolders.push(`${folder.title || folder.id}：${errorMessage}`);
+            await upsertPlaylistMeta({ playlistId, remoteVideoCount: target.mediaCount, playlistSyncStatus: 'failed' });
+            failedPlaylists.push(`${target.title || target.playlistId}：${errorMessage}`);
             if (err instanceof AuthRequiredError) {
               throw err;
             }
@@ -645,16 +699,16 @@ export const favoriteService = {
 
         if (signal?.aborted) break;
         completedTasks++;
-        baseProcessedVideos += folder.mediaCount;
+        baseProcessedVideos += target.mediaCount;
         processedVideos = baseProcessedVideos;
         reportProgress();
       }
 
-      if (failedFolders.length > 0) {
-        const visibleFailures = failedFolders.slice(0, 3).join('；');
-        const remainingFailures = failedFolders.length - 3;
+      if (failedPlaylists.length > 0) {
+        const visibleFailures = failedPlaylists.slice(0, 3).join('；');
+        const remainingFailures = failedPlaylists.length - 3;
         throw new Error(
-          `有 ${failedFolders.length} 个收藏夹同步失败：${visibleFailures}` +
+          `有 ${failedPlaylists.length} 个播放列表同步失败：${visibleFailures}` +
           (remainingFailures > 0 ? `；另有 ${remainingFailures} 个失败` : ''),
         );
       }
@@ -671,8 +725,11 @@ export const favoriteService = {
   /**
    * 获取全局索引（同步返回）；隐藏的收藏夹不会贡献全局候选视频。
    */
-  getGlobalIndex(hiddenFolderIds: number[] = []): FavoriteVideo[] {
-    return getVisibleGlobalIndex(hiddenFolderIds);
+  getGlobalIndex(
+    hiddenFolderIds: number[] = [],
+    visibleSourceKeys: string[] = [],
+  ): FavoriteVideo[] {
+    return getVisibleGlobalIndex(hiddenFolderIds, visibleSourceKeys);
   },
 
   /**
@@ -700,12 +757,13 @@ export const favoriteService = {
     playlistId?: string,
     limit: number = 50,
     hiddenFolderIds: number[] = [],
+    visibleSourceKeys: string[] = [],
   ): Promise<FavoriteVideo[]> {
     if (!playlistId) {
       if (!globalIndexCacheLoaded) {
         await loadGlobalIndexCache();
       }
-      return sampleWithoutReplacement(getVisibleGlobalIndex(hiddenFolderIds), limit);
+      return sampleWithoutReplacement(getVisibleGlobalIndex(hiddenFolderIds, visibleSourceKeys), limit);
     }
 
     const records = await getRandomVideosBatch(playlistId, limit);

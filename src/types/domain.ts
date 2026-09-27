@@ -45,6 +45,8 @@ export interface FavoriteVideo {
   upper: { mid: number; name: string };
   attr: number;
   folderIds?: number[];
+  /** 该视频所属的他人收藏夹或订阅合集稳定来源标识。 */
+  sourceKeys?: string[];
   /** 分P 列表，仅在获取到视频详情后填充 */
   parts?: VideoPart[];
 }

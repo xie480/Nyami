@@ -22,7 +22,8 @@ import { biliApi } from '../services/biliApi';
 import { useUIStore } from '../store/uiStore';
 import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
+import { BottomNavigationBar } from '../components/BottomNavigationBar';
 import type { Quality } from '../types/domain';
 import ImageCropPicker from 'react-native-image-crop-picker';
 import RNFS from 'react-native-fs';
@@ -49,9 +50,10 @@ const THEME_OPTIONS: Array<{ key: ThemeMode; title: string }> = [
   { key: 'glass-dark', title: '磨砂玻璃（暗黑）' },
 ];
 
+const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
+
 export const SettingsScreen = ({ navigation }: any) => {
   const t = useTheme();
-  const insets = useSafeAreaInsets();
   const {
     quality, autoCacheOnWifi, wifiOnly, hiddenFolderIds,
     expandMultiPart, themeMode, customBackgroundImage, glassBlurAmount,
@@ -89,6 +91,9 @@ export const SettingsScreen = ({ navigation }: any) => {
   const loggedIn = useAuthStore((s) => s.loggedIn);
   const userId = useAuthStore((s) => s.userId);
   const userInfo = useAuthStore((s) => s.userInfo);
+  const visibleSourceKeys = useImportedPlaylistStore(s =>
+    userId ? s.visibleSourceKeysByUid[userId] ?? EMPTY_VISIBLE_SOURCE_KEYS : EMPTY_VISIBLE_SOURCE_KEYS,
+  );
   const isVip = useAuthStore((s) => s.isVip);
   const logout = useAuthStore((s) => s.logout);
   const setUserInfo = useAuthStore((s) => s.setUserInfo);
@@ -122,21 +127,21 @@ export const SettingsScreen = ({ navigation }: any) => {
     }, [resetSyncState])
   );
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     setCacheSize(audioCache.getTotalSize());
     setCacheCount(audioCache.getCount());
-  };
-
-  useEffect(() => {
-    refresh();
-    setGlobalIndexCount(favoriteService.getGlobalIndex().length);
   }, []);
 
   useEffect(() => {
+    refresh();
+    setGlobalIndexCount(favoriteService.getGlobalIndex(hiddenFolderIds, visibleSourceKeys).length);
+  }, [refresh, hiddenFolderIds, visibleSourceKeys]);
+
+  useEffect(() => {
     if (syncStatus === 'done') {
-      setGlobalIndexCount(favoriteService.getGlobalIndex().length);
+      setGlobalIndexCount(favoriteService.getGlobalIndex(hiddenFolderIds, visibleSourceKeys).length);
     }
-  }, [syncStatus]);
+  }, [syncStatus, hiddenFolderIds, visibleSourceKeys]);
 
   const handlePickBackground = useCallback(async () => {
     try {
@@ -245,7 +250,7 @@ export const SettingsScreen = ({ navigation }: any) => {
     <View style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title="设置" showBack noBorder />
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{flex: 1}} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
       <Text style={s.section}>账户</Text>
       <View style={[s.group, s.cookieBox]}>
         {loggedIn && userInfo ? (
@@ -548,6 +553,8 @@ export const SettingsScreen = ({ navigation }: any) => {
           />
         </View>
       </ScrollView>
+
+      <BottomNavigationBar navigation={navigation} activeTab="settings" />
 
       <Dialog
         visible={dialogConfig.visible}
