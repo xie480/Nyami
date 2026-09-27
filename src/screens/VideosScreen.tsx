@@ -23,7 +23,6 @@ import { Header } from '../components/Header';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
-import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
 import { loadQueue, insertNext, appendQueue as tpAppendQueue, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
@@ -638,7 +637,6 @@ export const VideosScreen = ({ route, navigation }: any) => {
           </View>
         </View>
       </Modal>
-      <MiniPlayer />
     </View>
   );
 };

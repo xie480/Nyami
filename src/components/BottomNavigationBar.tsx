@@ -7,7 +7,7 @@ import {MiniPlayer} from './MiniPlayer';
 import {useTheme} from '../theme';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-type ActiveTab = 'folders' | 'profile' | 'settings';
+type ActiveTab = 'folders' | 'profile' | 'settings' | null;
 
 interface BottomNavigationBarProps {
   navigation: any;
@@ -26,7 +26,7 @@ const NAV_ITEMS: Array<{
   {key: 'settings', title: '设置', icon: 'cog-outline', route: 'Settings'},
 ];
 
-/** 固定在页面内容底部的磨砂玻璃主导航；首页入口预留给后续首页功能。 */
+/** 应用级固定磨砂播放导航面板；播放器与导航共用同一块玻璃背景。 */
 export const BottomNavigationBar: React.FC<BottomNavigationBarProps> = ({
   navigation,
   activeTab,
@@ -63,7 +63,10 @@ export const BottomNavigationBar: React.FC<BottomNavigationBarProps> = ({
         <View>
           {hasActiveTrack && (
             <>
-              <MiniPlayer embedded />
+              <MiniPlayer
+                embedded
+                onOpenPlayer={() => navigation.navigate('Player')}
+              />
               <View
                 style={{
                   height: StyleSheet.hairlineWidth,

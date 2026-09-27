@@ -14,7 +14,6 @@ import {
   State,
 } from 'react-native-track-player';
 import {pausePlayback, resumePlayback, skipToNext} from '../services/trackPlayer';
-import {useNavigation} from '@react-navigation/native';
 import {IconButton} from './IconButton';
 import {GlassView} from './GlassView';
 import {useTheme} from '../theme';
@@ -25,16 +24,19 @@ import {useProgressStore} from '../store/progressStore';
 interface MiniPlayerProps {
   /** 在统一的底部播放/导航面板中使用时，MiniPlayer 不绘制自己的玻璃背景。 */
   embedded?: boolean;
+  onOpenPlayer: () => void;
 }
 
-export const MiniPlayer: React.FC<MiniPlayerProps> = ({embedded = false}) => {
+export const MiniPlayer: React.FC<MiniPlayerProps> = ({
+  embedded = false,
+  onOpenPlayer,
+}) => {
   const t = useTheme();
   const track = useActiveTrack();
   const playback = usePlaybackState();
   // 【性能修复】选择性子订阅，避免每次进度轮询触发重渲染
   const progressPosition = useProgressStore(s => s.position);
   const progressDuration = useProgressStore(s => s.duration);
-  const nav = useNavigation<any>();
   const isGlass = !!t.glass;
   const isResolving = usePlayerStore(s => s.isResolving);
 
@@ -113,14 +115,14 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({embedded = false}) => {
   const playerRow = (
     <View style={s.row}>
       <TouchableOpacity
-        onPress={() => nav.navigate('Player')}
+        onPress={onOpenPlayer}
         activeOpacity={0.7}>
         <FastImage source={{uri: track.artwork as string}} style={s.cover} />
       </TouchableOpacity>
       <TouchableOpacity
         style={s.info}
         activeOpacity={0.7}
-        onPress={() => nav.navigate('Player')}>
+        onPress={onOpenPlayer}>
         <Text style={s.title} numberOfLines={1}>
           {track.title}
         </Text>

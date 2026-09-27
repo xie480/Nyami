@@ -23,7 +23,6 @@ import { useUIStore } from '../store/uiStore';
 import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
 import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
-import { BottomNavigationBar } from '../components/BottomNavigationBar';
 import type { Quality } from '../types/domain';
 import ImageCropPicker from 'react-native-image-crop-picker';
 import RNFS from 'react-native-fs';
@@ -553,8 +552,6 @@ export const SettingsScreen = ({ navigation }: any) => {
           />
         </View>
       </ScrollView>
-
-      <BottomNavigationBar navigation={navigation} activeTab="settings" />
 
       <Dialog
         visible={dialogConfig.visible}

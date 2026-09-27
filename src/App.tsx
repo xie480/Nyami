@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { useAuthStore } from './store/authStore';
 import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
@@ -30,6 +30,7 @@ import { LoginModal } from './components/LoginModal';
 import { storage } from './core/storage';
 import { useSyncStore } from './store/syncStore';
 import { GlassBackground } from './components/GlassBackground';
+import { BottomNavigationBar } from './components/BottomNavigationBar';
 import { startProgressPolling, stopProgressPolling } from './store/progressStore';
 
 const Stack = createStackNavigator();
@@ -86,6 +87,25 @@ export default function App() {
   const toastRef = useRef<ToastNotificationRef>(null);
   const [isOnline, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
+  const [currentRouteName, setCurrentRouteName] = useState<string | null>(null);
+  const updateCurrentRouteName = useCallback(() => {
+    if (navigationRef.isReady()) {
+      setCurrentRouteName(navigationRef.getCurrentRoute()?.name ?? null);
+    }
+  }, [navigationRef]);
+  const isGlobalDockVisible =
+    currentRouteName !== null &&
+    !['Splash', 'Home', 'Player'].includes(currentRouteName);
+  const activeDockTab =
+    currentRouteName === 'Settings'
+      ? 'settings'
+      : currentRouteName === 'TagRecommendations'
+        ? 'profile'
+        : ['Folders', 'Videos', 'VisibleFolders', 'NoCacheFolders', 'SyncDetails'].includes(
+              currentRouteName ?? '',
+            )
+          ? 'folders'
+          : null;
   const loggedIn = useAuthStore((s) => s.loggedIn);
   const uid = useAuthStore((s) => s.userId);
   const initAuth = useAuthStore((s) => s.initAuth);
@@ -192,35 +212,46 @@ export default function App() {
         <ThemeProvider>
           <SafeAreaWrapper baseBgColor={baseBgColor}>
             <GlassBackground />
-            <NavigationContainer ref={navigationRef} theme={navTheme}>
-              <Stack.Navigator
-                initialRouteName="Splash"
-                screenOptions={{
-                  headerShown: false,
-                  cardStyle: { backgroundColor: 'transparent' },
-                  animation: isGlassMode ? 'none' : 'default',
-                  // 【性能优化】启用 freezeOnBlur：页面不可见时停止渲染，
-                  // 配合 react-native-screens 释放 GPU/CPU 资源
-                  freezeOnBlur: true,
-                }}
-              >
-                <Stack.Screen name="Splash" component={SplashScreenWithBg} />
-                <Stack.Screen name="Home" component={HomeScreenWithBg} />
-                <Stack.Screen name="Folders" component={FoldersScreenWithBg} />
-                <Stack.Screen name="Videos" component={VideosScreenWithBg} />
-                <Stack.Screen
-                  name="Player"
-                  component={PlayerScreenWithBg}
-                  options={{ presentation: 'modal' }}
+            <View style={{flex: 1}}>
+              <NavigationContainer
+                ref={navigationRef}
+                theme={navTheme}
+                onReady={updateCurrentRouteName}
+                onStateChange={updateCurrentRouteName}>
+                <Stack.Navigator
+                  initialRouteName="Splash"
+                  screenOptions={{
+                    headerShown: false,
+                    cardStyle: { backgroundColor: 'transparent' },
+                    animation: isGlassMode ? 'none' : 'default',
+                    // 【性能优化】启用 freezeOnBlur：页面不可见时停止渲染，
+                    // 配合 react-native-screens 释放 GPU/CPU 资源
+                    freezeOnBlur: true,
+                  }}>
+                  <Stack.Screen name="Splash" component={SplashScreenWithBg} />
+                  <Stack.Screen name="Home" component={HomeScreenWithBg} />
+                  <Stack.Screen name="Folders" component={FoldersScreenWithBg} />
+                  <Stack.Screen name="Videos" component={VideosScreenWithBg} />
+                  <Stack.Screen
+                    name="Player"
+                    component={PlayerScreenWithBg}
+                    options={{ presentation: 'modal' }}
+                  />
+                  <Stack.Screen name="Settings" component={SettingsScreenWithBg} />
+                  <Stack.Screen name="SoundLab" component={SoundLabScreenWithBg} />
+                  <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreenWithBg} />
+                  <Stack.Screen name="NoCacheFolders" component={NoCacheFoldersScreenWithBg} />
+                  <Stack.Screen name="SyncDetails" component={SyncDetailsScreenWithBg} />
+                  <Stack.Screen name="TagRecommendations" component={TagRecommendationsScreenWithBg} />
+                </Stack.Navigator>
+              </NavigationContainer>
+              {isGlobalDockVisible && (
+                <BottomNavigationBar
+                  navigation={navigationRef}
+                  activeTab={activeDockTab}
                 />
-                <Stack.Screen name="Settings" component={SettingsScreenWithBg} />
-                <Stack.Screen name="SoundLab" component={SoundLabScreenWithBg} />
-                <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreenWithBg} />
-                <Stack.Screen name="NoCacheFolders" component={NoCacheFoldersScreenWithBg} />
-                <Stack.Screen name="SyncDetails" component={SyncDetailsScreenWithBg} />
-                <Stack.Screen name="TagRecommendations" component={TagRecommendationsScreenWithBg} />
-              </Stack.Navigator>
-            </NavigationContainer>
+              )}
+            </View>
           </SafeAreaWrapper>
           {/* 全局顶部通知组件 - 覆盖在所有页面之上 */}
           <ToastNotification ref={toastRef} />

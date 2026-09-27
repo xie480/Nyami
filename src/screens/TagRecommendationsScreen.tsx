@@ -12,7 +12,6 @@ import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useFocusEffect, useIsFocused} from '@react-navigation/native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {BottomNavigationBar} from '../components/BottomNavigationBar';
 import {Button} from '../components/Button';
 import {
   favoriteService,
@@ -674,7 +673,6 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
           )}
         </ScrollView>
       )}
-      <BottomNavigationBar navigation={navigation} activeTab="profile" />
     </View>
   );
 };

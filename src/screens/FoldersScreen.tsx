@@ -24,7 +24,6 @@ import { IconButton } from '../components/IconButton';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
-import { BottomNavigationBar } from '../components/BottomNavigationBar';
 import { Button } from '../components/Button';
 import { favoriteService, loadGlobalIndexCache } from '../services/favoriteService';
 import { biliApi } from '../services/biliApi';
@@ -1205,7 +1204,6 @@ export const FoldersScreen = ({ navigation }: any) => {
           </View>
         </View>
       </Modal>
-      <BottomNavigationBar navigation={navigation} activeTab="folders" />
     </View>
   );
 };
