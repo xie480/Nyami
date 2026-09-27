@@ -508,6 +508,14 @@ export const FoldersScreen = ({ navigation }: any) => {
           style={{ marginLeft: t.spacing.md }}
           onPress={() => navigation.navigate('Settings')}
         />
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="打开收藏标签推荐"
+          onPress={() => navigation.navigate('TagRecommendations')}
+          style={{padding: 6, marginLeft: t.spacing.xs}}
+        >
+          <Icon name="tag-heart-outline" size={24} color={t.colors.primary} />
+        </TouchableOpacity>
       </View>
 
       {isOnlineSearch && (

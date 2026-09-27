@@ -69,5 +69,19 @@ export default schemaMigrations({
         }),
       ],
     },
+    {
+      toVersion: 4,
+      steps: [
+        createTable({
+          name: 'video_tag_cache',
+          columns: [
+            { name: 'video_id', type: 'string', isIndexed: true },
+            { name: 'tags_json', type: 'string', isOptional: true },
+            { name: 'fetched_at', type: 'number', isOptional: true },
+            { name: 'retry_after', type: 'number', isOptional: true },
+          ],
+        }),
+      ],
+    },
   ],
 });

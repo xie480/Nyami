@@ -7,6 +7,7 @@ import migrations from './migrations';
 import { PlaylistMeta } from './models/PlaylistMeta';
 import { VideoMeta } from './models/VideoMeta';
 import { SyncJob } from './models/SyncJob';
+import { VideoTagCache } from './models/VideoTagCache';
 
 const adapter = new SQLiteAdapter({
   schema,
@@ -19,9 +20,10 @@ const adapter = new SQLiteAdapter({
 
 export const database = new Database({
   adapter,
-  modelClasses: [PlaylistMeta, VideoMeta, SyncJob],
+  modelClasses: [PlaylistMeta, VideoMeta, SyncJob, VideoTagCache],
 });
 
 export const playlistMetaCollection = database.get<PlaylistMeta>('playlist_meta');
 export const videoMetaCollection = database.get<VideoMeta>('video_meta');
 export const syncJobCollection = database.get<SyncJob>('sync_job');
+export const videoTagCacheCollection = database.get<VideoTagCache>('video_tag_cache');

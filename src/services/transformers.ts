@@ -2,12 +2,14 @@ import type {
   BiliFolder,
   BiliFavoriteVideoMedia,
   BiliVideoSearchItem,
+  BiliVideoTag,
   BiliDashAudio,
 } from '../types/bili';
 import type {
   FavoriteFolder,
   FavoriteVideo,
   OnlineVideoSearchResult,
+  VideoTag,
 } from '../types/domain';
 
 export function trimFolder(f: BiliFolder): FavoriteFolder {
@@ -72,6 +74,22 @@ export function trimSearchVideo(
       .map(tag => tag.trim())
       .filter(Boolean),
   };
+}
+
+export function trimVideoTags(tags: BiliVideoTag[]): VideoTag[] {
+  const normalizedTags = new Map<string, VideoTag>();
+  for (const tag of tags) {
+    const tagName = typeof tag.tag_name === 'string' ? tag.tag_name.trim() : '';
+    const tagId = Number(tag.tag_id);
+    if (!tagName || !Number.isSafeInteger(tagId) || tagId < 0) {
+      continue;
+    }
+    const key = `${tagId}:${tagName.toLocaleLowerCase()}`;
+    if (!normalizedTags.has(key)) {
+      normalizedTags.set(key, {tagId, tagName});
+    }
+  }
+  return Array.from(normalizedTags.values());
 }
 
 export function matchesOnlineVideoSearch(

@@ -79,6 +79,11 @@ export async function biliGet<T>(
   let lastError: any;
   const retryDeadline = Date.now() + config.retry.totalTimeoutMs;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    if (options.signal?.aborted) {
+      const abortError = new Error('请求已取消');
+      abortError.name = 'AbortError';
+      throw abortError;
+    }
     const remainingMs = retryDeadline - Date.now();
     if (remainingMs <= 0) {
       throw lastError;
@@ -117,6 +122,9 @@ export async function biliGet<T>(
     } catch (err: any) {
       clearTimeout(timeoutId);
       lastError = err;
+      if (options.signal?.aborted) {
+        throw err;
+      }
       // 处理鉴权错误，其他业务错误直接抛出
       if (err instanceof AuthRequiredError) {
         // 静默模式：直接抛出异常，交由业务层（如 syncStore）捕获并展示 UI 状态

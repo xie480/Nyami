@@ -15,7 +15,18 @@
     folders: 10 * 60 * 1000,         // 收藏夹列表 10 分钟
     folderVideos: 5 * 60 * 1000,     // 收藏夹视频 5 分钟
     videoInfo: 24 * 60 * 60 * 1000,  // 视频元信息 1 天
+    videoTags: 30 * 24 * 60 * 60 * 1000, // 视频 tag 30 天
     audioUrl: 60 * 60 * 1000,        // 音频 URL 1 小时（B 站约 2 小时失效）
+  },
+
+  /** 收藏 tag 画像与推荐参数 */
+  tagRecommendations: {
+    cacheQueryChunkSize: 500,
+    maxProfileTags: 5,
+    maxRecommendations: 30,
+    musicTid: 3,
+    transientRetryDelayMs: 30 * 60 * 1000,
+    unavailableRetryDelayMs: 24 * 60 * 60 * 1000,
   },
 
   /** HTTP 请求超时 */

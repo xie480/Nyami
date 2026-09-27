@@ -27,6 +27,12 @@ export interface BiliVideoSearchItem {
   tag?: string;
 }
 
+/** B 站标签专用接口返回的视频标签。 */
+export interface BiliVideoTag {
+  tag_id: number;
+  tag_name: string;
+}
+
 export interface BiliVideoSearchPage {
   result?: BiliVideoSearchItem[];
   page?: number;

@@ -62,6 +62,43 @@ export interface OnlineVideoSearchResult {
   tags: string[];
 }
 
+/** 规范化后的视频 tag。 */
+export interface VideoTag {
+  tagId: number;
+  tagName: string;
+}
+
+/** 本地缓存的视频 tag 快照。 */
+export interface VideoTagCacheEntry {
+  videoId: string;
+  tags: VideoTag[];
+  fetchedAt: number | null;
+  retryAfter: number | null;
+}
+
+/** 单个兴趣 tag 的收藏覆盖度。 */
+export interface TagPreference {
+  tagId: number;
+  tagName: string;
+  videoCount: number;
+  score: number;
+}
+
+/** 从当前已同步收藏数据计算出的本地兴趣画像。 */
+export interface TagProfile {
+  totalVideoCount: number;
+  resolvedVideoCount: number;
+  taggedVideoCount: number;
+  pendingVideoCount: number;
+  preferences: TagPreference[];
+}
+
+/** 根据兴趣 tag 检索并去重后的推荐视频。 */
+export interface TagRecommendation extends OnlineVideoSearchResult {
+  matchedTags: string[];
+  score: number;
+}
+
 /** 音频流信息 */
 export interface AudioInfo {
   bvid: string;

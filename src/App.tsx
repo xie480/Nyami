@@ -22,6 +22,7 @@ import { VisibleFoldersScreen } from './screens/VisibleFoldersScreen';
 import { NoCacheFoldersScreen } from './screens/NoCacheFoldersScreen';
 import { SplashScreen } from './screens/SplashScreen';
 import { SyncDetailsScreen } from './screens/SyncDetailsScreen';
+import { TagRecommendationsScreen } from './screens/TagRecommendationsScreen';
 import { favoriteService, loadGlobalIndexCache } from './services/favoriteService';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { useUIStore } from './store/uiStore';
@@ -55,6 +56,7 @@ const VisibleFoldersScreenWithBg = withBackground(VisibleFoldersScreen);
 const NoCacheFoldersScreenWithBg = withBackground(NoCacheFoldersScreen);
 const SplashScreenWithBg = withBackground(SplashScreen);
 const SyncDetailsScreenWithBg = withBackground(SyncDetailsScreen);
+const TagRecommendationsScreenWithBg = withBackground(TagRecommendationsScreen);
 
 /**
  * 安全区域适配包装器
@@ -159,21 +161,21 @@ export default function App() {
     };
   }, []);
 
-  // Rebuild global index on startup or when uid changes
+  // Restore the same account's local index, or clear old account data before reuse.
   useEffect(() => {
     const init = async () => {
       if (!authReady) return;
       if (uid) {
         const lastUid = storage.getString('lastUid');
-        
-        // 先加载缓存，确保 globalIndex 有数据
-        await loadGlobalIndexCache();
-        
-        // 仅在切换账号时清理旧索引，用户需在设置页面手动同步
         if (lastUid !== uid) {
-          // 仅清理旧数据，等待用户手动同步
+          // 账号切换时先清除旧索引与标签缓存，再等待用户手动同步。
           await favoriteService.clearGlobalIndex();
-          storage.setString('lastUid', uid);
+          if (useAuthStore.getState().userId === uid) {
+            storage.setString('lastUid', uid);
+          }
+        } else {
+          // 同一账号启动时恢复本地全局索引。
+          await loadGlobalIndexCache();
         }
       } else {
         // 用户登出时清理数据
@@ -216,6 +218,7 @@ export default function App() {
                 <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreenWithBg} />
                 <Stack.Screen name="NoCacheFolders" component={NoCacheFoldersScreenWithBg} />
                 <Stack.Screen name="SyncDetails" component={SyncDetailsScreenWithBg} />
+                <Stack.Screen name="TagRecommendations" component={TagRecommendationsScreenWithBg} />
               </Stack.Navigator>
             </NavigationContainer>
           </SafeAreaWrapper>

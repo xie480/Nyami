@@ -8,8 +8,11 @@ import type {
   BiliFavoriteVideoMedia,
   BiliVideoSearchPage,
   BiliVideoInfo,
+  BiliVideoTag,
   BiliPlayUrlData,
 } from '../types/bili';
+
+const VIDEO_TAGS_ENDPOINT = '/x/tag/archive/tags';
 
 interface FolderListResp {
   count: number;
@@ -72,13 +75,16 @@ export const biliApi = {
   },
 
   /** B 站网页端视频搜索；每页 20 条，响应数据包含标题与 tag。 */
-  async searchVideos(keyword: string, page = 1, signal?: AbortSignal) {
+  async searchVideos(keyword: string, page = 1, signal?: AbortSignal, tids = 0) {
     const normalizedKeyword = keyword.trim();
     if (!normalizedKeyword) {
       throw new Error('搜索关键词不能为空');
     }
     if (!Number.isInteger(page) || page < 1) {
       throw new Error('搜索页码无效');
+    }
+    if (!Number.isSafeInteger(tids) || tids < 0) {
+      throw new Error('视频分区 ID 无效');
     }
     const {imgKey, subKey} = await getWbiKeys();
     const signedQuery = encWbi(
@@ -87,7 +93,7 @@ export const biliApi = {
         keyword: normalizedKeyword,
         order: 'totalrank',
         duration: 0,
-        tids: 0,
+        tids,
         page,
       },
       imgKey,
@@ -98,6 +104,23 @@ export const biliApi = {
       {signal, silent: true},
       1,
     );
+  },
+
+  /** 获取单个视频的 tag；使用轻量接口，避免详情聚合接口附带 Related 数据。 */
+  async getVideoTags(bvid: string, signal?: AbortSignal) {
+    const normalizedBvid = bvid.trim();
+    if (!normalizedBvid) {
+      throw new Error('bvid 不能为空');
+    }
+    const tags = await biliGet<BiliVideoTag[]>(
+      VIDEO_TAGS_ENDPOINT,
+      {params: {bvid: normalizedBvid}, signal, silent: true},
+      1,
+    );
+    if (!Array.isArray(tags)) {
+      throw new Error('B 站视频 tag 响应格式无效');
+    }
+    return tags;
   },
 
   /** 新建自有收藏夹；明确绑定当前账号 Cookie 与 CSRF。 */

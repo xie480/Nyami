@@ -1,6 +1,18 @@
-import { database, playlistMetaCollection, videoMetaCollection, syncJobCollection } from './database';
+import {
+  database,
+  playlistMetaCollection,
+  videoMetaCollection,
+  syncJobCollection,
+  videoTagCacheCollection,
+} from './database';
 import { Q } from '@nozbe/watermelondb';
-import type { FavoriteVideo, VideoPart } from '../types/domain';
+import { config } from '../config';
+import type {
+  FavoriteVideo,
+  VideoPart,
+  VideoTag,
+  VideoTagCacheEntry,
+} from '../types/domain';
 
 /**
  * 批量插入或更新视频记录（针对特定收藏夹）
@@ -269,6 +281,95 @@ export async function getAllValidVideos() {
   ).fetch();
 }
 
+/** 按 BVID 分块读取本地 tag 缓存，避免大型收藏集超过 SQLite 参数数量限制。 */
+export async function getVideoTagCacheEntries(
+  videoIds: string[],
+): Promise<VideoTagCacheEntry[]> {
+  const uniqueIds = Array.from(new Set(videoIds.filter(Boolean)));
+  const cachedRecords = [];
+  const chunkSize = config.tagRecommendations.cacheQueryChunkSize;
+
+  for (let start = 0; start < uniqueIds.length; start += chunkSize) {
+    const chunk = uniqueIds.slice(start, start + chunkSize);
+    const records = await videoTagCacheCollection
+      .query(Q.where('video_id', Q.oneOf(chunk)))
+      .fetch();
+    cachedRecords.push(...records);
+  }
+
+  return cachedRecords.map(record => {
+    let tags: VideoTag[] = [];
+    let fetchedAt = record.fetchedAt;
+    if (record.tagsJson) {
+      try {
+        const parsed: unknown = JSON.parse(record.tagsJson);
+        if (Array.isArray(parsed)) {
+          tags = parsed.filter(
+            (tag): tag is VideoTag =>
+              typeof tag?.tagId === 'number' &&
+              typeof tag?.tagName === 'string',
+          );
+        } else {
+          fetchedAt = null;
+        }
+      } catch {
+        fetchedAt = null;
+      }
+    }
+    return {
+      videoId: record.videoId,
+      tags,
+      fetchedAt,
+      retryAfter: record.retryAfter,
+    };
+  });
+}
+
+/** 插入或更新单个视频 tag 快照或重试时间。 */
+export async function upsertVideoTagCache(data: {
+  videoId: string;
+  tags?: VideoTag[];
+  fetchedAt?: number | null;
+  retryAfter?: number | null;
+}): Promise<void> {
+  if (!data.videoId) {
+    return;
+  }
+
+  await database.write(async writer => {
+    const existing = await videoTagCacheCollection
+      .query(Q.where('video_id', data.videoId))
+      .fetch();
+    const current = existing[0];
+
+    if (current) {
+      await writer.batch(
+        current.prepareUpdate(record => {
+          if (data.tags !== undefined) {
+            record.tagsJson = JSON.stringify(data.tags);
+          }
+          if (data.fetchedAt !== undefined) {
+            record.fetchedAt = data.fetchedAt;
+          }
+          if (data.retryAfter !== undefined) {
+            record.retryAfter = data.retryAfter;
+          }
+        }),
+      );
+      return;
+    }
+
+    await writer.batch(
+      videoTagCacheCollection.prepareCreate(record => {
+        record.videoId = data.videoId;
+        record.tagsJson = data.tags === undefined ? null : JSON.stringify(data.tags);
+        record.fetchedAt = data.fetchedAt ?? null;
+        record.retryAfter = data.retryAfter ?? null;
+      }),
+    );
+  });
+}
+
 /**
  * 获取收藏夹下的所有有效视频（未删除）
  */
@@ -333,6 +434,7 @@ export async function clearAllData(): Promise<void> {
     await playlistMetaCollection.query().markAllAsDeleted();
     await videoMetaCollection.query().markAllAsDeleted();
     await syncJobCollection.query().markAllAsDeleted();
+    await videoTagCacheCollection.query().markAllAsDeleted();
   });
 }
 

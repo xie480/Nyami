@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 3,
+  version: 4,
   tables: [
     tableSchema({
       name: 'playlist_meta',
@@ -52,6 +52,15 @@ export const schema = appSchema({
         { name: 'failed_reason', type: 'string', isOptional: true },
         { name: 'started_at', type: 'number' },
         { name: 'finished_at', type: 'number', isOptional: true },
+      ],
+    }),
+    tableSchema({
+      name: 'video_tag_cache',
+      columns: [
+        { name: 'video_id', type: 'string', isIndexed: true },
+        { name: 'tags_json', type: 'string', isOptional: true },
+        { name: 'fetched_at', type: 'number', isOptional: true },
+        { name: 'retry_after', type: 'number', isOptional: true },
       ],
     }),
   ],
