@@ -15,6 +15,7 @@ import {useFocusEffect, useIsFocused} from '@react-navigation/native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Button} from '../components/Button';
 import {Loading} from '../components/Loading';
+import {TagProfilePipeline, TagProfileRadar} from '../components/TagProfileVisualization';
 import {
   favoriteService,
   ensureGlobalIndexCacheLoaded,
@@ -174,7 +175,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   const [failedSearchCount, setFailedSearchCount] = useState(0);
   const [recommendationHasMore, setRecommendationHasMore] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
-  const [profileView, setProfileView] = useState<'tags' | 'listening'>('tags');
+  const [profileView, setProfileView] = useState<'radar' | 'pipeline'>('radar');
   const [error, setError] = useState<string | null>(null);
   const requestController = useRef<AbortController | null>(null);
   const loadedUid = useRef<string | null>(cachedScreenSnapshot ? uid : null);
@@ -519,9 +520,6 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
           ),
         )
       : 0;
-  const strongestTagCount = Math.max(1, ...(profile?.preferences.map(item => item.videoCount) ?? [1]));
-  const profileTags = profile?.preferences.slice(0, 12) ?? [];
-
   return (
     <View style={{flex: 1, backgroundColor: t.colors.background}}>
       <StatusBar
@@ -585,8 +583,8 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
 
           <View style={{flexDirection: 'row', padding: 4, marginTop: t.spacing.lg, borderRadius: t.radius.full, backgroundColor: t.colors.surfaceHigh}}>
             {([
-              {key: 'tags', title: '兴趣标签'},
-              {key: 'listening', title: '听歌偏好'},
+              {key: 'radar', title: '兴趣雷达'},
+              {key: 'pipeline', title: '推荐路径'},
             ] as const).map(tab => {
               const selected = profileView === tab.key;
               return (
@@ -612,7 +610,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
               }}>
               <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
                 <Text style={{color: t.colors.text, fontSize: t.fontSize.md, fontWeight: '700'}}>
-                  {profileView === 'tags' ? '兴趣标签' : '兴趣画像'}
+                  {profileView === 'radar' ? '兴趣维度' : '推荐生成路径'}
                 </Text>
                 <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs}}>
                   已读取 {profile.resolvedVideoCount}/{profile.totalVideoCount} 个视频
@@ -621,39 +619,13 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
               <Text style={{color: t.colors.textSub, fontSize: t.fontSize.sm, marginTop: t.spacing.xs}}>
                 {profile.taggedVideoCount} 个视频含可用于画像的标签
               </Text>
-              {profile.preferences.length > 0 ? profileView === 'tags' ? (
-                <View style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: t.spacing.md}}>
-                  {profileTags.map((preference, index) => (
-                    <View
-                      key={`${preference.tagId}:${preference.tagName}`}
-                      style={{paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.sm, borderRadius: t.radius.full, backgroundColor: index < 3 ? t.colors.primary : t.colors.primaryLight, marginRight: t.spacing.xs, marginBottom: t.spacing.xs}}>
-                      <Text style={{color: index < 3 ? t.colors.onPrimary : t.colors.text, fontSize: t.fontSize.sm, fontWeight: index < 3 ? '600' : '400'}}>
-                        {preference.tagName} · {preference.videoCount}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
+              {profile.preferences.length > 0 ? profileView === 'radar' ? (
+                <TagProfileRadar preferences={profile.preferences} />
               ) : (
-                <View style={{marginTop: t.spacing.lg}}>
-                  {profile.preferences.slice(0, 5).map(preference => {
-                    const relativeWidth = Math.max(6, Math.round((preference.videoCount / strongestTagCount) * 100));
-                    const coverage = profile.totalVideoCount > 0
-                      ? Math.round((preference.videoCount / profile.totalVideoCount) * 100)
-                      : 0;
-                    return (
-                      <View key={`${preference.tagId}:${preference.tagName}`} style={{flexDirection: 'row', alignItems: 'center', marginBottom: t.spacing.md}}>
-                        <Text style={{width: 88, color: t.colors.text, fontSize: t.fontSize.sm}} numberOfLines={1}>{preference.tagName}</Text>
-                        <View style={{flex: 1, height: 14, borderRadius: 7, overflow: 'hidden', backgroundColor: t.colors.surfaceHigh}}>
-                          <View style={{height: '100%', width: `${relativeWidth}%`, borderRadius: 7, backgroundColor: t.colors.primary}} />
-                        </View>
-                        <Text style={{width: 44, textAlign: 'right', color: t.colors.textSub, fontSize: t.fontSize.xs}}>{coverage}%</Text>
-                      </View>
-                    );
-                  })}
-                  <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: t.spacing.xs}}>
-                    百分比表示该标签覆盖的已同步收藏视频，横条长度按当前标签频次缩放。
-                  </Text>
-                </View>
+                <TagProfilePipeline
+                  profile={profile}
+                  recommendationCount={recommendations.length}
+                />
               ) : (
                 <Text style={{color: t.colors.textHint, fontSize: t.fontSize.sm, marginTop: t.spacing.md}}>
                   还没有可用的标签数据。点击下方按钮读取收藏视频 tag。
