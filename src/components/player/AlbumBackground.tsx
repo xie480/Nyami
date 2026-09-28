@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {Animated, Platform, StyleSheet, View} from 'react-native';
+import {Animated, StyleSheet, View} from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import {AlbumTheme} from '../../utils/albumTheme';
 
@@ -7,6 +7,7 @@ interface Props {
   artworkUri?: string;
   theme: AlbumTheme;
   isVisible: boolean;
+  blurAmount: number;
 }
 
 interface ImageLayers {
@@ -18,6 +19,7 @@ export const AlbumBackground: React.FC<Props> = ({
   artworkUri,
   theme,
   isVisible,
+  blurAmount,
 }) => {
   const [layers, setLayers] = useState<ImageLayers>({current: artworkUri});
   const fade = useRef(new Animated.Value(1)).current;
@@ -63,8 +65,6 @@ export const AlbumBackground: React.FC<Props> = ({
     });
   };
 
-  const blurRadius = Platform.OS === 'android' ? 24 : 42;
-
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       {layers.previous ? (
@@ -76,7 +76,7 @@ export const AlbumBackground: React.FC<Props> = ({
             {opacity: previousOpacity},
           ]}
           resizeMode="cover"
-          blurRadius={blurRadius}
+          blurRadius={blurAmount}
         />
       ) : null}
       {layers.current ? (
@@ -85,7 +85,7 @@ export const AlbumBackground: React.FC<Props> = ({
           source={{uri: layers.current}}
           style={[styles.artwork, {opacity: fade, transform: [{scale: 1.16}]}]}
           resizeMode="cover"
-          blurRadius={blurRadius}
+          blurRadius={blurAmount}
           onLoad={() => fadeIncoming(layers.current)}
           onError={() => fadeIncoming(layers.current)}
         />

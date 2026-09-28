@@ -6,6 +6,13 @@ import type { Quality } from '../types/domain';
 
 export type ThemeMode = 'system' | 'light' | 'dark' | 'glass-light' | 'glass-dark';
 
+export const PLAYER_ARTWORK_BLUR = {
+  min: 0,
+  max: 48,
+  step: 2,
+  default: 18,
+} as const;
+
 // 将 MMKV 存储适配器改为同步执行，彻底消除首次渲染时的状态闪烁
 const mmkvStorage: StateStorage = {
   getItem: (name: string) => storage.getString(name) ?? null,
@@ -22,6 +29,7 @@ interface Settings {
   themeMode: ThemeMode;
   customBackgroundImage: string | null;
   glassBlurAmount: number;
+  playerArtworkBlurAmount: number;
   mixWithOthers: boolean;
   noCacheFolderIds: number[];
   recommendationDurationFilterEnabled: boolean;
@@ -39,6 +47,7 @@ interface SettingsState extends Settings {
   setThemeMode: (mode: ThemeMode) => void;
   setCustomBackgroundImage: (uri: string | null) => void;
   setGlassBlurAmount: (v: number) => void;
+  setPlayerArtworkBlurAmount: (v: number) => void;
   setMixWithOthers: (v: boolean) => void;
   setNoCacheFolderIds: (ids: number[]) => void;
   setRecommendationDurationFilterEnabled: (enabled: boolean) => void;
@@ -73,6 +82,7 @@ export const useSettingsStore = create<SettingsState>()(
       themeMode: 'glass-dark',
       customBackgroundImage: null,
       glassBlurAmount: 28,
+      playerArtworkBlurAmount: PLAYER_ARTWORK_BLUR.default,
       mixWithOthers: false,
       noCacheFolderIds: [],
       recommendationDurationFilterEnabled: true,
@@ -87,6 +97,19 @@ export const useSettingsStore = create<SettingsState>()(
       setThemeMode: (mode) => set({ themeMode: mode }),
       setCustomBackgroundImage: (uri) => set({ customBackgroundImage: uri }),
       setGlassBlurAmount: (v) => set({ glassBlurAmount: v }),
+      setPlayerArtworkBlurAmount: (v) => {
+        if (!Number.isFinite(v)) {
+          return;
+        }
+        const bounded = Math.max(
+          PLAYER_ARTWORK_BLUR.min,
+          Math.min(
+            PLAYER_ARTWORK_BLUR.max,
+            Math.round(v / PLAYER_ARTWORK_BLUR.step) * PLAYER_ARTWORK_BLUR.step,
+          ),
+        );
+        set({playerArtworkBlurAmount: bounded});
+      },
       setMixWithOthers: (v) => set({ mixWithOthers: v }),
       setNoCacheFolderIds: (ids) => set({ noCacheFolderIds: ids }),
       setRecommendationDurationFilterEnabled: (enabled) =>

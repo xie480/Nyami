@@ -3,14 +3,12 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   AppState,
-  Modal,
   Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -33,6 +31,7 @@ import {Switch} from '../components/Switch';
 import {AlbumBackground} from '../components/player/AlbumBackground';
 import {PlaybackControls} from '../components/player/PlaybackControls';
 import {PlayerActionPanel} from '../components/player/PlayerActionPanel';
+import {PlayerMoreSheet} from '../components/player/PlayerMoreSheet';
 import {TrackInfo} from '../components/player/TrackInfo';
 import {VinylRecord} from '../components/player/VinylRecord';
 import {
@@ -108,6 +107,12 @@ export const PlayerScreen = () => {
   const setCachePersonalizedRecommendations = useSettingsStore(
     state => state.setCachePersonalizedRecommendations,
   );
+  const playerArtworkBlurAmount = useSettingsStore(
+    state => state.playerArtworkBlurAmount,
+  );
+  const setPlayerArtworkBlurAmount = useSettingsStore(
+    state => state.setPlayerArtworkBlurAmount,
+  );
   const syncStatus = useSyncStore(state => state.syncStatus);
   const isPersonalized = usePlayerStore(
     state => !!state.playContext?.isPersonalized,
@@ -115,7 +120,7 @@ export const PlayerScreen = () => {
   const activeTrack = useActiveTrack();
   const playback = usePlaybackState();
 
-  const [isPartsModalVisible, setIsPartsModalVisible] = useState(false);
+  const [isMoreSheetVisible, setIsMoreSheetVisible] = useState(false);
   const [favoritePickerVisible, setFavoritePickerVisible] = useState(false);
   const [dragPosition, setDragPosition] = useState<number | null>(null);
   const [isReduceMotionEnabled, setIsReduceMotionEnabled] = useState(false);
@@ -168,9 +173,6 @@ export const PlayerScreen = () => {
   const isBuffering =
     !isPlaceholder &&
     (playback.state === State.Buffering || playback.state === State.Loading);
-  const hasMultiParts = Boolean(
-    currentVideo?.parts && currentVideo.parts.length > 1,
-  );
   const statusBarHeight =
     Platform.OS === 'android'
       ? Math.max(insets.top, StatusBar.currentHeight ?? 0)
@@ -185,14 +187,6 @@ export const PlayerScreen = () => {
     Math.min(screenWidth * 0.74, (availableHeight - reservedHeight) * 0.73),
   );
   const seekDuration = progressDuration || duration;
-  const modalSurfaceStyle = useMemo(
-    () => ({
-      paddingBottom: insets.bottom + 8,
-      backgroundColor: t.isDark ? '#17191E' : '#F6F4EF',
-    }),
-    [insets.bottom, t.isDark],
-  );
-
   const hasResetProgressOnFocus = useRef(false);
   useFocusEffect(
     React.useCallback(() => {
@@ -274,6 +268,7 @@ export const PlayerScreen = () => {
         artworkUri={artworkUri}
         theme={albumTheme}
         isVisible={isMotionActive}
+        blurAmount={playerArtworkBlurAmount}
       />
 
       <ScrollView
@@ -418,88 +413,27 @@ export const PlayerScreen = () => {
 
         <PlayerActionPanel
           theme={albumTheme}
-          hasParts={hasMultiParts}
           onQueue={() => useUIStore.getState().setPlaylistVisible(true)}
           onEffects={() => navigation.navigate('SoundLab')}
-          onMore={() => setIsPartsModalVisible(true)}
+          onMore={() => setIsMoreSheetVisible(true)}
         />
       </ScrollView>
 
-      {hasMultiParts && currentVideo ? (
-        <Modal
-          visible={isPartsModalVisible}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setIsPartsModalVisible(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback
-              onPress={() => setIsPartsModalVisible(false)}>
-              <View style={styles.modalBackdrop} />
-            </TouchableWithoutFeedback>
-            <View style={[styles.modalContent, modalSurfaceStyle]}>
-              <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, {color: t.colors.text}]}>
-                  选集 ({currentVideo.parts!.length})
-                </Text>
-                <IconButton
-                  name="close"
-                  size={24}
-                  color={t.colors.text}
-                  accessibilityLabel="关闭选集列表"
-                  onPress={() => setIsPartsModalVisible(false)}
-                />
-              </View>
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {currentVideo.parts!.map((part: any) => {
-                  const isActivePart = part.cid === currentCid;
-                  return (
-                    <TouchableOpacity
-                      key={part.cid}
-                      style={[
-                        styles.partItem,
-                        {borderBottomColor: t.colors.divider},
-                        isActivePart && {
-                          backgroundColor: `${albumTheme.primaryAccent}22`,
-                        },
-                      ]}
-                      onPress={() => {
-                        playSpecificPart(
-                          currentVideo.bvid,
-                          part.cid,
-                          part.title,
-                        );
-                        setIsPartsModalVisible(false);
-                      }}
-                      activeOpacity={0.72}>
-                      <Text
-                        style={[
-                          styles.partTitle,
-                          {
-                            color: isActivePart
-                              ? albumTheme.primaryAccent
-                              : t.colors.text,
-                          },
-                        ]}
-                        numberOfLines={1}>
-                        {part.title}
-                      </Text>
-                      {isActivePart ? (
-                        <Text
-                          style={[
-                            styles.playingIndicator,
-                            {color: albumTheme.primaryAccent},
-                          ]}>
-                          正在播放
-                        </Text>
-                      ) : null}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-      ) : null}
+      <PlayerMoreSheet
+        visible={isMoreSheetVisible}
+        blurAmount={playerArtworkBlurAmount}
+        parts={currentVideo?.parts ?? []}
+        currentCid={currentCid}
+        theme={albumTheme}
+        onBlurAmountChange={setPlayerArtworkBlurAmount}
+        onSelectPart={part => {
+          if (currentVideo) {
+            playSpecificPart(currentVideo.bvid, part.cid, part.title);
+          }
+          setIsMoreSheetVisible(false);
+        }}
+        onClose={() => setIsMoreSheetVisible(false)}
+      />
 
       <FavoriteFolderPickerSheet
         visible={favoritePickerVisible}
@@ -557,36 +491,4 @@ const styles = StyleSheet.create({
   cacheLabel: {fontSize: 10, marginHorizontal: 6},
   playbackError: {paddingVertical: 4, alignItems: 'center'},
   playbackErrorText: {color: '#FFE0DC', fontSize: 12, textAlign: 'center'},
-  modalOverlay: {flex: 1, justifyContent: 'flex-end'},
-  modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.58)',
-  },
-  modalContent: {
-    maxHeight: '62%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 8,
-  },
-  modalHeader: {
-    minHeight: 54,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingLeft: 20,
-    paddingRight: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(128,128,128,0.35)',
-  },
-  modalTitle: {fontSize: 17, fontWeight: '700'},
-  partItem: {
-    minHeight: 54,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  partTitle: {flex: 1, fontSize: 14, marginRight: 12},
-  playingIndicator: {fontSize: 11, fontWeight: '600'},
 });

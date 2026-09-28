@@ -6,7 +6,6 @@ import {AlbumTheme} from '../../utils/albumTheme';
 
 interface Props {
   theme: AlbumTheme;
-  hasParts: boolean;
   onQueue: () => void;
   onEffects: () => void;
   onMore: () => void;
@@ -43,7 +42,6 @@ const Action: React.FC<ActionProps> = ({
 
 export const PlayerActionPanel: React.FC<Props> = ({
   theme,
-  hasParts,
   onQueue,
   onEffects,
   onMore,
@@ -78,7 +76,6 @@ export const PlayerActionPanel: React.FC<Props> = ({
       label="更多"
       icon="dots-horizontal"
       color={theme.foreground}
-      disabled={!hasParts}
       onPress={onMore}
     />
   </View>
