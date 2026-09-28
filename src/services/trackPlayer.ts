@@ -817,7 +817,7 @@ export async function loadQueue(
       autoCache(targetTracks[0].id as string);
     }
 
-    usePlayerStore.getState().setQueue(videos, startBvid);
+    usePlayerStore.getState().setCurrentQueue(videos, startBvid);
 
     // 3. 触发后台水合后续轨道 (Slow Path)
     // 依赖 maintainQueueBuffer 自动补齐 TARGET_NATIVE_BUFFER
@@ -987,7 +987,18 @@ export async function insertNext(video: FavoriteVideo): Promise<void> {
     return;
   }
   logicalQueue.splice(insertPos, 0, video);
-  cur.setQueue(logicalQueue, cur.currentBvid ?? undefined);
+  const originalQueue = [
+    ...(cur.originalQueue.length > 0 ? cur.originalQueue : cur.queue),
+  ];
+  const originalCurrentIndex = originalQueue.findIndex(
+    item => item.bvid === currentBvid,
+  );
+  originalQueue.splice(
+    originalCurrentIndex === -1 ? originalQueue.length : originalCurrentIndex + 1,
+    0,
+    video,
+  );
+  usePlayerStore.setState({queue: logicalQueue, originalQueue});
 
   const realTracks = await hydrateVideo(video);
   if (revision !== queueRevision) {
@@ -1015,7 +1026,10 @@ export async function removeFromQueue(bvid: string): Promise<void> {
   advanceQueueRevision();
   const cur = usePlayerStore.getState();
   const filtered = cur.queue.filter(v => v.bvid !== bvid);
-  cur.setQueue(filtered, cur.currentBvid ?? undefined);
+  const originalQueue = (
+    cur.originalQueue.length > 0 ? cur.originalQueue : cur.queue
+  ).filter(video => video.bvid !== bvid);
+  usePlayerStore.setState({queue: filtered, originalQueue});
 
   // 工业级方案：禁止在运行时 remove native queue，仅更新 logical queue
   maintainQueueBuffer().catch(() => {});
@@ -1039,7 +1053,7 @@ export async function reorderQueue(
   }
 
   const cur = usePlayerStore.getState();
-  cur.setQueue(videos, startBvid ?? cur.currentBvid ?? undefined);
+  cur.setCurrentQueue(videos, startBvid ?? cur.currentBvid ?? undefined);
 
   const activeTrack = await TrackPlayer.getActiveTrack();
   const currentBvid = activeTrack?.id as string | undefined;
@@ -1072,7 +1086,11 @@ export async function appendQueue(
   advanceQueueRevision();
   const cur = usePlayerStore.getState();
   const combined = [...cur.queue, ...videos];
-  cur.setQueue(combined, startBvid ?? cur.currentBvid ?? undefined);
+  const originalQueue = [
+    ...(cur.originalQueue.length > 0 ? cur.originalQueue : cur.queue),
+    ...videos,
+  ];
+  usePlayerStore.setState({queue: combined, originalQueue});
 
   maintainQueueBuffer().catch(() => {});
 }

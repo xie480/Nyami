@@ -2,8 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {FavoriteVideo, OnlineSearchQueueContext} from '../types/domain';
 import { storage } from '../core/storage';
-import TrackPlayer from 'react-native-track-player';
-import { loadQueue, insertNext as tpInsertNext, removeFromQueue as tpRemoveFromQueue, reorderQueue as tpReorderQueue, appendQueue as tpAppendQueue } from '../services/trackPlayer';
+import { insertNext as tpInsertNext, removeFromQueue as tpRemoveFromQueue, reorderQueue as tpReorderQueue, appendQueue as tpAppendQueue } from '../services/trackPlayer';
 import { useProgressStore } from './progressStore';
 
 // MMKV storage adapter compatible with Zustand persist
@@ -12,6 +11,8 @@ const mmkvStorage = {
   setItem: (name: string, value: string) => Promise.resolve(storage.setString(name, value)),
   removeItem: (name: string) => Promise.resolve(storage.delete(name)),
 };
+
+let playModeSwitchRevision = 0;
 
 export interface PlayContext {
   folderId?: number;
@@ -42,6 +43,8 @@ interface PlayerState {
   /** 是否正在后台异步构建播放队列（追加更多分页数据） */
   queueLoading: boolean;
   setQueue: (q: FavoriteVideo[], bvid?: string, context?: PlayContext) => void;
+  /** Synchronize the active playback order without replacing the sequential baseline. */
+  setCurrentQueue: (q: FavoriteVideo[], bvid?: string) => void;
   setCurrentBvid: (bvid: string | null) => void;
   setPlaybackError: (msg: string | null) => void;
   setPlayMode: (mode: 'sequential' | 'shuffle') => void;
@@ -74,17 +77,26 @@ export const usePlayerStore = create<PlayerState>()(
       originalQueue: [],
       playContext: null,
       setQueue: (queue, bvid, context) => {
+        playModeSwitchRevision += 1;
         // 【P0防闪烁优化】setQueue 触发新队列时同步重置播放进度，
         // 避免 PlayerScreen 在新数据就绪前显示上一首歌的 position/duration
         useProgressStore.getState().resetProgress();
         return set(state => ({
           queue,
           currentBvid: bvid ?? queue[0]?.bvid ?? null,
-          originalQueue: queue,
+          originalQueue: [...queue],
           currentCid: null,
-          playContext: context !== undefined ? context : state.playContext
+          playContext: context !== undefined ? context : state.playContext,
         }));
       },
+      setCurrentQueue: (queue, bvid) => set(state => ({
+        queue,
+        currentBvid: bvid ?? (
+          state.currentBvid && queue.some(video => video.bvid === state.currentBvid)
+            ? state.currentBvid
+            : queue[0]?.bvid ?? null
+        ),
+      })),
       setCurrentBvid: (bvid) => set({ currentBvid: bvid }),
       setCurrentCid: (cid) => set({ currentCid: cid }),
       setResolving: (resolving) => set({ isResolving: resolving }),
@@ -92,53 +104,56 @@ export const usePlayerStore = create<PlayerState>()(
       setPlayContext: (context) => set({ playContext: context }),
       updateVideoParts: (bvid, parts) => set(state => ({
         queue: state.queue.map(v => (v.bvid === bvid ? { ...v, parts } : v)),
-        originalQueue: state.originalQueue.map(v => (v.bvid === bvid ? { ...v, parts } : v))
+        originalQueue: state.originalQueue.map(v => (v.bvid === bvid ? { ...v, parts } : v)),
       })),
       setPlaybackError: (msg) => set({ playbackError: msg }),
-      setPlayMode: (mode) => set({ playMode: mode }),
+      setPlayMode: (mode) => {
+        playModeSwitchRevision += 1;
+        set({playMode: mode});
+      },
       togglePlayMode: () => {
-        const state = get();
-        if (state.playMode === 'sequential') {
-          // 立即更新 UI 状态
-          set({ playMode: 'shuffle' });
-          
-          // 延迟执行耗时的洗牌和 TrackPlayer 同步操作
-          setTimeout(() => {
-            const currentState = get();
-            const currentBvid = currentState.currentBvid;
-            const currentTrackIndex = currentState.queue.findIndex(v => v.bvid === currentBvid);
-            
-            let shuffled = [...currentState.queue];
+        const targetMode =
+          get().playMode === 'sequential' ? 'shuffle' : 'sequential';
+        const revision = ++playModeSwitchRevision;
+        set({playMode: targetMode});
+
+        setTimeout(() => {
+          if (revision !== playModeSwitchRevision) {
+            return;
+          }
+
+          const currentState = get();
+          if (currentState.playMode !== targetMode) {
+            return;
+          }
+          const currentBvid = currentState.currentBvid;
+          const baseline = currentState.originalQueue.length > 0
+            ? currentState.originalQueue
+            : currentState.queue;
+          let nextQueue = [...baseline];
+
+          if (targetMode === 'shuffle') {
+            const currentTrackIndex = nextQueue.findIndex(
+              video => video.bvid === currentBvid,
+            );
             if (currentTrackIndex !== -1) {
-              const currentTrack = shuffled.splice(currentTrackIndex, 1)[0];
-              // Fisher-Yates shuffle for the rest
-              for (let i = shuffled.length - 1; i > 0; i--) {
+              const currentTrack = nextQueue.splice(currentTrackIndex, 1)[0];
+              for (let i = nextQueue.length - 1; i > 0; i -= 1) {
                 const j = Math.floor(Math.random() * (i + 1));
-                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                [nextQueue[i], nextQueue[j]] = [nextQueue[j], nextQueue[i]];
               }
-              shuffled.unshift(currentTrack);
+              nextQueue.unshift(currentTrack);
             } else {
-              for (let i = shuffled.length - 1; i > 0; i--) {
+              for (let i = nextQueue.length - 1; i > 0; i -= 1) {
                 const j = Math.floor(Math.random() * (i + 1));
-                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                [nextQueue[i], nextQueue[j]] = [nextQueue[j], nextQueue[i]];
               }
             }
-            
-            set({ queue: shuffled });
-            // Sync with TrackPlayer
-            tpReorderQueue(shuffled, currentBvid ?? undefined).catch(console.error);
-          }, 0);
-        } else {
-          // 立即更新 UI 状态
-          set({ playMode: 'sequential' });
-          
-          // 延迟执行耗时的恢复和 TrackPlayer 同步操作
-          setTimeout(() => {
-            const currentState = get();
-            set({ queue: currentState.originalQueue });
-            tpReorderQueue(currentState.originalQueue, currentState.currentBvid ?? undefined).catch(console.error);
-          }, 0);
-        }
+          }
+
+          currentState.setCurrentQueue(nextQueue, currentBvid ?? undefined);
+          tpReorderQueue(nextQueue, currentBvid ?? undefined).catch(console.error);
+        }, 0);
       },
       // Insert a video to be played next after the current track
       insertNext: async (video) => {
