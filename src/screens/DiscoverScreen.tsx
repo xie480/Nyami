@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   InteractionManager,
+  RefreshControl,
   ScrollView,
   StatusBar,
   Text,
@@ -173,6 +174,13 @@ export const DiscoverScreen = ({navigation}: any) => {
       <ScrollView
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        refreshControl={(
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void refresh('manual')}
+            tintColor={t.colors.primary}
+          />
+        )}
         contentContainerStyle={{paddingTop: Math.max(insets.top, 12) + t.spacing.sm, paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.xl}}>
         <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: t.spacing.md}}>
           <View>
