@@ -553,6 +553,7 @@ export const favoriteService = {
     force = false,
     onProgress?: (event: SyncProgressEvent) => void,
     signal?: AbortSignal,
+    onVideosSynced?: (videos: FavoriteVideo[]) => void,
   ): Promise<void> {
     if (!uid) return;
 
@@ -734,6 +735,7 @@ export const favoriteService = {
             if (videosToUpsert.length > 0) {
               await upsertVideosBatch(playlistId, videosToUpsert);
               indexMayHaveChanged = true;
+              onVideosSynced?.(videosToUpsert);
             }
             
             // 获取当前收藏夹的绝对有效视频数量

@@ -325,6 +325,50 @@ export async function getVideoTagCacheEntries(
   });
 }
 
+/** 批量插入或更新视频 tag 快照或重试时间。 */
+export async function upsertVideoTagCacheBatch(entries: Array<{
+  videoId: string;
+  tags?: VideoTag[];
+  fetchedAt?: number | null;
+  retryAfter?: number | null;
+}>): Promise<void> {
+  const uniqueEntries = Array.from(
+    new Map(entries.filter(entry => entry.videoId).map(entry => [entry.videoId, entry])).values(),
+  );
+  if (uniqueEntries.length === 0) return;
+
+  await database.write(async writer => {
+    const videoIds = uniqueEntries.map(entry => entry.videoId);
+    const existingRecords = await videoTagCacheCollection
+      .query(Q.where('video_id', Q.oneOf(videoIds)))
+      .fetch();
+    const existingByVideoId = new Map<string, (typeof existingRecords)[number]>();
+    for (const record of existingRecords) {
+      if (!existingByVideoId.has(record.videoId)) {
+        existingByVideoId.set(record.videoId, record);
+      }
+    }
+
+    const operations = uniqueEntries.map(data => {
+      const current = existingByVideoId.get(data.videoId);
+      if (current) {
+        return current.prepareUpdate(record => {
+          if (data.tags !== undefined) record.tagsJson = JSON.stringify(data.tags);
+          if (data.fetchedAt !== undefined) record.fetchedAt = data.fetchedAt;
+          if (data.retryAfter !== undefined) record.retryAfter = data.retryAfter;
+        });
+      }
+      return videoTagCacheCollection.prepareCreate(record => {
+        record.videoId = data.videoId;
+        record.tagsJson = data.tags === undefined ? null : JSON.stringify(data.tags);
+        record.fetchedAt = data.fetchedAt ?? null;
+        record.retryAfter = data.retryAfter ?? null;
+      });
+    });
+    await writer.batch(...operations);
+  });
+}
+
 /** 插入或更新单个视频 tag 快照或重试时间。 */
 export async function upsertVideoTagCache(data: {
   videoId: string;
@@ -332,42 +376,7 @@ export async function upsertVideoTagCache(data: {
   fetchedAt?: number | null;
   retryAfter?: number | null;
 }): Promise<void> {
-  if (!data.videoId) {
-    return;
-  }
-
-  await database.write(async writer => {
-    const existing = await videoTagCacheCollection
-      .query(Q.where('video_id', data.videoId))
-      .fetch();
-    const current = existing[0];
-
-    if (current) {
-      await writer.batch(
-        current.prepareUpdate(record => {
-          if (data.tags !== undefined) {
-            record.tagsJson = JSON.stringify(data.tags);
-          }
-          if (data.fetchedAt !== undefined) {
-            record.fetchedAt = data.fetchedAt;
-          }
-          if (data.retryAfter !== undefined) {
-            record.retryAfter = data.retryAfter;
-          }
-        }),
-      );
-      return;
-    }
-
-    await writer.batch(
-      videoTagCacheCollection.prepareCreate(record => {
-        record.videoId = data.videoId;
-        record.tagsJson = data.tags === undefined ? null : JSON.stringify(data.tags);
-        record.fetchedAt = data.fetchedAt ?? null;
-        record.retryAfter = data.retryAfter ?? null;
-      }),
-    );
-  });
+  await upsertVideoTagCacheBatch([data]);
 }
 
 /**

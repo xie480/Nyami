@@ -5,7 +5,7 @@ import {
   RateLimitError,
   ResourceUnavailableError,
 } from '../core/errors';
-import {getVideoTagCacheEntries, upsertVideoTagCache} from '../db/operations';
+import {getVideoTagCacheEntries, upsertVideoTagCacheBatch} from '../db/operations';
 import {biliApi} from './biliApi';
 import {trimSearchVideo, trimVideoTags} from './transformers';
 import {useAuthStore} from '../store/authStore';
@@ -182,7 +182,7 @@ function shouldPauseBackfill(error: unknown): boolean {
 }
 
 /**
- * 逐个补齐收藏视频的 tag，并立即写入本地缓存。
+ * 有界并行补齐收藏视频 tag，并按小批次写入本地缓存。
  * 所有请求复用 biliApi 的全局限速；UID 改变或页面取消时停止后续读取。
  */
 export async function backfillFavoriteTags(
@@ -208,6 +208,7 @@ export async function backfillFavoriteTags(
   };
   onProgress({...progress});
 
+  const uncachedVideos: FavoriteVideo[] = [];
   for (const video of unique) {
     if (signal.aborted) {
       break;
@@ -239,66 +240,118 @@ export async function backfillFavoriteTags(
       } else {
         progress.failedVideoCount += 1;
       }
-      onProgress({...progress});
       continue;
     }
+    uncachedVideos.push(video);
+  }
+  onProgress({...progress});
 
-    try {
-      const response = await biliApi.getVideoTags(video.bvid, signal);
-      if (signal.aborted) {
-        break;
-      }
-      if (useAuthStore.getState().userId !== expectedUid) {
-        progress.paused = true;
-        break;
-      }
-      const tags = trimVideoTags(response);
-      const fetchedAt = Date.now();
-      await upsertVideoTagCache({
-        videoId: video.bvid,
-        tags,
-        fetchedAt,
-        retryAfter: null,
-      });
-      cacheByVideoId.set(video.bvid, {
-        videoId: video.bvid,
-        tags,
-        fetchedAt,
-        retryAfter: null,
-      });
-      if (tags.length > 0) {
-        progress.successfulVideoCount += 1;
-      } else {
-        progress.emptyVideoCount += 1;
-      }
-    } catch (error) {
-      if (signal.aborted) {
-        break;
-      }
-      if (useAuthStore.getState().userId !== expectedUid) {
-        progress.paused = true;
-        break;
-      }
+  type BackfillOutcome =
+    | {kind: 'success' | 'empty'; videoId: string; tags: VideoTag[]; fetchedAt: number}
+    | {kind: 'failure'; videoId: string; cached?: VideoTagCacheEntry; retryAfter: number; pause: boolean}
+    | {kind: 'accountChanged'}
+    | null;
 
-      const retryAfter = Date.now() + retryDelayFor(error);
-      await upsertVideoTagCache({videoId: video.bvid, retryAfter});
-      cacheByVideoId.set(video.bvid, {
-        videoId: video.bvid,
-        tags: cached?.tags ?? [],
-        fetchedAt: cached?.fetchedAt ?? null,
-        retryAfter,
-      });
-      progress.failedVideoCount += 1;
-      if (shouldPauseBackfill(error)) {
+  const concurrency = config.tagRecommendations.backfillConcurrency;
+  for (let offset = 0; offset < uncachedVideos.length && !progress.paused; offset += concurrency) {
+    if (signal.aborted) break;
+    if (useAuthStore.getState().userId !== expectedUid) {
+      progress.paused = true;
+      break;
+    }
+
+    const batch = uncachedVideos.slice(offset, offset + concurrency);
+    const outcomes = await Promise.all(batch.map(async (video): Promise<BackfillOutcome> => {
+      const cached = cacheByVideoId.get(video.bvid);
+      try {
+        const response = await biliApi.getVideoTags(video.bvid, signal);
+        if (signal.aborted) return null;
+        if (useAuthStore.getState().userId !== expectedUid) {
+          return {kind: 'accountChanged'};
+        }
+        const tags = trimVideoTags(response);
+        return {
+          kind: tags.length > 0 ? 'success' : 'empty',
+          videoId: video.bvid,
+          tags,
+          fetchedAt: Date.now(),
+        };
+      } catch (error) {
+        if (signal.aborted) return null;
+        if (useAuthStore.getState().userId !== expectedUid) {
+          return {kind: 'accountChanged'};
+        }
+        return {
+          kind: 'failure',
+          videoId: video.bvid,
+          cached,
+          retryAfter: Date.now() + retryDelayFor(error),
+          pause: shouldPauseBackfill(error),
+        };
+      }
+    }));
+
+    if (useAuthStore.getState().userId !== expectedUid) {
+      progress.paused = true;
+      onProgress({...progress});
+      break;
+    }
+
+    const cacheWrites: Array<{
+      videoId: string;
+      tags?: VideoTag[];
+      fetchedAt?: number | null;
+      retryAfter?: number | null;
+    }> = [];
+    let pauseAfterBatch = false;
+    for (const outcome of outcomes) {
+      if (!outcome) continue;
+      if (outcome.kind === 'accountChanged') {
         progress.paused = true;
+        pauseAfterBatch = true;
+        continue;
+      }
+      if (outcome.kind === 'success' || outcome.kind === 'empty') {
+        const cachedEntry = {
+          videoId: outcome.videoId,
+          tags: outcome.tags,
+          fetchedAt: outcome.fetchedAt,
+          retryAfter: null,
+        };
+        cacheWrites.push(cachedEntry);
+        cacheByVideoId.set(outcome.videoId, cachedEntry);
         progress.completedVideoCount += 1;
-        onProgress({...progress});
-        break;
+        if (outcome.kind === 'success') {
+          progress.successfulVideoCount += 1;
+        } else {
+          progress.emptyVideoCount += 1;
+        }
+        continue;
+      }
+
+      const cachedEntry = {
+        videoId: outcome.videoId,
+        tags: outcome.cached?.tags ?? [],
+        fetchedAt: outcome.cached?.fetchedAt ?? null,
+        retryAfter: outcome.retryAfter,
+      };
+      cacheWrites.push({
+        videoId: cachedEntry.videoId,
+        fetchedAt: cachedEntry.fetchedAt,
+        retryAfter: cachedEntry.retryAfter,
+      });
+      cacheByVideoId.set(outcome.videoId, cachedEntry);
+      progress.completedVideoCount += 1;
+      progress.failedVideoCount += 1;
+      if (outcome.pause) {
+        progress.paused = true;
+        pauseAfterBatch = true;
       }
     }
 
-    progress.completedVideoCount += 1;
+    await upsertVideoTagCacheBatch(cacheWrites);
     onProgress({...progress});
+    if (pauseAfterBatch || signal.aborted) break;
   }
 
   const cacheEntries = Array.from(cacheByVideoId.values());
@@ -309,8 +362,7 @@ export async function backfillFavoriteTags(
 }
 
 /**
- * 在全局索引完成后异步补齐标签。B 站请求沿用全局限速，因此不阻塞主同步，
- * 且 syncStore 会在下次索引同步开始前中断本任务，避免与索引请求争用限速窗口。
+ * 后台标签队列可在索引同步期间接收新入库视频；所有 B 站请求仍共用全局限速器。
  */
 function enqueueFavoriteTagsBackfill(
   expectedUid: string,
@@ -414,6 +466,8 @@ function enqueueFavoriteTagsBackfill(
         });
 
         if (interrupted) {
+          backgroundBackfillPaused = true;
+          backgroundBackfillEpoch += 1;
           useTagBackfillStore.getState().finish(expectedUid, 'paused');
           return;
         }
@@ -445,7 +499,7 @@ function enqueueFavoriteTagsBackfill(
   })();
 }
 
-/** 在索引同步完成后解除暂停闸门并安排当前索引的标签回填。 */
+/** 解除暂停闸门并安排当前索引已有视频的标签回填。 */
 export function resumeFavoriteTagsBackfill(
   expectedUid: string,
   videos: FavoriteVideo[],
@@ -455,11 +509,13 @@ export function resumeFavoriteTagsBackfill(
   enqueueFavoriteTagsBackfill(expectedUid, videos, backgroundBackfillEpoch);
 }
 
-/** 索引同步开始时暂停后台标签请求，已写入 WatermelonDB 的缓存会保留。 */
-export function pauseFavoriteTagsBackfill(): void {
-  backgroundBackfillPaused = true;
-  backgroundBackfillEpoch += 1;
-  backgroundBackfillTask?.controller.abort();
+/** 将新同步入库的视频追加到正在运行的标签回填队列。 */
+export function addFavoriteVideosToTagBackfill(
+  expectedUid: string,
+  videos: FavoriteVideo[],
+): void {
+  if (backgroundBackfillPaused) return;
+  enqueueFavoriteTagsBackfill(expectedUid, videos, backgroundBackfillEpoch);
 }
 
 /**
