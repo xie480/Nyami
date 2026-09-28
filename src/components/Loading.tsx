@@ -5,6 +5,7 @@ import {useTheme} from '../theme';
 
 const CANVAS_SIZE = 160;
 const WAVE_BAR_COUNT = 7;
+const WAVE_PEAKS = [0.72, 0.92, 0.66, 1, 0.78, 0.94, 0.7];
 const STATUS_DOT_COUNT = 3;
 
 export const Loading: React.FC<{text?: string}> = ({text = '加载中...'}) => {
@@ -35,9 +36,9 @@ export const Loading: React.FC<{text?: string}> = ({text = '加载中...'}) => {
         Animated.timing(value, {toValue: low, duration, easing: Easing.inOut(Easing.cubic), useNativeDriver: true}),
       ]));
     const waves = waveLevels.map((level, index) => Animated.loop(Animated.sequence([
-      Animated.timing(level, {toValue: 1, duration: 230, delay: index * 55, easing: Easing.out(Easing.cubic), useNativeDriver: true}),
-      Animated.timing(level, {toValue: 0.12, duration: 300, easing: Easing.inOut(Easing.cubic), useNativeDriver: true}),
-      Animated.delay((WAVE_BAR_COUNT - index) * 55),
+      Animated.timing(level, {toValue: WAVE_PEAKS[index], duration: 180, delay: index * 45, easing: Easing.out(Easing.cubic), useNativeDriver: true}),
+      Animated.timing(level, {toValue: 0.12, duration: 230, easing: Easing.inOut(Easing.cubic), useNativeDriver: true}),
+      Animated.timing(level, {toValue: 0.12, duration: (WAVE_BAR_COUNT - index) * 45, easing: Easing.linear, useNativeDriver: true}),
     ])));
     const dots = statusDots.map((dot, index) => Animated.loop(Animated.sequence([
       Animated.timing(dot, {toValue: 1, duration: 240, delay: index * 140, easing: Easing.out(Easing.quad), useNativeDriver: true}),
@@ -60,7 +61,7 @@ export const Loading: React.FC<{text?: string}> = ({text = '加载中...'}) => {
   const outerSpin = outerRotation.interpolate({inputRange: [0, 1], outputRange: ['0deg', '360deg']});
   const innerSpin = innerRotation.interpolate({inputRange: [0, 1], outputRange: ['360deg', '0deg']});
   const orbitSpin = orbitRotation.interpolate({inputRange: [0, 1], outputRange: ['0deg', '360deg']});
-  const coreScale = corePulse.interpolate({inputRange: [0, 1], outputRange: [0.92, 1.08]});
+  const coreScale = corePulse.interpolate({inputRange: [0, 1], outputRange: [0.88, 1.12]});
   const haloScale = haloPulse.interpolate({inputRange: [0, 1], outputRange: [0.62, 1.2]});
   const haloOpacity = haloPulse.interpolate({inputRange: [0, 1], outputRange: [0.52, 0.04]});
 
@@ -118,15 +119,15 @@ export const Loading: React.FC<{text?: string}> = ({text = '加载中...'}) => {
             style={{width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center'}}>
             <View style={{height: 32, flexDirection: 'row', alignItems: 'center'}}>
               {waveLevels.map((level, index) => {
-                const barScale = level.interpolate({inputRange: [0.12, 1], outputRange: [0.2, 1]});
+                const barScale = level.interpolate({inputRange: [0.12, 1], outputRange: [0.08, 1]});
                 return (
                   <Animated.View
                     key={index}
                     style={{
-                      width: 3,
-                      height: 30,
+                      width: 4,
+                      height: 34,
                       borderRadius: 2,
-                      marginHorizontal: 2,
+                      marginHorizontal: 1.5,
                       backgroundColor: t.colors.onPrimary,
                       opacity: level,
                       transform: [{scaleY: barScale}],
