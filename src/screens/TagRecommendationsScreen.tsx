@@ -622,10 +622,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
               {profile.preferences.length > 0 ? profileView === 'radar' ? (
                 <TagProfileRadar preferences={profile.preferences} />
               ) : (
-                <TagProfilePipeline
-                  profile={profile}
-                  recommendationCount={recommendations.length}
-                />
+                <TagProfilePipeline profile={profile} />
               ) : (
                 <Text style={{color: t.colors.textHint, fontSize: t.fontSize.sm, marginTop: t.spacing.md}}>
                   还没有可用的标签数据。点击下方按钮读取收藏视频 tag。

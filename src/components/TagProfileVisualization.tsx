@@ -122,17 +122,14 @@ export const TagProfileRadar = ({preferences}: {preferences: TagPreference[]}) =
 
 export const TagProfilePipeline = ({
   profile,
-  recommendationCount,
 }: {
   profile: TagProfile;
-  recommendationCount: number;
 }) => {
   const t = useTheme();
   const steps = [
     {title: '收藏视频', detail: '作为画像分析的数据源', value: `${profile.totalVideoCount} 个`, icon: 'heart-multiple-outline'},
     {title: '标签解析', detail: `${profile.taggedVideoCount} 个视频含可用标签`, value: `${profile.resolvedVideoCount}/${profile.totalVideoCount}`, icon: 'tag-multiple-outline'},
     {title: '兴趣维度', detail: '按标签覆盖频次形成偏好', value: `${profile.preferences.length} 项`, icon: 'chart-timeline-variant'},
-    {title: '歌曲推荐', detail: '匹配画像并过滤收藏内容', value: `${recommendationCount} 首`, icon: 'music-note-eighth'},
   ] as const;
 
   return (
