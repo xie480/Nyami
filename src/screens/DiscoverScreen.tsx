@@ -1,4 +1,4 @@
-import React, {useCallback} from 'react';
+import React, {useCallback, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,7 @@ import {IconButton} from '../components/IconButton';
 import {useHomeRecommendations} from '../hooks/useHomeRecommendations';
 import {usePlayerStore} from '../store/playerStore';
 import {useProgressStore} from '../store/progressStore';
+import {useAuthStore} from '../store/authStore';
 import {prefetchAudioUrl} from '../services/dataPrefetcher';
 import {loadQueue, playWithIntent, resolveCurrentTrack} from '../services/trackPlayer';
 import {searchVideoToFavoriteVideo} from '../services/transformers';
@@ -33,6 +34,8 @@ export const DiscoverScreen = ({navigation}: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const {uid, feed, refreshing, refresh} = useHomeRecommendations();
+  const biliAvatar = useAuthStore(state => state.userInfo?.avatar ?? '');
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState('');
   const setQueue = usePlayerStore(state => state.setQueue);
 
   const startPlayback = useCallback(async (selectedVideo: TagRecommendation) => {
@@ -63,6 +66,12 @@ export const DiscoverScreen = ({navigation}: any) => {
 
   const glassBackground = t.glass?.colors.glass.bg ?? t.colors.surface;
   const glassBorder = t.glass?.colors.glass.border ?? t.colors.divider;
+  const avatarUrl = biliAvatar
+    ? biliAvatar.startsWith('//')
+      ? `https:${biliAvatar}`
+      : biliAvatar.replace(/^http:\/\//i, 'https://')
+    : '';
+  const showAvatar = Boolean(avatarUrl) && failedAvatarUrl !== avatarUrl;
   const previewCollections = feed.collections.slice(0, config.recommendations.homePlaylistPreviewCount);
   const previewSongs = feed.songs.slice(0, config.recommendations.homeSongPreviewCount);
 
@@ -151,7 +160,23 @@ export const DiscoverScreen = ({navigation}: any) => {
             <Text style={{fontSize: t.fontSize.xxl, fontWeight: '800', color: t.colors.text}}>发现好音乐</Text>
             <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 3}}>按你的收藏画像，每 5 小时挑一份灵感</Text>
           </View>
-          <IconButton name="account-circle-outline" size={28} color={t.colors.textSub} accessibilityLabel="用户画像" onPress={() => navigation.navigate('TagRecommendations')} />
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="用户画像"
+            activeOpacity={0.75}
+            onPress={() => navigation.navigate('TagRecommendations')}
+            style={{width: 42, height: 42, borderRadius: 21, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.surfaceHigh}}>
+            {showAvatar ? (
+              <FastImage
+                source={{uri: avatarUrl}}
+                style={{width: 42, height: 42, borderRadius: 21}}
+                resizeMode={FastImage.resizeMode.cover}
+                onError={() => setFailedAvatarUrl(avatarUrl)}
+              />
+            ) : (
+              <Icon name="account-circle-outline" size={28} color={t.colors.textSub} />
+            )}
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity
