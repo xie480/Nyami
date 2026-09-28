@@ -25,6 +25,7 @@ import {persistVideoPartsToDb} from '../db/operations';
 import {useAuthStore} from '../store/authStore';
 import {loadMorePersonalizedSongs} from './homeRecommendationService';
 import {searchVideoToFavoriteVideo} from './transformers';
+import {consumeExpiredSleepTimer} from './sleepTimer';
 
 let _ready = false;
 
@@ -1848,6 +1849,11 @@ export async function PlaybackService() {
   });
 
   TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, event => {
+    if (consumeExpiredSleepTimer()) {
+      pausePlayback().catch(error => {
+        LoggerService.warn('TrackPlayer', 'SleepTimer', '定时暂停失败', error);
+      });
+    }
     handlePlaybackProgress(event.position, event.duration, event.track);
   });
 
@@ -1872,6 +1878,15 @@ export async function PlaybackService() {
 
   TrackPlayer.addEventListener(Event.PlaybackState, async playbackState => {
     const playerState = (playbackState as any).state;
+
+    if (playerState === State.Playing && consumeExpiredSleepTimer()) {
+      try {
+        await pausePlayback();
+      } catch (error) {
+        LoggerService.warn('TrackPlayer', 'SleepTimer', '定时暂停失败', error);
+      }
+      return;
+    }
 
     if (playerState === State.Paused || playerState === State.Stopped) {
       try {

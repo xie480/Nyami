@@ -32,6 +32,7 @@ import {AlbumBackground} from '../components/player/AlbumBackground';
 import {PlaybackControls} from '../components/player/PlaybackControls';
 import {PlayerActionPanel} from '../components/player/PlayerActionPanel';
 import {PlayerMoreSheet} from '../components/player/PlayerMoreSheet';
+import {SleepTimerSheet} from '../components/player/SleepTimerSheet';
 import {TrackInfo} from '../components/player/TrackInfo';
 import {VinylRecord} from '../components/player/VinylRecord';
 import {
@@ -42,6 +43,7 @@ import {
   skipToNext,
   skipToPrevious,
 } from '../services/trackPlayer';
+import {scheduleSleepTimer} from '../services/sleepTimer';
 import {formatDuration} from '../utils/format';
 import {useTheme} from '../theme';
 import {useAlbumTheme} from '../hooks/useAlbumTheme';
@@ -121,6 +123,8 @@ export const PlayerScreen = () => {
   const playback = usePlaybackState();
 
   const [isMoreSheetVisible, setIsMoreSheetVisible] = useState(false);
+  const [isSleepTimerSheetVisible, setIsSleepTimerSheetVisible] =
+    useState(false);
   const [favoritePickerVisible, setFavoritePickerVisible] = useState(false);
   const [dragPosition, setDragPosition] = useState<number | null>(null);
   const [isReduceMotionEnabled, setIsReduceMotionEnabled] = useState(false);
@@ -415,9 +419,19 @@ export const PlayerScreen = () => {
           theme={albumTheme}
           onQueue={() => useUIStore.getState().setPlaylistVisible(true)}
           onEffects={() => navigation.navigate('SoundLab')}
+          onTimer={() => setIsSleepTimerSheetVisible(true)}
           onMore={() => setIsMoreSheetVisible(true)}
         />
       </ScrollView>
+
+      <SleepTimerSheet
+        visible={isSleepTimerSheetVisible}
+        theme={albumTheme}
+        onStart={minutes => {
+          scheduleSleepTimer(minutes, () => pausePlayback());
+        }}
+        onClose={() => setIsSleepTimerSheetVisible(false)}
+      />
 
       <PlayerMoreSheet
         visible={isMoreSheetVisible}
