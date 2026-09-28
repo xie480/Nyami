@@ -121,9 +121,14 @@ export const DiscoverScreen = ({navigation}: any) => {
         <Text style={{fontSize: t.fontSize.base, lineHeight: 22, fontWeight: '700', color: t.colors.text, marginTop: t.spacing.sm}} numberOfLines={2}>
           {item.title}
         </Text>
-        <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 3}} numberOfLines={1}>
+      </TouchableOpacity>
+      <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 3}}>
+        <Text style={{flex: 1, minWidth: 0, fontSize: t.fontSize.xs, color: t.colors.textSub}} numberOfLines={1}>
           {item.ownerName || 'B 站 UP 主'} · {item.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹'}
         </Text>
+        <SubscribePlaylistButton source={item} compact />
+      </View>
+      <TouchableOpacity activeOpacity={0.82} onPress={() => openCollection(item)}>
         <Text style={{fontSize: t.fontSize.xs, lineHeight: 18, color: t.colors.textHint, marginTop: 5, minHeight: 36}} numberOfLines={2}>
           {item.description?.trim() || `B 站暂未提供简介 · 收录 ${item.mediaCount} 个视频`}
         </Text>
@@ -135,9 +140,6 @@ export const DiscoverScreen = ({navigation}: any) => {
           ))}
         </View>
       </TouchableOpacity>
-      <View style={{marginTop: t.spacing.xs}}>
-        <SubscribePlaylistButton source={item} compact />
-      </View>
     </View>
   );
 

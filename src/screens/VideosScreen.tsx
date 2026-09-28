@@ -17,6 +17,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import TrackPlayer from 'react-native-track-player';
 import { IconButton } from '../components/IconButton';
+import { SubscribePlaylistButton } from '../components/SubscribePlaylistButton';
 import { StatusBar } from 'react-native';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
@@ -481,6 +482,11 @@ export const VideosScreen = ({ route, navigation }: any) => {
           style={{alignSelf: 'flex-start', marginTop: statusBarHeight + 5, marginLeft: t.spacing.md, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(12,10,22,0.32)'}}>
           <Icon name="chevron-left" size={28} color="#fff" />
         </TouchableOpacity>
+        {source ? (
+          <View style={{position: 'absolute', top: statusBarHeight + 5, right: t.spacing.md, zIndex: 2}}>
+            <SubscribePlaylistButton source={source} compact />
+          </View>
+        ) : null}
         <View style={{position: 'absolute', left: t.spacing.lg, right: t.spacing.lg, bottom: t.spacing.lg}}>
           <View style={{alignSelf: 'flex-start', paddingHorizontal: t.spacing.sm, paddingVertical: 4, borderRadius: t.radius.full, backgroundColor: t.colors.primary}}>
             <Text style={{fontSize: t.fontSize.xs, fontWeight: '600', color: t.colors.onPrimary}}>

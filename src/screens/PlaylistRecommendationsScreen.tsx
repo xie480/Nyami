@@ -113,13 +113,12 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   const renderCollection = useCallback(({item: source}: {item: CollectionRecommendation}) => (
     <View style={{marginBottom: t.spacing.md}}>
       <GlassView borderRadius={22} backgroundColor={glassBackground} borderColor={glassBorder} noShadow noBlur minimal>
-        <View style={{padding: t.spacing.sm}}>
+        <View style={{flexDirection: 'row', padding: t.spacing.sm}}>
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel={`打开 ${source.title}`}
             activeOpacity={0.8}
-            onPress={() => openSource(source)}
-            style={{flexDirection: 'row'}}>
+            onPress={() => openSource(source)}>
             <View style={{width: 116, height: 128, borderRadius: 16, overflow: 'hidden', backgroundColor: t.colors.surfaceHigh}}>
               {source.cover ? (
                 <FastImage source={{uri: source.cover}} style={{width: '100%', height: '100%'}} resizeMode={FastImage.resizeMode.cover} />
@@ -133,13 +132,25 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
                 <Text style={{fontSize: 10, color: '#fff', marginLeft: 3}}>{source.mediaCount}</Text>
               </View>
             </View>
-            <View style={{flex: 1, marginLeft: t.spacing.md, paddingVertical: 3}}>
-              <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
+          </TouchableOpacity>
+          <View style={{flex: 1, minWidth: 0, marginLeft: t.spacing.md, paddingVertical: 3}}>
+            <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={`打开 ${source.title}`}
+                activeOpacity={0.8}
+                onPress={() => openSource(source)}
+                style={{flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'flex-start'}}>
                 <Text style={{flex: 1, color: t.colors.text, fontSize: t.fontSize.base, lineHeight: 21, fontWeight: '700'}} numberOfLines={2}>
                   {source.title}
                 </Text>
                 <Icon name="chevron-right" size={21} color={t.colors.textHint} />
+              </TouchableOpacity>
+              <View style={{marginLeft: t.spacing.xs}}>
+                <SubscribePlaylistButton source={source} compact />
               </View>
+            </View>
+            <TouchableOpacity activeOpacity={0.8} onPress={() => openSource(source)}>
               <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 4}} numberOfLines={1}>
                 {source.ownerName || 'B 站 UP 主'} · {source.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹'}
               </Text>
@@ -153,10 +164,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
                   </View>
                 ))}
               </View>
-            </View>
-          </TouchableOpacity>
-          <View style={{marginLeft: 116 + t.spacing.md, marginTop: t.spacing.xs}}>
-            <SubscribePlaylistButton source={source} />
+            </TouchableOpacity>
           </View>
         </View>
       </GlassView>
