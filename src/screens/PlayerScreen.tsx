@@ -1,8 +1,10 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  Alert,
   AccessibilityInfo,
   ActivityIndicator,
   AppState,
+  Linking,
   Platform,
   ScrollView,
   StatusBar,
@@ -46,6 +48,7 @@ import {
 } from '../services/trackPlayer';
 import {scheduleSleepTimer} from '../services/sleepTimer';
 import {formatDuration} from '../utils/format';
+import {createBilibiliVideoUrl} from '../utils/bilibiliVideoUrl';
 import {useTheme} from '../theme';
 import {useAlbumTheme} from '../hooks/useAlbumTheme';
 import {useSettingsStore} from '../store/settingsStore';
@@ -160,6 +163,19 @@ export const PlayerScreen = () => {
       tags: [],
     };
   }, [currentVideo]);
+  const currentVideoUrl = createBilibiliVideoUrl(currentVideo?.bvid);
+  const openCurrentVideoOnBilibili = useCallback(async () => {
+    if (!currentVideoUrl) {
+      return;
+    }
+
+    setIsMoreSheetVisible(false);
+    try {
+      await Linking.openURL(currentVideoUrl);
+    } catch {
+      Alert.alert('无法打开视频', '请检查设备是否可以打开 B 站视频链接。');
+    }
+  }, [currentVideoUrl]);
 
   const artworkUri =
     typeof track?.artwork === 'string' ? track.artwork : undefined;
@@ -439,9 +455,11 @@ export const PlayerScreen = () => {
         visible={isMoreSheetVisible}
         blurAmount={playerArtworkBlurAmount}
         parts={currentVideo?.parts ?? []}
+        bvid={currentVideo?.bvid}
         currentCid={currentCid}
         theme={albumTheme}
         onBlurAmountChange={setPlayerArtworkBlurAmount}
+        onOpenBilibiliVideo={openCurrentVideoOnBilibili}
         onSelectPart={part => {
           if (currentVideo) {
             playSpecificPart(currentVideo.bvid, part.cid, part.title);

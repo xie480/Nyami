@@ -14,15 +14,18 @@ import {Slider} from '../Slider';
 import {useTheme} from '../../theme';
 import {PLAYER_ARTWORK_BLUR} from '../../store/settingsStore';
 import {AlbumTheme} from '../../utils/albumTheme';
+import {createBilibiliVideoUrl} from '../../utils/bilibiliVideoUrl';
 import type {VideoPart} from '../../types/domain';
 
 interface Props {
   visible: boolean;
   blurAmount: number;
   parts: VideoPart[];
+  bvid: string | null | undefined;
   currentCid: number | null;
   theme: AlbumTheme;
   onBlurAmountChange: (value: number) => void;
+  onOpenBilibiliVideo: () => void;
   onSelectPart: (part: VideoPart) => void;
   onClose: () => void;
 }
@@ -31,14 +34,17 @@ export const PlayerMoreSheet: React.FC<Props> = ({
   visible,
   blurAmount,
   parts,
+  bvid,
   currentCid,
   theme,
   onBlurAmountChange,
+  onOpenBilibiliVideo,
   onSelectPart,
   onClose,
 }) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const videoUrl = createBilibiliVideoUrl(bvid);
   const sheetStyle = useMemo(
     () => ({
       backgroundColor: t.isDark ? '#17191E' : '#F6F4EF',
@@ -138,6 +144,40 @@ export const PlayerMoreSheet: React.FC<Props> = ({
                 柔化
               </Text>
             </View>
+
+            {videoUrl ? (
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="在 B 站打开当前视频详情页"
+                onPress={onOpenBilibiliVideo}
+                activeOpacity={0.72}
+                style={[styles.sourceLink, {borderColor: t.colors.divider}]}>
+                <View
+                  style={[
+                    styles.sectionIcon,
+                    {backgroundColor: `${theme.primaryAccent}18`},
+                  ]}>
+                  <MaterialCommunityIcons
+                    name="open-in-new"
+                    size={20}
+                    color={theme.primaryAccent}
+                  />
+                </View>
+                <View style={styles.sectionCopy}>
+                  <Text style={[styles.sectionTitle, {color: t.colors.text}]}>
+                    打开 B 站视频详情页
+                  </Text>
+                  <Text style={[styles.caption, {color: t.colors.textSub}]}>
+                    查看当前视频与评论
+                  </Text>
+                </View>
+                <MaterialCommunityIcons
+                  name="chevron-right"
+                  size={22}
+                  color={t.colors.textHint}
+                />
+              </TouchableOpacity>
+            ) : null}
 
             {parts.length > 1 ? (
               <View style={styles.partsSection}>
@@ -247,6 +287,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: -2,
+  },
+  sourceLink: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    paddingHorizontal: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
   },
   partsSection: {marginTop: 22},
   partsList: {marginTop: 8},
