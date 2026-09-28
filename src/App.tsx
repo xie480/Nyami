@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuthStore } from './store/authStore';
 import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler, PermissionsAndroid, StatusBar } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -37,7 +37,7 @@ import { SearchScreen } from './screens/SearchScreen';
 import { PlaylistRecommendationsScreen } from './screens/PlaylistRecommendationsScreen';
 import { SongRecommendationsScreen } from './screens/SongRecommendationsScreen';
 
-const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
 
 const GlobalPlaylistPanel = React.memo(function GlobalPlaylistPanel() {
   const visible = useUIStore(state => state.playlistVisible);
@@ -126,7 +126,7 @@ export default function App() {
   }), [isDark]);
   const stackScreenOptions = useMemo(() => ({
     headerShown: false,
-    cardStyle: { backgroundColor: 'transparent' },
+    contentStyle: { backgroundColor: 'transparent' },
     animation: 'none' as const,
     // 页面不可见时冻结，减少后台页面持续渲染。
     freezeOnBlur: true,
