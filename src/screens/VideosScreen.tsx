@@ -18,7 +18,6 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import TrackPlayer from 'react-native-track-player';
 import { IconButton } from '../components/IconButton';
 import { StatusBar } from 'react-native';
-import { Header } from '../components/Header';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
@@ -442,7 +441,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       justifyContent: 'flex-end',
     },
     modalContent: {
-      backgroundColor: t.colors.background,
+      backgroundColor: t.isDark ? '#17181B' : '#FAFBFD',
       borderTopLeftRadius: 12,
       borderTopRightRadius: 12,
       padding: t.spacing.lg,
@@ -461,59 +460,44 @@ export const VideosScreen = ({ route, navigation }: any) => {
   return (
     // 【性能优化】collapsable=false 确保 Android 上屏幕容器不被 View 融合优化
     <View style={s.container} {...(Platform.OS === 'android' ? { collapsable: false as any } : {})}>
-      <StatusBar barStyle={source || t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
-      {source ? (
-        <View style={{height: 252, overflow: 'hidden', backgroundColor: t.colors.primaryDark}}>
-          {heroCover ? (
-            <FastImage source={{uri: heroCover}} style={StyleSheet.absoluteFillObject} resizeMode={FastImage.resizeMode.cover} />
-          ) : null}
-          <LinearGradient
-            pointerEvents="none"
-            colors={t.isDark ? ['rgba(8,8,12,0.08)', 'rgba(8,8,12,0.94)'] : ['rgba(12,10,22,0.02)', 'rgba(12,10,22,0.84)']}
-            style={StyleSheet.absoluteFillObject}
-          />
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="返回收藏夹"
-            onPress={() => navigation.goBack()}
-            style={{alignSelf: 'flex-start', marginTop: statusBarHeight + 5, marginLeft: t.spacing.md, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(12,10,22,0.32)'}}>
-            <Icon name="chevron-left" size={28} color="#fff" />
-          </TouchableOpacity>
-          <View style={{position: 'absolute', left: t.spacing.lg, right: t.spacing.lg, bottom: t.spacing.lg}}>
-            <View style={{alignSelf: 'flex-start', paddingHorizontal: t.spacing.sm, paddingVertical: 4, borderRadius: t.radius.full, backgroundColor: t.colors.primary}}>
-              <Text style={{fontSize: t.fontSize.xs, fontWeight: '600', color: t.colors.onPrimary}}>
-                {source.kind === 'subscribedSeason' ? '订阅合集' : '收藏夹'}
-              </Text>
-            </View>
-            <Text style={{fontSize: 25, lineHeight: 31, fontWeight: '700', color: '#fff', marginTop: t.spacing.sm}} numberOfLines={2}>{listTitle}</Text>
-            <Text style={{fontSize: t.fontSize.sm, color: 'rgba(255,255,255,0.88)', marginTop: t.spacing.xs}} numberOfLines={1}>
-              {source.ownerName ? `${source.ownerName} · ` : ''}{totalVideoCount} 个视频
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      <View style={{height: 252, overflow: 'hidden', backgroundColor: t.colors.primaryDark}}>
+        {heroCover ? (
+          <FastImage source={{uri: heroCover}} style={StyleSheet.absoluteFillObject} resizeMode={FastImage.resizeMode.cover} />
+        ) : (
+          <View style={[StyleSheet.absoluteFillObject, {alignItems: 'center', justifyContent: 'center'}]}>
+            <Icon name="folder-music-outline" size={72} color="rgba(255,255,255,0.18)" />
+          </View>
+        )}
+        <LinearGradient
+          pointerEvents="none"
+          colors={t.isDark ? ['rgba(8,8,12,0.08)', 'rgba(8,8,12,0.94)'] : ['rgba(12,10,22,0.02)', 'rgba(12,10,22,0.84)']}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="返回收藏夹"
+          onPress={() => navigation.goBack()}
+          style={{alignSelf: 'flex-start', marginTop: statusBarHeight + 5, marginLeft: t.spacing.md, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(12,10,22,0.32)'}}>
+          <Icon name="chevron-left" size={28} color="#fff" />
+        </TouchableOpacity>
+        <View style={{position: 'absolute', left: t.spacing.lg, right: t.spacing.lg, bottom: t.spacing.lg}}>
+          <View style={{alignSelf: 'flex-start', paddingHorizontal: t.spacing.sm, paddingVertical: 4, borderRadius: t.radius.full, backgroundColor: t.colors.primary}}>
+            <Text style={{fontSize: t.fontSize.xs, fontWeight: '600', color: t.colors.onPrimary}}>
+              {source?.kind === 'subscribedSeason' ? '订阅合集' : source ? '收藏夹' : '我创建'}
             </Text>
-            {source.description ? (
-              <Text style={{fontSize: t.fontSize.xs, lineHeight: 17, color: 'rgba(255,255,255,0.82)', marginTop: t.spacing.xs}} numberOfLines={2}>
-                {source.description}
-              </Text>
-            ) : null}
           </View>
+          <Text style={{fontSize: 25, lineHeight: 31, fontWeight: '700', color: '#fff', marginTop: t.spacing.sm}} numberOfLines={2}>{listTitle}</Text>
+          <Text style={{fontSize: t.fontSize.sm, color: 'rgba(255,255,255,0.88)', marginTop: t.spacing.xs}} numberOfLines={1}>
+            {source?.ownerName ? `${source.ownerName} · ` : '我的收藏 · '}{totalVideoCount} 个视频
+          </Text>
+          {source?.description ? (
+            <Text style={{fontSize: t.fontSize.xs, lineHeight: 17, color: 'rgba(255,255,255,0.82)', marginTop: t.spacing.xs}} numberOfLines={2}>
+              {source.description}
+            </Text>
+          ) : null}
         </View>
-      ) : (
-        <>
-          <Header title={listTitle} showBack noBorder />
-          <View style={{flexDirection: 'row', alignItems: 'center', marginHorizontal: t.spacing.lg, marginTop: t.spacing.sm, marginBottom: t.spacing.xs, padding: t.spacing.md, borderRadius: 20, backgroundColor: t.colors.primaryLight}}>
-            <View style={{width: 68, height: 68, borderRadius: 16, overflow: 'hidden', backgroundColor: t.colors.surfaceHigh, alignItems: 'center', justifyContent: 'center'}}>
-              {heroCover ? (
-                <FastImage source={{uri: heroCover}} style={{width: '100%', height: '100%'}} resizeMode={FastImage.resizeMode.cover} />
-              ) : (
-                <Icon name="folder-music-outline" size={30} color={t.colors.primary} />
-              )}
-            </View>
-            <View style={{flex: 1, marginLeft: t.spacing.md}}>
-              <Text style={{fontSize: t.fontSize.lg, color: t.colors.text, fontWeight: '700'}} numberOfLines={1}>{listTitle}</Text>
-              <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 5}}>我的收藏夹 · {totalVideoCount} 个视频</Text>
-            </View>
-          </View>
-        </>
-      )}
+      </View>
       {/* 搜索 + 排序栏 */}
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md}}>
         <View style={[s.searchBar, { flex: 1, height: 46, marginHorizontal: 0, marginVertical: 0, borderRadius: t.radius.full }]}>

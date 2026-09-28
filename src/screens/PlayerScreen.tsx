@@ -404,7 +404,7 @@ export const PlayerScreen = () => {
         },
         modalContent: {
           ...STATIC_STYLES.modalContent,
-          backgroundColor: themeColors.surfaceBg,
+          backgroundColor: t.isDark ? '#17181B' : '#FAFBFD',
           paddingBottom: themeColors.modalBottomPadding,
         },
         modalHeader: {
