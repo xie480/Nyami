@@ -34,14 +34,12 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   );
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
-  const listEndReachedArmedRef = useRef(false);
   const loadControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     loadControllerRef.current?.abort();
     loadControllerRef.current = null;
     loadingMoreRef.current = false;
-    listEndReachedArmedRef.current = false;
     setLoadingMore(false);
     setCollections(feed.collections);
     setHasMore(
@@ -58,7 +56,6 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     loadControllerRef.current?.abort();
     loadControllerRef.current = null;
     loadingMoreRef.current = false;
-    listEndReachedArmedRef.current = false;
     setLoadingMore(false);
     void refresh('manual');
   }, [refresh]);
@@ -225,14 +222,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
             tintColor={t.colors.primary}
           />
         )}
-        onScrollBeginDrag={() => {
-          listEndReachedArmedRef.current = true;
-        }}
-        onEndReached={() => {
-          if (!listEndReachedArmedRef.current) return;
-          listEndReachedArmedRef.current = false;
-          void loadMore();
-        }}
+        onEndReached={() => void loadMore()}
         onEndReachedThreshold={0.5}
         initialNumToRender={8}
         maxToRenderPerBatch={8}
