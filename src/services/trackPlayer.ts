@@ -1060,12 +1060,12 @@ export async function resumePlayback(): Promise<void> {
 let lastSkipToastTime = 0;
 let isSkipping = false;
 
-function showQueueNotReadyToast() {
+function showQueueNotReadyToast(message = '下一首暂时无法播放，请检查网络后重试') {
   const now = Date.now();
   if (now - lastSkipToastTime > 2000) {
     if (Platform.OS === 'android') {
       try {
-        ToastAndroid.show('下一首暂时无法播放，请检查网络后重试', ToastAndroid.SHORT);
+        ToastAndroid.show(message, ToastAndroid.SHORT);
       } catch (e) {}
     }
     lastSkipToastTime = now;
@@ -1174,36 +1174,113 @@ async function skipToNextWithPauseRevision(pauseRevision: number) {
 }
 
 export async function skipToPrevious() {
+  if (isSkipping) return;
+  isSkipping = true;
   const revision = queueRevision;
   const pauseRevision = userPauseRevision;
   try {
-    await withNativeQueueMutation(async () => {
-      if (revision !== queueRevision) {
-        return;
+    const position = await withNativeQueueMutation(async () => {
+      if (revision !== queueRevision) return null;
+      const nativeQueue = await TrackPlayer.getQueue();
+      const activeIndex = await TrackPlayer.getActiveTrackIndex();
+      const activeTrack = await TrackPlayer.getActiveTrack();
+      const reportedIndex =
+        typeof activeIndex === 'number' && activeIndex >= 0
+          ? activeIndex
+          : nativeQueue.findIndex(track => {
+              if (track.id !== activeTrack?.id) return false;
+              const queueCid = (track as Track & {cid?: number}).cid;
+              const activeCid = (activeTrack as (Track & {cid?: number}) | undefined)?.cid;
+              return activeCid === undefined || queueCid === activeCid;
+            });
+      return {
+        activeTrack,
+        activeId: (activeTrack?.id as string | undefined) ?? usePlayerStore.getState().currentBvid ?? undefined,
+        activeIndex: reportedIndex,
+        logicalQueue: [...usePlayerStore.getState().queue],
+      };
+    });
+    if (!position || revision !== queueRevision) return;
+
+    const logicalIndex = position.logicalQueue.findIndex(
+      video => video.bvid === position.activeId,
+    );
+    const previousVideo = logicalIndex > 0
+      ? position.logicalQueue[logicalIndex - 1]
+      : undefined;
+    const needsLogicalPrevious = position.activeIndex <= 0 && Boolean(previousVideo);
+    const previousTracks = needsLogicalPrevious && previousVideo
+      ? await hydrateVideo(previousVideo)
+      : [];
+    if (revision !== queueRevision) return;
+    if (needsLogicalPrevious && previousTracks.length === 0) {
+      usePlayerStore.getState().setPlaybackError('上一首暂时无法加载，请检查网络后重试');
+      showQueueNotReadyToast('上一首暂时无法播放，请检查网络后重试');
+      return;
+    }
+
+    const skipped = await withNativeQueueMutation(async () => {
+      if (revision !== queueRevision) return false;
+      const nativeQueue = await TrackPlayer.getQueue();
+      const activeIndex = await TrackPlayer.getActiveTrackIndex();
+      const activeTrack = await TrackPlayer.getActiveTrack();
+      const currentId = (activeTrack?.id as string | undefined)
+        ?? usePlayerStore.getState().currentBvid
+        ?? undefined;
+      const snapshotCid = (position.activeTrack as (Track & {cid?: number}) | undefined)?.cid;
+      const currentCid = (activeTrack as (Track & {cid?: number}) | undefined)?.cid;
+      if (
+        currentId !== position.activeId ||
+        (snapshotCid !== undefined && currentCid !== snapshotCid)
+      ) {
+        return false;
       }
+      const currentIndex =
+        typeof activeIndex === 'number' && activeIndex >= 0
+          ? activeIndex
+          : nativeQueue.findIndex(track => {
+              if (track.id !== activeTrack?.id) return false;
+              const queueCid = (track as Track & {cid?: number}).cid;
+              return currentCid === undefined || queueCid === currentCid;
+            });
+
       const audioRevision = beginAudioTransition();
       await fadeOutForTransition(audioRevision);
       if (
         revision !== queueRevision ||
         audioRevision !== audioTransitionRevision
       ) {
-        return;
+        return false;
       }
-      await TrackPlayer.skipToPrevious();
+      if (currentIndex > 0) {
+        // 原生队列已有前一轨时，优先保留同一视频的分P切换行为。
+        await TrackPlayer.skipToPrevious();
+      } else if (previousVideo && previousTracks.length > 0) {
+        // 搜索/推荐从中间歌曲起播时，loadQueue 只装入当前曲和后续缓冲；
+        // 把前一首插到活动轨之前，避免上一首按钮落在空的原生队列边界。
+        const insertionIndex = currentIndex < 0 ? 0 : currentIndex;
+        await TrackPlayer.add(previousTracks, insertionIndex);
+        await TrackPlayer.skip(insertionIndex);
+      } else {
+        await TrackPlayer.skipToPrevious();
+      }
       if (revision !== queueRevision) {
-        return;
+        return false;
       }
       if (pauseRevision !== userPauseRevision && !playbackIntent) {
-        return;
+        return true;
       }
       if (!playbackIntent) {
-        await playTrackWithFadeIn(audioRevision);
-        return;
+        return playTrackWithFadeIn(audioRevision);
       }
       await TrackPlayer.play();
       playbackIntent = true;
       void fadeInActiveTrack(audioRevision);
+      return true;
     });
+    if (skipped) {
+      usePlayerStore.getState().setPlaybackError(null);
+    }
   } catch (e) {
     LoggerService.error(
       'TrackPlayer',
@@ -1211,6 +1288,10 @@ export async function skipToPrevious() {
       'Error skipping to previous',
       e,
     );
+    usePlayerStore.getState().setPlaybackError('上一首暂时无法加载，请检查网络后重试');
+    showQueueNotReadyToast('上一首暂时无法播放，请检查网络后重试');
+  } finally {
+    isSkipping = false;
   }
 }
 
