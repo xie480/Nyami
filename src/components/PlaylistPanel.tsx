@@ -13,6 +13,8 @@ import {fetchOnlineVideoSearchPage} from '../services/onlineVideoSearchService';
 import {searchVideoToFavoriteVideo} from '../services/transformers';
 import { useFolderDataStore } from '../store/folderDataStore';
 import { useSyncStore } from '../store/syncStore';
+import { useAuthStore } from '../store/authStore';
+import { loadMorePersonalizedSongs } from '../services/homeRecommendationService';
 
 const QUEUE_LOAD_AHEAD_TRACKS = 5;
 const EMPTY_PLAYLIST_QUEUE: FavoriteVideo[] = [];
@@ -233,7 +235,64 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
 
   const handleLoadMore = useCallback(async () => {
     if (loadingMoreRef.current || !playContext) return;
-    if (usePlayerStore.getState().playMode !== 'sequential') return;
+    const playerState = usePlayerStore.getState();
+    if (playerState.playMode !== 'sequential' || playerState.queueLoading) return;
+
+    if (playContext.isPersonalized) {
+      if (playContext.recommendationHasMore === false) return;
+      const uid = useAuthStore.getState().userId;
+      if (!uid) return;
+
+      const nextPage = (playContext.recommendationPage ?? 1) + 1;
+      let activeContext = playContext;
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+      playerState.setQueueLoading(true);
+      try {
+        const result = await loadMorePersonalizedSongs(
+          uid,
+          nextPage,
+          playerState.queue.map(video => video.bvid),
+          new AbortController().signal,
+        );
+        const latestPlayer = usePlayerStore.getState();
+        if (
+          latestPlayer.playContext !== playContext ||
+          useAuthStore.getState().userId !== uid
+        ) {
+          return;
+        }
+        const existingBvids = new Set(latestPlayer.queue.map(video => video.bvid));
+        const newItems = result.recommendations
+          .filter(video => !existingBvids.has(video.bvid))
+          .map(searchVideoToFavoriteVideo);
+        if (newItems.length > 0) await latestPlayer.appendQueue(newItems);
+
+        const currentContext = usePlayerStore.getState().playContext;
+        if (currentContext === playContext) {
+          activeContext = {
+            ...currentContext,
+            recommendationPage: nextPage,
+            recommendationHasMore: result.hasMore,
+          };
+          usePlayerStore.getState().setPlayContext(activeContext);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '加载推荐歌曲失败';
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(message, ToastAndroid.SHORT);
+        } else {
+          Alert.alert('加载失败', message);
+        }
+      } finally {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+        if (usePlayerStore.getState().playContext === activeContext) {
+          usePlayerStore.getState().setQueueLoading(false);
+        }
+      }
+      return;
+    }
 
     if (playContext.onlineSearch) {
       const searchContext = playContext.onlineSearch;
