@@ -14,6 +14,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {GlassView} from '../components/GlassView';
 import {IconButton} from '../components/IconButton';
+import {SubscribePlaylistButton} from '../components/SubscribePlaylistButton';
 import {useHomeRecommendations} from '../hooks/useHomeRecommendations';
 import {usePlayerStore} from '../store/playerStore';
 import {useProgressStore} from '../store/progressStore';
@@ -94,47 +95,50 @@ export const DiscoverScreen = ({navigation}: any) => {
   const previewSongs = feed.songs.slice(0, config.recommendations.homeSongPreviewCount);
 
   const renderCollectionCard = (item: CollectionRecommendation) => (
-    <TouchableOpacity
-      key={item.sourceKey}
-      accessibilityRole="button"
-      accessibilityLabel={`打开合集 ${item.title}`}
-      activeOpacity={0.82}
-      onPress={() => openCollection(item)}
-      style={{width: 204, marginRight: t.spacing.md}}>
-      <View style={{height: 128, overflow: 'hidden', borderRadius: 16, backgroundColor: t.colors.surfaceHigh}}>
-        {item.cover ? (
-          <FastImage
-            source={{uri: item.cover}}
-            style={{width: '100%', height: '100%'}}
-            resizeMode={FastImage.resizeMode.cover}
-          />
-        ) : (
-          <View style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
-            <Icon name="playlist-music" size={36} color={t.colors.primary} />
+    <View key={item.sourceKey} style={{width: 204, marginRight: t.spacing.md}}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={`打开合集 ${item.title}`}
+        activeOpacity={0.82}
+        onPress={() => openCollection(item)}>
+        <View style={{height: 128, overflow: 'hidden', borderRadius: 16, backgroundColor: t.colors.surfaceHigh}}>
+          {item.cover ? (
+            <FastImage
+              source={{uri: item.cover}}
+              style={{width: '100%', height: '100%'}}
+              resizeMode={FastImage.resizeMode.cover}
+            />
+          ) : (
+            <View style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
+              <Icon name="playlist-music" size={36} color={t.colors.primary} />
+            </View>
+          )}
+          <View style={{position: 'absolute', left: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9, paddingVertical: 5, borderRadius: 14, backgroundColor: 'rgba(15,15,20,0.7)'}}>
+            <Icon name="play" size={14} color="#fff" />
+            <Text style={{fontSize: t.fontSize.xs, color: '#fff', marginLeft: 3}}>{item.mediaCount} 个视频</Text>
           </View>
-        )}
-        <View style={{position: 'absolute', left: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9, paddingVertical: 5, borderRadius: 14, backgroundColor: 'rgba(15,15,20,0.7)'}}>
-          <Icon name="play" size={14} color="#fff" />
-          <Text style={{fontSize: t.fontSize.xs, color: '#fff', marginLeft: 3}}>{item.mediaCount} 个视频</Text>
         </View>
+        <Text style={{fontSize: t.fontSize.base, lineHeight: 22, fontWeight: '700', color: t.colors.text, marginTop: t.spacing.sm}} numberOfLines={2}>
+          {item.title}
+        </Text>
+        <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 3}} numberOfLines={1}>
+          {item.ownerName || 'B 站 UP 主'} · {item.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹'}
+        </Text>
+        <Text style={{fontSize: t.fontSize.xs, lineHeight: 18, color: t.colors.textHint, marginTop: 5, minHeight: 36}} numberOfLines={2}>
+          {item.description?.trim() || `B 站暂未提供简介 · 收录 ${item.mediaCount} 个视频`}
+        </Text>
+        <View style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 5}}>
+          {item.matchedTags.slice(0, 3).map(tag => (
+            <View key={`${item.sourceKey}:${tag}`} style={{paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: t.colors.primaryLight, marginRight: 5, marginBottom: 4}}>
+              <Text style={{fontSize: 10, color: t.colors.primary}}>{tag}</Text>
+            </View>
+          ))}
+        </View>
+      </TouchableOpacity>
+      <View style={{marginTop: t.spacing.xs}}>
+        <SubscribePlaylistButton source={item} compact />
       </View>
-      <Text style={{fontSize: t.fontSize.base, lineHeight: 22, fontWeight: '700', color: t.colors.text, marginTop: t.spacing.sm}} numberOfLines={2}>
-        {item.title}
-      </Text>
-      <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 3}} numberOfLines={1}>
-        {item.ownerName || 'B 站 UP 主'} · {item.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹'}
-      </Text>
-      <Text style={{fontSize: t.fontSize.xs, lineHeight: 18, color: t.colors.textHint, marginTop: 5, minHeight: 36}} numberOfLines={2}>
-        {item.description?.trim() || `B 站暂未提供简介 · 收录 ${item.mediaCount} 个视频`}
-      </Text>
-      <View style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 5}}>
-        {item.matchedTags.slice(0, 3).map(tag => (
-          <View key={`${item.sourceKey}:${tag}`} style={{paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: t.colors.primaryLight, marginRight: 5, marginBottom: 4}}>
-            <Text style={{fontSize: 10, color: t.colors.primary}}>{tag}</Text>
-          </View>
-        ))}
-      </View>
-    </TouchableOpacity>
+    </View>
   );
 
   const renderSong = (item: TagRecommendation) => (

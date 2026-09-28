@@ -16,6 +16,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {GlassView} from '../components/GlassView';
 import {Header} from '../components/Header';
+import {SubscribePlaylistButton} from '../components/SubscribePlaylistButton';
 import {config} from '../config';
 import {useHomeRecommendations} from '../hooks/useHomeRecommendations';
 import {loadMoreRecommendedCollections} from '../services/homeRecommendationService';
@@ -110,51 +111,56 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   const glassBorder = t.glass?.colors.glass.border ?? t.colors.divider;
 
   const renderCollection = useCallback(({item: source}: {item: CollectionRecommendation}) => (
-    <TouchableOpacity
-      accessibilityRole="button"
-      accessibilityLabel={`打开 ${source.title}`}
-      activeOpacity={0.8}
-      onPress={() => openSource(source)}
-      style={{marginBottom: t.spacing.md}}>
+    <View style={{marginBottom: t.spacing.md}}>
       <GlassView borderRadius={22} backgroundColor={glassBackground} borderColor={glassBorder} noShadow noBlur minimal>
-        <View style={{flexDirection: 'row', padding: t.spacing.sm}}>
-          <View style={{width: 116, height: 128, borderRadius: 16, overflow: 'hidden', backgroundColor: t.colors.surfaceHigh}}>
-            {source.cover ? (
-              <FastImage source={{uri: source.cover}} style={{width: '100%', height: '100%'}} resizeMode={FastImage.resizeMode.cover} />
-            ) : (
-              <View style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
-                <Icon name="playlist-music" size={34} color={t.colors.primary} />
-              </View>
-            )}
-            <View style={{position: 'absolute', bottom: 7, left: 7, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 14, backgroundColor: 'rgba(10,10,16,0.72)'}}>
-              <Icon name="play" size={13} color="#fff" />
-              <Text style={{fontSize: 10, color: '#fff', marginLeft: 3}}>{source.mediaCount}</Text>
-            </View>
-          </View>
-          <View style={{flex: 1, marginLeft: t.spacing.md, paddingVertical: 3}}>
-            <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
-              <Text style={{flex: 1, color: t.colors.text, fontSize: t.fontSize.base, lineHeight: 21, fontWeight: '700'}} numberOfLines={2}>
-                {source.title}
-              </Text>
-              <Icon name="chevron-right" size={21} color={t.colors.textHint} />
-            </View>
-            <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 4}} numberOfLines={1}>
-              {source.ownerName || 'B 站 UP 主'} · {source.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹'}
-            </Text>
-            <Text style={{fontSize: t.fontSize.xs, lineHeight: 17, color: t.colors.textHint, marginTop: 5, flex: 1}} numberOfLines={3}>
-              {source.description?.trim() || `B 站暂未提供简介 · 收录 ${source.mediaCount} 个视频`}
-            </Text>
-            <View style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 4}}>
-              {source.matchedTags.slice(0, 3).map(tag => (
-                <View key={`${source.sourceKey}:${tag}`} style={{paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: t.colors.primaryLight, marginRight: 5, marginBottom: 3}}>
-                  <Text style={{fontSize: 10, color: t.colors.primary}}>{tag}</Text>
+        <View style={{padding: t.spacing.sm}}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`打开 ${source.title}`}
+            activeOpacity={0.8}
+            onPress={() => openSource(source)}
+            style={{flexDirection: 'row'}}>
+            <View style={{width: 116, height: 128, borderRadius: 16, overflow: 'hidden', backgroundColor: t.colors.surfaceHigh}}>
+              {source.cover ? (
+                <FastImage source={{uri: source.cover}} style={{width: '100%', height: '100%'}} resizeMode={FastImage.resizeMode.cover} />
+              ) : (
+                <View style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
+                  <Icon name="playlist-music" size={34} color={t.colors.primary} />
                 </View>
-              ))}
+              )}
+              <View style={{position: 'absolute', bottom: 7, left: 7, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 14, backgroundColor: 'rgba(10,10,16,0.72)'}}>
+                <Icon name="play" size={13} color="#fff" />
+                <Text style={{fontSize: 10, color: '#fff', marginLeft: 3}}>{source.mediaCount}</Text>
+              </View>
             </View>
+            <View style={{flex: 1, marginLeft: t.spacing.md, paddingVertical: 3}}>
+              <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
+                <Text style={{flex: 1, color: t.colors.text, fontSize: t.fontSize.base, lineHeight: 21, fontWeight: '700'}} numberOfLines={2}>
+                  {source.title}
+                </Text>
+                <Icon name="chevron-right" size={21} color={t.colors.textHint} />
+              </View>
+              <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 4}} numberOfLines={1}>
+                {source.ownerName || 'B 站 UP 主'} · {source.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹'}
+              </Text>
+              <Text style={{fontSize: t.fontSize.xs, lineHeight: 17, color: t.colors.textHint, marginTop: 5, flex: 1}} numberOfLines={3}>
+                {source.description?.trim() || `B 站暂未提供简介 · 收录 ${source.mediaCount} 个视频`}
+              </Text>
+              <View style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 4}}>
+                {source.matchedTags.slice(0, 3).map(tag => (
+                  <View key={`${source.sourceKey}:${tag}`} style={{paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: t.colors.primaryLight, marginRight: 5, marginBottom: 3}}>
+                    <Text style={{fontSize: 10, color: t.colors.primary}}>{tag}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </TouchableOpacity>
+          <View style={{marginLeft: 116 + t.spacing.md, marginTop: t.spacing.xs}}>
+            <SubscribePlaylistButton source={source} />
           </View>
         </View>
       </GlassView>
-    </TouchableOpacity>
+    </View>
   ), [glassBackground, glassBorder, openSource, t.colors, t.fontSize, t.spacing]);
 
   const listHeader = (

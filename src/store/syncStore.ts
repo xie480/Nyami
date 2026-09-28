@@ -10,6 +10,14 @@ import {useImportedPlaylistStore} from './importedPlaylistStore';
 // Active sync controller; identity checks prevent an older run from clearing a newer run.
 let syncAbortController: AbortController | null = null;
 
+interface QueuedSyncRequest {
+  uid: string;
+  hiddenFolderIds: number[];
+  force: boolean;
+}
+
+let pendingSyncRequest: QueuedSyncRequest | null = null;
+
 interface SyncState {
   syncStatus: 'idle' | 'syncing' | 'error' | 'done';
   progressData: SyncProgressEvent | null;
@@ -25,6 +33,15 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   syncError: null,
   startSync: async (uid: string, hiddenFolderIds: number[] = [], force = false) => {
     if (get().syncStatus === 'syncing') {
+      const nextRequest = {uid, hiddenFolderIds: [...hiddenFolderIds], force};
+      if (pendingSyncRequest?.uid === uid) {
+        pendingSyncRequest = {
+          ...nextRequest,
+          force: pendingSyncRequest.force || force,
+        };
+      } else {
+        pendingSyncRequest = nextRequest;
+      }
       return;
     }
 
@@ -64,11 +81,21 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     } finally {
       if (syncAbortController === controller) {
         syncAbortController = null;
+        const queuedRequest = pendingSyncRequest;
+        pendingSyncRequest = null;
+        if (queuedRequest && !abortSignal.aborted) {
+          await get().startSync(
+            queuedRequest.uid,
+            queuedRequest.hiddenFolderIds,
+            queuedRequest.force,
+          );
+        }
       }
     }
   },
   abortSync: () => {
     // Abort any ongoing sync operation and reset state
+    pendingSyncRequest = null;
     if (syncAbortController) {
       syncAbortController.abort();
     }
