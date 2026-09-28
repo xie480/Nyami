@@ -15,7 +15,6 @@ import {
   Modal,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useSelectionStore } from '../store/selectionStore';
 import { usePlayerStore } from '../store/playerStore';
 import { useProgressStore } from '../store/progressStore';
 import { IconButton } from '../components/IconButton';
@@ -25,7 +24,7 @@ import { ErrorView } from '../components/ErrorView';
 import { Button } from '../components/Button';
 import { favoriteService, loadGlobalIndexCache } from '../services/favoriteService';
 import { importedPlaylistService } from '../services/importedPlaylistService';
-import { appendQueue as tpAppendQueue, loadQueue, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
+import { loadQueue, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
 import { useAuthStore } from '../store/authStore';
 import { prefetchAudioUrl } from '../services/dataPrefetcher';
 import { useSettingsStore } from '../store/settingsStore';
@@ -70,15 +69,11 @@ export const FoldersScreen = ({ navigation }: any) => {
   );
   const setImportedCatalog = useImportedPlaylistStore((s) => s.setCatalog);
   const setQueue = usePlayerStore((s) => s.setQueue);
-  const selectedIds = useSelectionStore((s) => s.selectedIds);
-  const toggle = useSelectionStore((s) => s.toggle);
-  const clear = useSelectionStore((s) => s.clear);
   const [allFolders, setAllFolders] = useState<FavoriteFolder[] | null>(null);
   const [, setGlobalIndexReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importedSyncError, setImportedSyncError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const insets = useSafeAreaInsets();
   const syncStatus = useSyncStore((s) => s.syncStatus);
   const isSyncing = syncStatus === 'syncing';
@@ -541,20 +536,6 @@ export const FoldersScreen = ({ navigation }: any) => {
                   </View>
                   <Icon name="shuffle-variant" size={24} color={t.colors.primary} />
                 </TouchableOpacity>
-                <IconButton
-                  name={isMultiSelectMode ? 'checkbox-marked' : 'checkbox-blank-outline'}
-                  size={21}
-                  color={t.colors.textSub}
-                  style={{marginLeft: t.spacing.xs}}
-                  onPress={() => {
-                    if (isMultiSelectMode) {
-                      setIsMultiSelectMode(false);
-                      clear();
-                    } else {
-                      setIsMultiSelectMode(true);
-                    }
-                  }}
-                />
               </View>
             </View>
           }
@@ -575,11 +556,7 @@ export const FoldersScreen = ({ navigation }: any) => {
             return (
               <TouchableOpacity
                 activeOpacity={0.72}
-                disabled={isMultiSelectMode && item.origin !== 'owned'}
                 onPress={() => {
-                if (isMultiSelectMode) {
-                  if (item.origin === 'owned') toggle(item.id);
-                } else {
                   if (item.origin === 'owned') {
                     navigation.navigate('Videos', {
                       mediaId: item.id,
@@ -590,7 +567,6 @@ export const FoldersScreen = ({ navigation }: any) => {
                   } else if (item.source) {
                     navigation.navigate('Videos', {source: item.source});
                   }
-                }
               }}
                 style={{
                   flexDirection: 'row',
@@ -605,15 +581,6 @@ export const FoldersScreen = ({ navigation }: any) => {
                     android: {elevation: isGlass ? 0 : 2},
                   }),
                 }}>
-              {isMultiSelectMode && item.origin === 'owned' && (
-                <View style={{ padding: 6 }}>
-                  <Icon
-                    name={selectedIds.has(item.id) ? 'checkbox-marked' : 'checkbox-blank-outline'}
-                    size={24}
-                    color={t.colors.text}
-                  />
-                </View>
-              )}
               <View style={{width: 74, height: 74, borderRadius: 17, overflow: 'hidden', backgroundColor: t.colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginRight: t.spacing.md}}>
                 {coverUri ? (
                   <FastImage source={{uri: coverUri}} style={{width: '100%', height: '100%'}} resizeMode={FastImage.resizeMode.cover} />
@@ -628,72 +595,11 @@ export const FoldersScreen = ({ navigation }: any) => {
                 </Text>
                 <Text style={{fontSize: t.fontSize.xs, color: t.colors.primary, marginTop: 4}} numberOfLines={1}>{itemKind}</Text>
               </View>
-              {!isMultiSelectMode && (
-                <Icon name="chevron-right" size={22} color={t.colors.textHint} />
-              )}
+              <Icon name="chevron-right" size={22} color={t.colors.textHint} />
               </TouchableOpacity>
             );
           }}
         />
-      )}
-      {/* Mix Play Bar */}
-      {selectedIds.size > 0 && (
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: t.spacing.md,
-            backgroundColor: t.colors.surface,
-            borderTopWidth: 1,
-            borderColor: t.colors.divider,
-          }}
-        >
-          <Button
-            title="混合播放"
-            onPress={async () => {
-              try {
-                const ids = Array.from(selectedIds);
-                // 从选中的收藏夹中随机获取视频
-                const results = await Promise.all(
-                  ids.map(id => favoriteService.getRandomVideos(id.toString(), 50))
-                );
-                let allVideos = results.flat();
-                
-                // 再次打乱混合后的结果
-                const shuffled = allVideos.sort(() => Math.random() - 0.5);
-
-                if (shuffled.length === 0) {
-                   throw new Error('选中的收藏夹为空');
-                }
-
-                // Append to queue and start playback
-                await tpAppendQueue(shuffled);
-                await playWithIntent();
-                clear();
-
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show('已开始混合播放', ToastAndroid.SHORT);
-                } else {
-                  Alert.alert('提示', '已开始混合播放');
-                }
-              } catch (e: any) {
-                const msg = e.message || '混合播放失败';
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(msg, ToastAndroid.SHORT);
-                } else {
-                  Alert.alert('错误', msg);
-                }
-              }
-            }}
-          />
-          <IconButton
-            name="close"
-            size={24}
-            color={t.colors.text}
-            onPress={clear}
-          />
-        </View>
       )}
       <Modal
         visible={createFolderVisible}
