@@ -163,7 +163,6 @@ export default function App() {
   const uid = useAuthStore((s) => s.userId);
   const initAuth = useAuthStore((s) => s.initAuth);
   const authReady = useAuthStore((s) => s.authReady);
-  const isGlassMode = themeMode === 'glass-light' || themeMode === 'glass-dark';
   const navTheme = useMemo(() => ({
     ...(isDark ? DarkTheme : DefaultTheme),
     colors: {
@@ -174,10 +173,10 @@ export default function App() {
   const stackScreenOptions = useMemo(() => ({
     headerShown: false,
     cardStyle: { backgroundColor: 'transparent' },
-    animation: isGlassMode ? 'none' as const : 'default' as const,
+    animation: 'slide_from_right' as const,
     // 页面不可见时冻结，减少后台页面持续渲染。
     freezeOnBlur: true,
-  }), [isGlassMode]);
+  }), []);
   const startSync = useSyncStore(state => state.startSync);
 
   // Initialize player, network status listener, back handler, and Logger
@@ -298,7 +297,7 @@ export default function App() {
                   <Stack.Screen
                     name="Player"
                     component={PlayerScreenWithBg}
-                    options={{ presentation: 'modal' }}
+                    options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
                   />
                   <Stack.Screen
                     name="Settings"
