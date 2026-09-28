@@ -9,6 +9,8 @@ import { IconButton } from './IconButton';
 import type { FavoriteVideo } from '../types/domain';
 import { formatDuration } from '../utils/format';
 import { playSpecificPart, loadQueue, playQueuedTrack } from '../services/trackPlayer';
+import {fetchOnlineVideoSearchPage} from '../services/onlineVideoSearchService';
+import {searchVideoToFavoriteVideo} from '../services/transformers';
 import { useFolderDataStore } from '../store/folderDataStore';
 import { useSyncStore } from '../store/syncStore';
 
@@ -102,6 +104,8 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
   const listRef = useRef<any>(null);
+  const loadingMoreRef = useRef(false);
+  const listEndReachedArmedRef = useRef(false);
   const lastAutoLoadPageRef = useRef<string | null>(null);
   // 用于精确判断自动滚动触发时机，拦截分页加载时的无意识滚动
   const prevVisibleRef = useRef(visible);
@@ -225,9 +229,51 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   }, []);
 
   const handleLoadMore = useCallback(async () => {
-    if (loadingMore) return;
-    if (!playContext || (!playContext.folderId && !playContext.sourceKey)) return;
+    if (loadingMoreRef.current || !playContext) return;
     if (usePlayerStore.getState().playMode !== 'sequential') return;
+
+    if (playContext.onlineSearch) {
+      const searchContext = playContext.onlineSearch;
+      if (!searchContext.hasMore) return;
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+      try {
+        const nextPage = searchContext.page + 1;
+        const response = await fetchOnlineVideoSearchPage(searchContext, nextPage);
+        const latestPlayer = usePlayerStore.getState();
+        if (latestPlayer.playContext?.onlineSearch !== searchContext) return;
+        const existingBvids = new Set(latestPlayer.queue.map(video => video.bvid));
+        const newItems = response.results
+          .filter(video => !existingBvids.has(video.bvid))
+          .map(searchVideoToFavoriteVideo);
+        if (newItems.length > 0) await latestPlayer.appendQueue(newItems);
+
+        const currentContext = usePlayerStore.getState().playContext;
+        if (currentContext?.onlineSearch === searchContext) {
+          usePlayerStore.getState().setPlayContext({
+            ...currentContext,
+            onlineSearch: {
+              ...searchContext,
+              page: nextPage,
+              hasMore: response.hasMore,
+            },
+          });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '加载 B 站搜索结果失败';
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(message, ToastAndroid.SHORT);
+        } else {
+          Alert.alert('加载失败', message);
+        }
+      } finally {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
+      return;
+    }
+
+    if (!playContext.folderId && !playContext.sourceKey) return;
 
     const folderStore = useFolderDataStore.getState();
     // 仅当当前播放来源与全局 Store 中的列表来源一致时才继续分页。
@@ -237,6 +283,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     if (!matchesSource) return;
     if (!folderStore.hasMore || folderStore.loading) return;
 
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       const beforeBvids = new Set(folderStore.getDisplayedList().map(video => video.bvid));
@@ -254,9 +301,10 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
         await appendQueue(newItems);
       }
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [loadingMore, playContext, appendQueue]);
+  }, [playContext, appendQueue]);
 
   useEffect(() => {
     if (!currentBvid || playMode !== 'sequential' || !playContext?.sourceKey) return;
@@ -315,6 +363,9 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
           keyExtractor={(item) => item.bvid}
           renderItem={renderItem}
           onScrollToIndexFailed={handleScrollToIndexFailed}
+          onScrollBeginDrag={() => {
+            listEndReachedArmedRef.current = true;
+          }}
           contentContainerStyle={styles.list}
           initialScrollIndex={initialIndex}
           getItemLayout={(data, index) => ({ length: 64, offset: 64 * index, index })}
@@ -324,7 +375,11 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
           removeClippedSubviews={true}
           showsVerticalScrollIndicator={false}
           ListFooterComponent={renderFooter}
-          onEndReached={handleLoadMore}
+          onEndReached={() => {
+            if (!listEndReachedArmedRef.current) return;
+            listEndReachedArmedRef.current = false;
+            void handleLoadMore();
+          }}
           onEndReachedThreshold={0.5}
         />
       )}

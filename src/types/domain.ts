@@ -74,6 +74,18 @@ export interface OnlineVideoSearchResult {
   tags: string[];
 }
 
+export type OnlineVideoSearchSort = 'relevance' | 'newest' | 'durationAsc' | 'durationDesc';
+
+/** 在线搜索队列的下一页条件；保存在播放上下文中供播放列表继续拉取。 */
+export interface OnlineSearchQueueContext {
+  keyword: string;
+  tagFilter: string;
+  sort: OnlineVideoSearchSort;
+  page: number;
+  hasMore: boolean;
+  durationLimitSeconds: number | null;
+}
+
 /** 规范化后的视频 tag。 */
 export interface VideoTag {
   tagId: number;

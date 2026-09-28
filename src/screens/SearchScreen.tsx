@@ -19,11 +19,11 @@ import {FavoriteFolderPickerSheet} from '../components/FavoriteFolderPickerSheet
 import {GlassView} from '../components/GlassView';
 import {Header} from '../components/Header';
 import {IconButton} from '../components/IconButton';
-import {biliApi} from '../services/biliApi';
 import {favoriteService, loadGlobalIndexCache} from '../services/favoriteService';
 import {importedPlaylistService} from '../services/importedPlaylistService';
+import {fetchOnlineVideoSearchPage, sortOnlineVideoSearchResults} from '../services/onlineVideoSearchService';
 import {loadQueue, playWithIntent, resolveCurrentTrack} from '../services/trackPlayer';
-import {searchVideoToFavoriteVideo, trimSearchVideo} from '../services/transformers';
+import {searchVideoToFavoriteVideo} from '../services/transformers';
 import {useAuthStore} from '../store/authStore';
 import {useImportedPlaylistStore} from '../store/importedPlaylistStore';
 import {usePlayerStore} from '../store/playerStore';
@@ -32,10 +32,10 @@ import {useSettingsStore} from '../store/settingsStore';
 import {useTheme} from '../theme';
 import {storage} from '../core/storage';
 import {formatDuration} from '../utils/format';
-import type {FavoriteVideo, OnlineVideoSearchResult} from '../types/domain';
+import type {FavoriteVideo, OnlineVideoSearchResult, OnlineVideoSearchSort} from '../types/domain';
 
 type SearchMode = 'bilibili' | 'favorites';
-type SearchSort = 'relevance' | 'newest' | 'durationAsc' | 'durationDesc';
+type SearchSort = OnlineVideoSearchSort;
 
 const SORT_OPTIONS: Array<{key: SearchSort; title: string}> = [
   {key: 'relevance', title: '综合推荐'},
@@ -167,23 +167,25 @@ export const SearchScreen = ({navigation}: any) => {
     }
 
     try {
-      const response = await biliApi.searchVideos(keyword, page, controller.signal);
+      const response = await fetchOnlineVideoSearchPage(
+        {
+          keyword,
+          tagFilter: tagFilter.trim(),
+          sort,
+          durationLimitSeconds: recommendationDurationFilterEnabled
+            ? recommendationDurationLimitMinutes * 60
+            : null,
+        },
+        page,
+        controller.signal,
+      );
       if (currentRequestId !== requestId.current || controller.signal.aborted) return;
-      const normalizedTag = tagFilter.trim().toLocaleLowerCase();
-      const results = (response.result ?? [])
-        .filter(item => item.aid > 0 && !!item.bvid)
-        .map(trimSearchVideo)
-        .filter(item => !normalizedTag || item.tags.some(tag => tag.toLocaleLowerCase().includes(normalizedTag)))
-        .filter(item =>
-          !recommendationDurationFilterEnabled ||
-          (item.duration > 0 && item.duration <= recommendationDurationLimitMinutes * 60),
-        );
       setOnlineResults(current => {
-        const combined = page === 1 ? results : [...current, ...results];
+        const combined = page === 1 ? response.results : [...current, ...response.results];
         return Array.from(new Map(combined.map(item => [item.bvid, item])).values());
       });
       setOnlinePage(page);
-      setOnlineHasMore(page < (response.numPages ?? page));
+      setOnlineHasMore(response.hasMore);
       setDidSearch(true);
     } catch (searchError) {
       if (currentRequestId === requestId.current && !controller.signal.aborted) {
@@ -195,7 +197,7 @@ export const SearchScreen = ({navigation}: any) => {
         setOnlineLoading(false);
       }
     }
-  }, [query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, tagFilter, uid]);
+  }, [query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, sort, tagFilter, uid]);
 
   useEffect(() => {
     const changed =
@@ -211,12 +213,35 @@ export const SearchScreen = ({navigation}: any) => {
     }
   }, [didSearch, mode, onlineLoading, query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, runOnlineSearch, tagFilter]);
 
+  const sortedOnlineResults = useMemo(
+    () => sortOnlineVideoSearchResults(onlineResults, sort),
+    [onlineResults, sort],
+  );
+
   const playVideo = useCallback(async (video: FavoriteVideo) => {
     try {
-      setQueue([video], video.bvid, {});
+      const queue = mode === 'bilibili'
+        ? sortedOnlineResults.map(searchVideoToFavoriteVideo)
+        : [video];
+      const playContext = mode === 'bilibili'
+        ? {
+            onlineSearch: {
+              keyword: query.trim() || tagFilter.trim(),
+              tagFilter: tagFilter.trim(),
+              sort,
+              page: onlinePage,
+              hasMore: onlineHasMore,
+              durationLimitSeconds: recommendationDurationFilterEnabled
+                ? recommendationDurationLimitMinutes * 60
+                : null,
+            },
+          }
+        : {};
+      if (mode === 'bilibili') usePlayerStore.getState().setPlayMode('sequential');
+      setQueue(queue, video.bvid, playContext);
       usePlayerStore.getState().setResolving(true);
       useProgressStore.getState().resetProgress();
-      const revision = await loadQueue([video], video.bvid);
+      const revision = await loadQueue(queue, video.bvid);
       await playWithIntent();
       resolveCurrentTrack(revision).catch(() => {});
       navigation.navigate('Player');
@@ -224,7 +249,7 @@ export const SearchScreen = ({navigation}: any) => {
       usePlayerStore.getState().setResolving(false);
       Alert.alert('播放失败', playError instanceof Error ? playError.message : '视频暂时无法播放');
     }
-  }, [navigation, setQueue]);
+  }, [mode, navigation, onlineHasMore, onlinePage, query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, setQueue, sort, sortedOnlineResults, tagFilter]);
 
   const favoriteSearchIndex = useMemo(
     () => favoriteIndex.map(video => ({
@@ -242,14 +267,6 @@ export const SearchScreen = ({navigation}: any) => {
       .filter(item => item.normalizedTitle.includes(normalized) || item.normalizedAuthor.includes(normalized))
       .map(item => item.video);
   }, [deferredQuery, favoriteSearchIndex]);
-
-  const sortedOnlineResults = useMemo(() => {
-    const results = [...onlineResults];
-    if (sort === 'newest') results.sort((left, right) => right.pubtime - left.pubtime);
-    if (sort === 'durationAsc') results.sort((left, right) => left.duration - right.duration);
-    if (sort === 'durationDesc') results.sort((left, right) => right.duration - left.duration);
-    return results;
-  }, [onlineResults, sort]);
 
   const glassBackground = t.glass?.colors.glass.bg ?? t.colors.surface;
   const glassBorder = t.glass?.colors.glass.border ?? t.colors.divider;
