@@ -45,6 +45,10 @@ export interface SyncProgressEvent {
 
 // 内存缓存，用于同步读取全局索引（UI 层渲染时需同步获取）
 let globalIndexCache: FavoriteVideo[] = [];
+let globalIndexRevision = 0;
+let globalIndexSignature: string | null = null;
+let globalIndexLoadPromise: Promise<void> | null = null;
+const globalIndexRevisionListeners = new Set<(revision: number) => void>();
 
 export class FavoriteStateReadbackError extends Error {
   constructor(message: string, public readonly causeValue?: unknown) {
@@ -75,6 +79,39 @@ let globalIndexCacheLoaded = false;
 let visibleGlobalIndexSource: FavoriteVideo[] | null = null;
 let visibleGlobalIndexKey = '';
 let visibleGlobalIndexCache: FavoriteVideo[] = [];
+
+function getGlobalIndexSignature(videos: FavoriteVideo[]): string {
+  const membership = videos.map(video => [
+    video.bvid,
+    [...new Set(video.folderIds ?? [])].sort((left, right) => left - right),
+    [...new Set(video.sourceKeys ?? [])].sort(),
+  ] as const);
+  membership.sort((left, right) => left[0].localeCompare(right[0]));
+  return JSON.stringify(membership);
+}
+
+function replaceGlobalIndexCache(videos: FavoriteVideo[]): void {
+  const nextSignature = getGlobalIndexSignature(videos);
+  const indexChanged = nextSignature !== globalIndexSignature;
+  globalIndexCache = videos;
+  visibleGlobalIndexSource = null;
+  if (indexChanged) {
+    globalIndexRevision += 1;
+    globalIndexSignature = nextSignature;
+    globalIndexRevisionListeners.forEach(listener => {
+      try {
+        listener(globalIndexRevision);
+      } catch (error) {
+        LoggerService.warn(
+          'favoriteService',
+          'replaceGlobalIndexCache',
+          'Global index revision listener failed',
+          error,
+        );
+      }
+    });
+  }
+}
 
 // 互斥锁，防止同步任务并发执行
 const syncMutex = new Mutex();
@@ -149,22 +186,55 @@ function sampleWithoutReplacement<T>(items: readonly T[], limit: number): T[] {
  * 从 WatermelonDB 加载全局索引到内存缓存。
  * 应在应用启动时（uid useEffect）和同步完成后调用。
  */
-export async function loadGlobalIndexCache(): Promise<void> {
-  const validVideos = await getAllValidVideos();
-  // 去重，因为同一个视频可能在多个收藏夹中
-  const uniqueVideosMap = new Map<string, FavoriteVideo>();
-  for (const v of validVideos) {
-    if (!uniqueVideosMap.has(v.videoId)) {
-      uniqueVideosMap.set(v.videoId, mapVideoMetaToFavoriteVideo(v));
-    } else {
-      const existing = uniqueVideosMap.get(v.videoId)!;
-      const playlistVideo = mapVideoMetaToFavoriteVideo(v);
-      existing.folderIds = Array.from(new Set([...(existing.folderIds ?? []), ...(playlistVideo.folderIds ?? [])]));
-      existing.sourceKeys = Array.from(new Set([...(existing.sourceKeys ?? []), ...(playlistVideo.sourceKeys ?? [])]));
+export function loadGlobalIndexCache(): Promise<void> {
+  if (globalIndexLoadPromise) return globalIndexLoadPromise;
+
+  let loadPromise!: Promise<void>;
+  loadPromise = (async () => {
+    try {
+      const validVideos = await getAllValidVideos();
+      // 去重，因为同一个视频可能在多个收藏夹中
+      const uniqueVideosMap = new Map<string, FavoriteVideo>();
+      for (const v of validVideos) {
+        if (!uniqueVideosMap.has(v.videoId)) {
+          uniqueVideosMap.set(v.videoId, mapVideoMetaToFavoriteVideo(v));
+        } else {
+          const existing = uniqueVideosMap.get(v.videoId)!;
+          const playlistVideo = mapVideoMetaToFavoriteVideo(v);
+          existing.folderIds = Array.from(new Set([...(existing.folderIds ?? []), ...(playlistVideo.folderIds ?? [])]));
+          existing.sourceKeys = Array.from(new Set([...(existing.sourceKeys ?? []), ...(playlistVideo.sourceKeys ?? [])]));
+        }
+      }
+      replaceGlobalIndexCache(Array.from(uniqueVideosMap.values()));
+      globalIndexCacheLoaded = true;
+    } finally {
+      if (globalIndexLoadPromise === loadPromise) {
+        globalIndexLoadPromise = null;
+      }
     }
-  }
-  globalIndexCache = Array.from(uniqueVideosMap.values());
-  globalIndexCacheLoaded = true;
+  })();
+  globalIndexLoadPromise = loadPromise;
+  return loadPromise;
+}
+
+export async function ensureGlobalIndexCacheLoaded(): Promise<void> {
+  if (globalIndexCacheLoaded) return;
+  await loadGlobalIndexCache();
+}
+
+export function isGlobalIndexCacheLoaded(): boolean {
+  return globalIndexCacheLoaded;
+}
+
+export function getGlobalIndexRevision(): number {
+  return globalIndexRevision;
+}
+
+export function subscribeGlobalIndexRevision(
+  listener: (revision: number) => void,
+): () => void {
+  globalIndexRevisionListeners.add(listener);
+  return () => globalIndexRevisionListeners.delete(listener);
 }
 
 /**
@@ -266,7 +336,7 @@ async function syncSingleFolder(
       updatedIndex[cachedIndex] = { ...cached, folderIds, sourceKeys };
     }
   }
-  globalIndexCache = updatedIndex;
+  replaceGlobalIndexCache(updatedIndex);
 
   return newVideos;
 }
@@ -744,7 +814,7 @@ export const favoriteService = {
    */
   async clearGlobalIndex() {
     await clearAllData();
-    globalIndexCache = [];
+    replaceGlobalIndexCache([]);
     globalIndexCacheLoaded = true;
   },
 

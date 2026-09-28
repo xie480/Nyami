@@ -15,7 +15,10 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Button} from '../components/Button';
 import {
   favoriteService,
-  loadGlobalIndexCache,
+  ensureGlobalIndexCacheLoaded,
+  getGlobalIndexRevision,
+  isGlobalIndexCacheLoaded,
+  subscribeGlobalIndexRevision,
 } from '../services/favoriteService';
 import {prefetchAudioUrl} from '../services/dataPrefetcher';
 import {
@@ -57,6 +60,62 @@ const EMPTY_PROGRESS: TagBackfillProgress = {
 };
 
 const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
+const TAG_PROFILE_CACHE_LIMIT = 4;
+let cachedProfileUid: string | null = null;
+let cachedProfileIndexRevision: number | null = null;
+const tagProfileSnapshots = new Map<string, TagProfile>();
+
+function getTagProfileSnapshotKey(
+  uid: string,
+  indexRevision: number,
+  hiddenFolderIds: number[],
+  visibleSourceKeys: string[],
+): string {
+  return JSON.stringify([
+    uid,
+    indexRevision,
+    [...new Set(hiddenFolderIds)].sort((left, right) => left - right),
+    [...new Set(visibleSourceKeys)].sort(),
+  ]);
+}
+
+function prepareTagProfileCache(uid: string, indexRevision: number): void {
+  if (cachedProfileUid === uid && cachedProfileIndexRevision === indexRevision) {
+    return;
+  }
+  tagProfileSnapshots.clear();
+  cachedProfileUid = uid;
+  cachedProfileIndexRevision = indexRevision;
+}
+
+function getCachedTagProfile(
+  uid: string,
+  indexRevision: number,
+  snapshotKey: string,
+): TagProfile | null {
+  prepareTagProfileCache(uid, indexRevision);
+  const profile = tagProfileSnapshots.get(snapshotKey);
+  if (!profile) return null;
+  tagProfileSnapshots.delete(snapshotKey);
+  tagProfileSnapshots.set(snapshotKey, profile);
+  return profile;
+}
+
+function cacheTagProfile(
+  uid: string,
+  indexRevision: number,
+  snapshotKey: string,
+  profile: TagProfile,
+): void {
+  prepareTagProfileCache(uid, indexRevision);
+  tagProfileSnapshots.delete(snapshotKey);
+  tagProfileSnapshots.set(snapshotKey, profile);
+  while (tagProfileSnapshots.size > TAG_PROFILE_CACHE_LIMIT) {
+    const oldestKey = tagProfileSnapshots.keys().next().value;
+    if (oldestKey === undefined) break;
+    tagProfileSnapshots.delete(oldestKey);
+  }
+}
 
 /**
  * 展示当前本地收藏视频的 tag 画像，并按兴趣 tag 搜索音乐视频。
@@ -101,7 +160,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   const activeSnapshotController = useRef<AbortController | null>(null);
   const backgroundBackfillWasRunning = useRef(false);
 
-  const loadSnapshot = useCallback(async () => {
+  const loadSnapshot = useCallback(async (refreshProfile = false) => {
     if (!uid) {
       loadedUid.current = null;
       loadedSnapshotKey.current = null;
@@ -110,6 +169,9 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       activeSnapshotController.current = null;
       requestController.current?.abort();
       requestController.current = null;
+      tagProfileSnapshots.clear();
+      cachedProfileUid = null;
+      cachedProfileIndexRevision = null;
       setFavorites([]);
       setProfile(null);
       setRecommendations([]);
@@ -121,24 +183,59 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     }
 
     const requestUid = uid;
-    const snapshotKey = JSON.stringify([
+    const normalizedHiddenFolderIds = [...new Set(hiddenFolderIds)].sort(
+      (left, right) => left - right,
+    );
+    const normalizedVisibleSourceKeys = [...new Set(visibleSourceKeys)].sort();
+    const scopeKey = JSON.stringify([
       requestUid,
-      [...new Set(hiddenFolderIds)].sort((left, right) => left - right),
-      [...new Set(visibleSourceKeys)].sort(),
+      normalizedHiddenFolderIds,
+      normalizedVisibleSourceKeys,
     ]);
-    if (
-      loadedSnapshotKey.current === snapshotKey ||
-      activeSnapshotKey.current === snapshotKey
-    ) {
-      return;
+    let requestKey = scopeKey;
+    if (isGlobalIndexCacheLoaded()) {
+      const currentRevision = getGlobalIndexRevision();
+      const currentSnapshotKey = getTagProfileSnapshotKey(
+        requestUid,
+        currentRevision,
+        normalizedHiddenFolderIds,
+        normalizedVisibleSourceKeys,
+      );
+      requestKey = currentSnapshotKey;
+      if (!refreshProfile && loadedSnapshotKey.current === currentSnapshotKey) {
+        return;
+      }
+      if (!refreshProfile) {
+        const cachedProfile = getCachedTagProfile(
+          requestUid,
+          currentRevision,
+          currentSnapshotKey,
+        );
+        if (cachedProfile) {
+          const localFavorites = favoriteService.getGlobalIndex(
+            normalizedHiddenFolderIds,
+            normalizedVisibleSourceKeys,
+          );
+          loadedUid.current = requestUid;
+          loadedSnapshotKey.current = currentSnapshotKey;
+          setFavorites(localFavorites);
+          setProfile(cachedProfile);
+          setError(null);
+          setInitialLoading(false);
+          return;
+        }
+      }
     }
+    if (activeSnapshotKey.current === requestKey && !refreshProfile) return;
 
     const controller = new AbortController();
     requestController.current?.abort();
     requestController.current = controller;
-    activeSnapshotKey.current = snapshotKey;
+    activeSnapshotKey.current = requestKey;
     activeSnapshotController.current = controller;
-    setInitialLoading(true);
+    if (!refreshProfile || loadedSnapshotKey.current === null) {
+      setInitialLoading(true);
+    }
     setError(null);
     if (loadedUid.current !== requestUid) {
       loadedUid.current = requestUid;
@@ -155,7 +252,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         setError('本机收藏数据正在随账号切换清理，请稍后返回此页重试。');
         return;
       }
-      await loadGlobalIndexCache();
+      await ensureGlobalIndexCacheLoaded();
       if (
         controller.signal.aborted ||
         useAuthStore.getState().userId !== requestUid ||
@@ -163,16 +260,47 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       ) {
         return;
       }
-      const localFavorites = favoriteService.getGlobalIndex(hiddenFolderIds, visibleSourceKeys);
+      const indexRevision = getGlobalIndexRevision();
+      const snapshotKey = getTagProfileSnapshotKey(
+        requestUid,
+        indexRevision,
+        normalizedHiddenFolderIds,
+        normalizedVisibleSourceKeys,
+      );
+      if (!refreshProfile) {
+        if (loadedSnapshotKey.current === snapshotKey) return;
+        const cachedProfile = getCachedTagProfile(
+          requestUid,
+          indexRevision,
+          snapshotKey,
+        );
+        if (cachedProfile) {
+          const cachedFavorites = favoriteService.getGlobalIndex(
+            normalizedHiddenFolderIds,
+            normalizedVisibleSourceKeys,
+          );
+          loadedUid.current = requestUid;
+          loadedSnapshotKey.current = snapshotKey;
+          setFavorites(cachedFavorites);
+          setProfile(cachedProfile);
+          return;
+        }
+      }
+      const localFavorites = favoriteService.getGlobalIndex(
+        normalizedHiddenFolderIds,
+        normalizedVisibleSourceKeys,
+      );
       setFavorites(localFavorites);
       const {profile: cachedProfile} = await loadTagProfile(localFavorites);
       if (
         controller.signal.aborted ||
         useAuthStore.getState().userId !== requestUid ||
-        storage.getString('lastUid') !== requestUid
+        storage.getString('lastUid') !== requestUid ||
+        getGlobalIndexRevision() !== indexRevision
       ) {
         return;
       }
+      cacheTagProfile(requestUid, indexRevision, snapshotKey, cachedProfile);
       setProfile(cachedProfile);
       loadedSnapshotKey.current = snapshotKey;
     } catch (loadError) {
@@ -206,6 +334,15 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     }, [loadSnapshot]),
   );
 
+  useEffect(() => {
+    if (!uid) return;
+    return subscribeGlobalIndexRevision(() => {
+      if (isFocused && loadedSnapshotKey.current) {
+        loadSnapshot();
+      }
+    });
+  }, [isFocused, loadSnapshot, uid]);
+
   useEffect(() => () => {
     requestController.current?.abort();
     requestController.current = null;
@@ -218,14 +355,13 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     }
     if (backgroundBackfillWasRunning.current) {
       backgroundBackfillWasRunning.current = false;
-      loadedSnapshotKey.current = null;
       if (activeSnapshotController.current) {
         activeSnapshotController.current.abort();
         activeSnapshotController.current = null;
         activeSnapshotKey.current = null;
       }
       if (isFocused) {
-        loadSnapshot();
+        loadSnapshot(true);
       }
     }
   }, [backgroundBackfillStatus, isFocused, loadSnapshot]);
@@ -262,6 +398,15 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         return;
       }
       setProfile(result.profile);
+      const indexRevision = getGlobalIndexRevision();
+      const snapshotKey = getTagProfileSnapshotKey(
+        requestUid,
+        indexRevision,
+        hiddenFolderIds,
+        visibleSourceKeys,
+      );
+      cacheTagProfile(requestUid, indexRevision, snapshotKey, result.profile);
+      loadedSnapshotKey.current = snapshotKey;
 
       if (result.progress.paused) {
         setStage('idle');
@@ -303,7 +448,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         requestController.current = null;
       }
     }
-  }, [favorites, initialLoading, uid]);
+  }, [favorites, hiddenFolderIds, initialLoading, uid, visibleSourceKeys]);
 
   /** 将推荐结果组成播放队列，沿用现有播放器的意图与预取流程。 */
   const handlePlayRecommendation = useCallback(
@@ -392,7 +537,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityLabel="刷新用户画像"
-          onPress={loadSnapshot}
+          onPress={() => loadSnapshot(true)}
           style={{width: 40, height: 40, alignItems: 'center', justifyContent: 'center'}}>
           <Icon name="refresh" size={22} color={t.colors.text} />
         </TouchableOpacity>
