@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  InteractionManager,
   Platform,
   RefreshControl,
   StatusBar,
@@ -118,21 +117,19 @@ export const SongRecommendationsScreen = ({navigation}: any) => {
       const previousSong = selectedIndex > 0 ? queue[selectedIndex - 1] : undefined;
       if (previousSong) prefetchAudioUrl(previousSong.bvid, previousSong.parts?.[0]?.cid).catch(() => {});
       navigation.navigate('Player');
-      InteractionManager.runAfterInteractions(() => {
-        void (async () => {
-          try {
-            const revision = await loadQueue(queue, selectedSong.bvid);
-            if (!revision) {
-              throw new Error(usePlayerStore.getState().playbackError || '推荐歌曲暂时无法播放');
-            }
-            resolveCurrentTrack(revision).catch(() => {});
-          } catch (error) {
-            usePlayerStore.getState().setResolving(false);
-            const message = error instanceof Error ? error.message : '推荐歌曲暂时无法播放';
-            Alert.alert('播放失败', message);
+      void (async () => {
+        try {
+          const revision = await loadQueue(queue, selectedSong.bvid);
+          if (!revision) {
+            throw new Error(usePlayerStore.getState().playbackError || '推荐歌曲暂时无法播放');
           }
-        })();
-      });
+          resolveCurrentTrack(revision).catch(() => {});
+        } catch (error) {
+          usePlayerStore.getState().setResolving(false);
+          const message = error instanceof Error ? error.message : '推荐歌曲暂时无法播放';
+          Alert.alert('播放失败', message);
+        }
+      })();
     } catch (error) {
       usePlayerStore.getState().setResolving(false);
       const message = error instanceof Error ? error.message : '推荐歌曲暂时无法播放';

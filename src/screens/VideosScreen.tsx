@@ -11,7 +11,6 @@ import {
   ToastAndroid,
   Modal,
   TextInput,
-  InteractionManager,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import LinearGradient from 'react-native-linear-gradient';
@@ -135,7 +134,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const insets = useSafeAreaInsets();
   const { mediaId, title } = route.params;
   const source = route.params.source as ImportedPlaylist | undefined;
-  const includeVideoParts = Boolean(route.params.includeVideoParts);
+  const includeVideoParts = Boolean(route.params.includeVideoParts || source);
   const listTitle = source?.title ?? title ?? '播放列表';
   const setQueue = usePlayerStore((s) => s.setQueue);
   const playMode = usePlayerStore((s) => s.playMode);
@@ -235,13 +234,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
     } else if (mediaId) {
       initFolder(mediaId);
     }
-    // Give it a small delay to show loading state if needed, or just set false after init
-    const timer = setTimeout(() => {
-      if (mountedRef.current) setIniting(false);
-    }, 100);
-    return () => {
-      clearTimeout(timer);
-    };
+    setIniting(false);
   }, [mediaId, source, initFolder, initImportedSource]);
 
   const displayedList = getDisplayedList();
@@ -291,20 +284,17 @@ export const VideosScreen = ({ route, navigation }: any) => {
       // 在 TrackPlayer 还未就绪时显示歌曲信息，避免"未播放"闪烁
       navigation.navigate('Player');
 
-      // 导航动画完成后再创建原生队列，避免队列操作和页面切换争用 JS 线程。
-      InteractionManager.runAfterInteractions(() => {
-        void (async () => {
-          try {
-            const version = await loadQueue(displayedList, target.bvid);
-            if (!version) {
-              throw new Error(usePlayerStore.getState().playbackError || '歌曲暂时无法播放');
-            }
-            resolveCurrentTrack(version).catch(() => {});
-          } catch (error) {
-            showQueueStartError(error, '播放失败');
+      void (async () => {
+        try {
+          const version = await loadQueue(displayedList, target.bvid);
+          if (!version) {
+            throw new Error(usePlayerStore.getState().playbackError || '歌曲暂时无法播放');
           }
-        })();
-      });
+          resolveCurrentTrack(version).catch(() => {});
+        } catch (error) {
+          showQueueStartError(error, '播放失败');
+        }
+      })();
     } catch (e: any) {
       const msg = e.message || '播放失败';
       if (Platform.OS === 'android') {
@@ -339,20 +329,17 @@ export const VideosScreen = ({ route, navigation }: any) => {
       // 【P0性能优化】极速并发预取
       prefetchAudioUrl(target.bvid, target.parts?.[0]?.cid).catch(() => {});
       navigation.navigate('Player');
-      // 【P0动画优化】高耗时 Bridge 操作延迟到路由动画完成后执行
-      InteractionManager.runAfterInteractions(() => {
-        void (async () => {
-          try {
-            const version = await loadQueue(currentList, target.bvid);
-            if (!version) {
-              throw new Error(usePlayerStore.getState().playbackError || '歌曲暂时无法播放');
-            }
-            resolveCurrentTrack(version).catch(() => {});
-          } catch (error) {
-            showQueueStartError(error, '播放全部失败');
+      void (async () => {
+        try {
+          const version = await loadQueue(currentList, target.bvid);
+          if (!version) {
+            throw new Error(usePlayerStore.getState().playbackError || '歌曲暂时无法播放');
           }
-        })();
-      });
+          resolveCurrentTrack(version).catch(() => {});
+        } catch (error) {
+          showQueueStartError(error, '播放全部失败');
+        }
+      })();
     } catch (e: any) {
       const msg = e.message || '播放全部失败';
       if (Platform.OS === 'android') {
@@ -393,20 +380,17 @@ export const VideosScreen = ({ route, navigation }: any) => {
       // 【P0性能优化】极速并发预取
       prefetchAudioUrl(target.bvid, target.parts?.[0]?.cid).catch(() => {});
       navigation.navigate('Player');
-      // 【P0动画优化】高耗时 Bridge 操作延迟到路由动画完成后执行
-      InteractionManager.runAfterInteractions(() => {
-        void (async () => {
-          try {
-            const version = await loadQueue(shuffled, target.bvid);
-            if (!version) {
-              throw new Error(usePlayerStore.getState().playbackError || '歌曲暂时无法播放');
-            }
-            resolveCurrentTrack(version).catch(() => {});
-          } catch (error) {
-            showQueueStartError(error, '随机播放失败');
+      void (async () => {
+        try {
+          const version = await loadQueue(shuffled, target.bvid);
+          if (!version) {
+            throw new Error(usePlayerStore.getState().playbackError || '歌曲暂时无法播放');
           }
-        })();
-      });
+          resolveCurrentTrack(version).catch(() => {});
+        } catch (error) {
+          showQueueStartError(error, '随机播放失败');
+        }
+      })();
     } catch (e: any) {
       const msg = e.message || '随机播放失败';
       if (Platform.OS === 'android') {
@@ -562,7 +546,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
         <IconButton name="sort-variant" size={24} color={t.colors.text} style={{ marginLeft: t.spacing.sm }} disabled={isSearchDisabled} onPress={() => setSortModalVisible(true)} />
       </View>
 
-      {initing ? (
+      {initing || (loading && displayedList.length === 0) ? (
         <Loading />
       ) : error && displayedList.length === 0 ? (
         <ErrorView message={error} onRetry={loadMore} />

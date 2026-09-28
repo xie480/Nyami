@@ -46,10 +46,12 @@
 
   /** 播放器淡入淡出过渡参数。 */
   playback: {
-    fadeInDurationMs: 300,
-    fadeOutDurationMs: 240,
-    fadeOutLeadMs: 700,
-    fadeStepCount: 8,
+    fadeInDurationMs: 200,
+    fadeOutDurationMs: 150,
+    fadeOutLeadMs: 180,
+    fadeStepCount: 4,
+    hydratedTrackCacheTtlMs: 30 * 1000,
+    hydratedTrackCacheLimit: 16,
     progressUpdateIntervalSeconds: 0.25,
   },
 

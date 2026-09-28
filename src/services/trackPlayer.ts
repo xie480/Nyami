@@ -32,6 +32,8 @@ const MIN_NATIVE_BUFFER = 8;
 const TARGET_NATIVE_BUFFER = 12;
 let queueRevision = 0;
 const videoPartsLoadPromises = new Map<string, Promise<void>>();
+const hydratedTrackCache = new Map<string, {tracks: Track[]; expiresAt: number}>();
+const trackHydrationPromises = new Map<string, Promise<Track[]>>();
 let queueMaintenanceRequested = false;
 let queueMaintenancePromise: Promise<void> | null = null;
 let queueEndRecoveryPromise: Promise<void> | null = null;
@@ -373,7 +375,60 @@ export async function setupPlayer() {
   _ready = true;
 }
 
+function getHydratedTrackCacheKey(v: FavoriteVideo, targetCid?: number): string {
+  const settings = useSettingsStore.getState();
+  const cid = targetCid ?? v.parts?.[0]?.cid ?? 'default';
+  return `${v.bvid}:${cid}:${settings.quality}:${settings.expandMultiPart ? 'parts' : 'single'}`;
+}
+
+function invalidateHydratedTrackCache(bvid: string): void {
+  const keyPrefix = `${bvid}:`;
+  for (const key of hydratedTrackCache.keys()) {
+    if (key.startsWith(keyPrefix)) hydratedTrackCache.delete(key);
+  }
+}
+
 async function hydrateVideo(
+  v: FavoriteVideo,
+  targetCid?: number,
+): Promise<Track[]> {
+  const cacheKey = getHydratedTrackCacheKey(v, targetCid);
+  const now = Date.now();
+  const cached = hydratedTrackCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    hydratedTrackCache.delete(cacheKey);
+    hydratedTrackCache.set(cacheKey, cached);
+    return cached.tracks;
+  }
+  if (cached) hydratedTrackCache.delete(cacheKey);
+
+  const pending = trackHydrationPromises.get(cacheKey);
+  if (pending) return pending;
+
+  const hydration = hydrateVideoUncached(v, targetCid);
+  trackHydrationPromises.set(cacheKey, hydration);
+  try {
+    const tracks = await hydration;
+    if (tracks.length > 0) {
+      hydratedTrackCache.set(cacheKey, {
+        tracks,
+        expiresAt: Date.now() + config.playback.hydratedTrackCacheTtlMs,
+      });
+      while (hydratedTrackCache.size > config.playback.hydratedTrackCacheLimit) {
+        const oldestKey = hydratedTrackCache.keys().next().value;
+        if (!oldestKey) break;
+        hydratedTrackCache.delete(oldestKey);
+      }
+    }
+    return tracks;
+  } finally {
+    if (trackHydrationPromises.get(cacheKey) === hydration) {
+      trackHydrationPromises.delete(cacheKey);
+    }
+  }
+}
+
+async function hydrateVideoUncached(
   v: FavoriteVideo,
   targetCid?: number,
 ): Promise<Track[]> {
@@ -707,6 +762,11 @@ export async function loadQueue(
     );
 
     const targetVideo = videos[startIndex];
+    const previousVideo = startIndex > 0 ? videos[startIndex - 1] : undefined;
+    if (previousVideo) {
+      // 与当前歌曲解析并行，让用户立即点上一首时复用正在完成的请求。
+      void hydrateVideo(previousVideo);
+    }
 
     // 1. 仅水合当前目标歌曲 (Fast Path)，实现秒播
     const targetTracks = await hydrateVideo(targetVideo);
@@ -1082,6 +1142,65 @@ async function hasLogicalNextTrack(): Promise<boolean> {
   return logicalIndex !== -1 && logicalIndex + 1 < logicalQueue.length;
 }
 
+async function ensureNextLogicalTrackBuffered(revision: number): Promise<boolean> {
+  const snapshot = await withNativeQueueMutation(async () => {
+    if (revision !== queueRevision) return null;
+    const nativeQueue = await TrackPlayer.getQueue();
+    const activeIndex = await TrackPlayer.getActiveTrackIndex();
+    const activeTrack = await TrackPlayer.getActiveTrack();
+    const currentBvid = (activeTrack?.id as string | undefined)
+      ?? usePlayerStore.getState().currentBvid
+      ?? undefined;
+    const currentIndex = typeof activeIndex === 'number' && activeIndex >= 0
+      ? activeIndex
+      : nativeQueue.findIndex(track => track.id === currentBvid);
+    const logicalQueue = usePlayerStore.getState().queue;
+    const logicalIndex = logicalQueue.findIndex(video => video.bvid === currentBvid);
+    const nextVideo = logicalIndex >= 0 ? logicalQueue[logicalIndex + 1] : undefined;
+    if (!currentBvid || currentIndex < 0 || !nextVideo) return null;
+    return {
+      currentBvid,
+      nextVideo,
+      alreadyBuffered: nativeQueue.some(
+        (track, index) => index > currentIndex && track.id === nextVideo.bvid,
+      ),
+    };
+  });
+  if (!snapshot || revision !== queueRevision) return false;
+  if (snapshot.alreadyBuffered) return true;
+
+  const tracks = await hydrateVideo(snapshot.nextVideo);
+  if (tracks.length === 0 || revision !== queueRevision) return false;
+
+  return withNativeQueueMutation(async () => {
+    if (revision !== queueRevision) return false;
+    const nativeQueue = await TrackPlayer.getQueue();
+    const activeIndex = await TrackPlayer.getActiveTrackIndex();
+    const activeTrack = await TrackPlayer.getActiveTrack();
+    const currentBvid = (activeTrack?.id as string | undefined)
+      ?? usePlayerStore.getState().currentBvid
+      ?? undefined;
+    const currentIndex = typeof activeIndex === 'number' && activeIndex >= 0
+      ? activeIndex
+      : nativeQueue.findIndex(track => track.id === currentBvid);
+    if (currentBvid !== snapshot.currentBvid || currentIndex < 0) return false;
+
+    const latestQueue = usePlayerStore.getState().queue;
+    const logicalIndex = latestQueue.findIndex(video => video.bvid === currentBvid);
+    if (latestQueue[logicalIndex + 1]?.bvid !== snapshot.nextVideo.bvid) return false;
+    if (
+      nativeQueue.some(
+        (track, index) => index > currentIndex && track.id === snapshot.nextVideo.bvid,
+      )
+    ) {
+      return true;
+    }
+
+    await TrackPlayer.add(tracks, currentIndex + 1);
+    return true;
+  });
+}
+
 async function skipNativeQueueToNext(pauseRevision: number): Promise<boolean> {
   const revision = queueRevision;
   return withNativeQueueMutation(async () => {
@@ -1142,14 +1261,21 @@ async function skipToNextWithPauseRevision(pauseRevision: number) {
     return;
   }
   isSkipping = true;
+  const revision = queueRevision;
   try {
     let skipped = await skipNativeQueueToNext(pauseRevision);
+    if (revision !== queueRevision) return;
     const hasLogicalNext = !skipped && await hasLogicalNextTrack();
     if (hasLogicalNext) {
-      await maintainQueueBuffer();
-      skipped = await skipNativeQueueToNext(pauseRevision);
+      const buffered = await ensureNextLogicalTrackBuffered(revision);
+      if (buffered && revision === queueRevision) {
+        skipped = await skipNativeQueueToNext(pauseRevision);
+      }
     }
 
+    if (skipped) {
+      maintainQueueBuffer().catch(() => {});
+    }
     if (!skipped && hasLogicalNext) {
       usePlayerStore.getState().setPlaybackError('下一首暂时无法加载，请检查网络后重试');
       showQueueNotReadyToast();
@@ -1539,6 +1665,7 @@ async function processPlaybackError(
     audioService.invalidate(bvid, cid);
     invalidateUrl(bvid, cid);
     invalidateDomainCache();
+    invalidateHydratedTrackCache(bvid);
 
     const refreshedTracks = await hydrateVideo(video, cid);
     if (revision !== queueRevision) {

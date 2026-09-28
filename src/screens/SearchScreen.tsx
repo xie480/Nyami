@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  InteractionManager,
   Modal,
   StatusBar,
   Text,
@@ -251,20 +250,18 @@ export const SearchScreen = ({navigation}: any) => {
         prefetchAudioUrl(previousVideo.bvid, previousVideo.parts?.[0]?.cid).catch(() => {});
       }
       navigation.navigate('Player');
-      InteractionManager.runAfterInteractions(() => {
-        void (async () => {
-          try {
-            const revision = await loadQueue(queue, video.bvid);
-            if (!revision) {
-              throw new Error(usePlayerStore.getState().playbackError || '视频暂时无法播放');
-            }
-            resolveCurrentTrack(revision).catch(() => {});
-          } catch (playError) {
-            usePlayerStore.getState().setResolving(false);
-            Alert.alert('播放失败', playError instanceof Error ? playError.message : '视频暂时无法播放');
+      void (async () => {
+        try {
+          const revision = await loadQueue(queue, video.bvid);
+          if (!revision) {
+            throw new Error(usePlayerStore.getState().playbackError || '视频暂时无法播放');
           }
-        })();
-      });
+          resolveCurrentTrack(revision).catch(() => {});
+        } catch (playError) {
+          usePlayerStore.getState().setResolving(false);
+          Alert.alert('播放失败', playError instanceof Error ? playError.message : '视频暂时无法播放');
+        }
+      })();
     } catch (playError) {
       usePlayerStore.getState().setResolving(false);
       Alert.alert('播放失败', playError instanceof Error ? playError.message : '视频暂时无法播放');

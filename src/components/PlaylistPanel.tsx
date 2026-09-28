@@ -18,6 +18,15 @@ import { loadMorePersonalizedSongs } from '../services/homeRecommendationService
 
 const QUEUE_LOAD_AHEAD_TRACKS = 5;
 const EMPTY_PLAYLIST_QUEUE: FavoriteVideo[] = [];
+const QUEUE_ITEM_HEIGHT = 56;
+const QUEUE_ITEM_SPACING = 8;
+const QUEUE_PART_ROW_HEIGHT = 28;
+const QUEUE_PARTS_SPACING = 4;
+
+function getQueueItemExtraHeight(video: FavoriteVideo | undefined, expandedBvid: string | null): number {
+  if (!video || video.bvid !== expandedBvid || !video.parts || video.parts.length <= 1) return 0;
+  return video.parts.length * QUEUE_PART_ROW_HEIGHT + QUEUE_PARTS_SPACING;
+}
 
 interface PlaylistItemProps {
   item: FavoriteVideo;
@@ -54,7 +63,7 @@ const PlaylistItem = memo(function PlaylistItem({
               {item.title}
             </Text>
             <Text style={[styles.sub, { color: t.colors.textSub }]} numberOfLines={1} ellipsizeMode="tail">
-              {item.upper.name}
+              {item.upper?.name || '未知 UP 主'}
             </Text>
           </View>
         </RNTouchableOpacity>
@@ -214,10 +223,10 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
         const timer = setTimeout(() => {
           listRef.current?.scrollToIndex({
             index: idx,
-            animated: true,
+            animated: false,
             viewPosition: 0.5,
           });
-        }, 350);
+        }, 0);
         return () => clearTimeout(timer);
       }
     }
@@ -227,11 +236,25 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     const timer = setTimeout(() => {
       listRef.current?.scrollToIndex({
         index: info.index,
-        animated: true,
+        animated: false,
         viewPosition: 0.5,
       });
-    }, 500);
+    }, 0);
   }, []);
+
+  const getItemLayout = useCallback((data: ArrayLike<FavoriteVideo> | null | undefined, index: number) => {
+    const items = data ?? queue;
+    let offset = index * (QUEUE_ITEM_HEIGHT + QUEUE_ITEM_SPACING);
+    for (let itemIndex = 0; itemIndex < index; itemIndex += 1) {
+      offset += getQueueItemExtraHeight(items[itemIndex], expandedBvid);
+    }
+    const item = items[index];
+    return {
+      length: QUEUE_ITEM_HEIGHT + QUEUE_ITEM_SPACING + getQueueItemExtraHeight(item, expandedBvid),
+      offset,
+      index,
+    };
+  }, [expandedBvid, queue]);
 
   const handleLoadMore = useCallback(async () => {
     if (loadingMoreRef.current || !playContext) return;
@@ -430,7 +453,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
           }}
           contentContainerStyle={styles.list}
           initialScrollIndex={initialIndex}
-          getItemLayout={(data, index) => ({ length: 64, offset: 64 * index, index })}
+          getItemLayout={getItemLayout}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
           windowSize={5}
@@ -493,7 +516,8 @@ const styles = StyleSheet.create({
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    height: QUEUE_ITEM_HEIGHT,
+    paddingVertical: 0,
     paddingHorizontal: 12,
     marginVertical: 4,
     borderRadius: 8,
@@ -505,7 +529,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   info: {
-    width: '115%',
+    flex: 1,
   },
   title: {
     fontSize: 14,
@@ -538,7 +562,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 6,
+    height: QUEUE_PART_ROW_HEIGHT,
+    paddingVertical: 0,
     paddingRight: 8,
   },
   partTitle: {
