@@ -288,6 +288,32 @@ export const FoldersScreen = ({ navigation }: any) => {
     navigation.navigate('Player');
   };
 
+  const folderTabs = !searchActive && playlistItems !== null ? (
+    <View style={{paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.md}}>
+      <View style={{flexDirection: 'row', padding: 4, borderRadius: t.radius.full, backgroundColor: t.colors.surfaceHigh}}>
+        {([
+          {key: 'all', title: '全部', count: playlistItems.length},
+          {key: 'owned', title: '我创建', count: ownedPlaylistCount},
+          {key: 'collected', title: '我收藏', count: collectedPlaylistCount},
+        ] as const).map(tab => {
+          const selected = folderTab === tab.key;
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              accessibilityRole="button"
+              accessibilityState={{selected}}
+              onPress={() => setFolderTab(tab.key)}
+              style={{flex: 1, minHeight: 40, borderRadius: t.radius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? t.colors.primary : 'transparent'}}>
+              <Text style={{color: selected ? t.colors.onPrimary : t.colors.textSub, fontSize: t.fontSize.sm, fontWeight: selected ? '600' : '400'}}>
+                {tab.title} {tab.count}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  ) : null;
+
   return (
     // 【性能优化】collapsable=false 确保 Android 上屏幕容器不被 View 融合优化
     <View style={s.container} {...(Platform.OS === 'android' ? { collapsable: false as any } : {})}>
@@ -371,6 +397,8 @@ export const FoldersScreen = ({ navigation }: any) => {
           外部收藏来源同步失败，仍显示上次同步目录：{importedSyncError}
         </Text>
       )}
+
+      {folderTabs}
 
       {playlistItems === null && !error ? (
         <Loading />
@@ -502,27 +530,6 @@ export const FoldersScreen = ({ navigation }: any) => {
           initialNumToRender={10}
           ListHeaderComponent={
             <View style={{marginBottom: t.spacing.xs}}>
-              <View style={{flexDirection: 'row', padding: 4, borderRadius: t.radius.full, backgroundColor: t.colors.surfaceHigh}}>
-                {([
-                  {key: 'all', title: '全部', count: playlistItems?.length ?? 0},
-                  {key: 'owned', title: '我创建', count: ownedPlaylistCount},
-                  {key: 'collected', title: '我收藏', count: collectedPlaylistCount},
-                ] as const).map(tab => {
-                  const selected = folderTab === tab.key;
-                  return (
-                    <TouchableOpacity
-                      key={tab.key}
-                      accessibilityRole="button"
-                      accessibilityState={{selected}}
-                      onPress={() => setFolderTab(tab.key)}
-                      style={{flex: 1, minHeight: 40, borderRadius: t.radius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? t.colors.primary : 'transparent'}}>
-                      <Text style={{color: selected ? t.colors.onPrimary : t.colors.textSub, fontSize: t.fontSize.sm, fontWeight: selected ? '600' : '400'}}>
-                        {tab.title} {tab.count}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
               <View style={{flexDirection: 'row', alignItems: 'center', marginTop: t.spacing.md, padding: t.spacing.md, borderRadius: 22, backgroundColor: t.colors.primaryLight}}>
                 <TouchableOpacity activeOpacity={0.75} onPress={handleRandomPlayAll} style={{flex: 1, flexDirection: 'row', alignItems: 'center'}}>
                   <View style={{width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.primary}}>
