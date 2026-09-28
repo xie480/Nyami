@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useAuthStore } from './store/authStore';
 import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
@@ -37,6 +37,9 @@ import { SearchScreen } from './screens/SearchScreen';
 import { PlaylistRecommendationsScreen } from './screens/PlaylistRecommendationsScreen';
 
 const Stack = createStackNavigator();
+
+// 底栏目标页采用轻量淡入上移转场，避免整页横向推入带来的视觉负担。
+const BOTTOM_TAB_SCREEN_OPTIONS = {animation: 'fade_from_bottom' as const};
 
 const withBackground = (Component: React.ComponentType<any>) => {
   return function ScreenWithBackground(props: any) {
@@ -93,27 +96,11 @@ export default function App() {
   const toastRef = useRef<ToastNotificationRef>(null);
   const [isOnline, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
-  const [currentRouteName, setCurrentRouteName] = useState<string | null>(null);
   const updateCurrentRouteName = useCallback(() => {
     if (navigationRef.isReady()) {
-      setCurrentRouteName(navigationRef.getCurrentRoute()?.name ?? null);
+      useUIStore.getState().setCurrentRouteName(navigationRef.getCurrentRoute()?.name ?? null);
     }
   }, [navigationRef]);
-  const isGlobalDockVisible =
-    currentRouteName !== null &&
-    !['Splash', 'Home', 'Player'].includes(currentRouteName);
-  const activeDockTab =
-    ['Discover', 'Search', 'PlaylistRecommendations'].includes(currentRouteName ?? '')
-      ? 'home'
-      : currentRouteName === 'Settings'
-      ? 'settings'
-      : currentRouteName === 'TagRecommendations'
-        ? 'profile'
-        : ['Folders', 'Videos', 'VisibleFolders', 'NoCacheFolders', 'SyncDetails'].includes(
-              currentRouteName ?? '',
-            )
-          ? 'folders'
-          : null;
   const loggedIn = useAuthStore((s) => s.loggedIn);
   const uid = useAuthStore((s) => s.userId);
   const initAuth = useAuthStore((s) => s.initAuth);
@@ -121,13 +108,20 @@ export default function App() {
   const playlistVisible = useUIStore(state => state.playlistVisible);
   const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
   const isGlassMode = themeMode === 'glass-light' || themeMode === 'glass-dark';
-  const navTheme = {
+  const navTheme = useMemo(() => ({
     ...(isDark ? DarkTheme : DefaultTheme),
     colors: {
       ...(isDark ? DarkTheme.colors : DefaultTheme.colors),
       background: 'transparent',
     },
-  };
+  }), [isDark]);
+  const stackScreenOptions = useMemo(() => ({
+    headerShown: false,
+    cardStyle: { backgroundColor: 'transparent' },
+    animation: isGlassMode ? 'none' as const : 'default' as const,
+    // 页面不可见时冻结，减少后台页面持续渲染。
+    freezeOnBlur: true,
+  }), [isGlassMode]);
   const startSync = useSyncStore(state => state.startSync);
 
   // Initialize player, network status listener, back handler, and Logger
@@ -228,40 +222,44 @@ export default function App() {
                 onStateChange={updateCurrentRouteName}>
                 <Stack.Navigator
                   initialRouteName="Splash"
-                  screenOptions={{
-                    headerShown: false,
-                    cardStyle: { backgroundColor: 'transparent' },
-                    animation: isGlassMode ? 'none' : 'default',
-                    // 【性能优化】启用 freezeOnBlur：页面不可见时停止渲染，
-                    // 配合 react-native-screens 释放 GPU/CPU 资源
-                    freezeOnBlur: true,
-                  }}>
+                  screenOptions={stackScreenOptions}>
                   <Stack.Screen name="Splash" component={SplashScreenWithBg} />
                   <Stack.Screen name="Home" component={HomeScreenWithBg} />
-                  <Stack.Screen name="Discover" component={DiscoverScreenWithBg} />
+                  <Stack.Screen
+                    name="Discover"
+                    component={DiscoverScreenWithBg}
+                    options={BOTTOM_TAB_SCREEN_OPTIONS}
+                  />
                   <Stack.Screen name="Search" component={SearchScreenWithBg} />
                   <Stack.Screen name="PlaylistRecommendations" component={PlaylistRecommendationsScreenWithBg} />
-                  <Stack.Screen name="Folders" component={FoldersScreenWithBg} />
+                  <Stack.Screen
+                    name="Folders"
+                    component={FoldersScreenWithBg}
+                    options={BOTTOM_TAB_SCREEN_OPTIONS}
+                  />
                   <Stack.Screen name="Videos" component={VideosScreenWithBg} />
                   <Stack.Screen
                     name="Player"
                     component={PlayerScreenWithBg}
                     options={{ presentation: 'modal' }}
                   />
-                  <Stack.Screen name="Settings" component={SettingsScreenWithBg} />
+                  <Stack.Screen
+                    name="Settings"
+                    component={SettingsScreenWithBg}
+                    options={BOTTOM_TAB_SCREEN_OPTIONS}
+                  />
                   <Stack.Screen name="SoundLab" component={SoundLabScreenWithBg} />
                   <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreenWithBg} />
                   <Stack.Screen name="NoCacheFolders" component={NoCacheFoldersScreenWithBg} />
                   <Stack.Screen name="SyncDetails" component={SyncDetailsScreenWithBg} />
-                  <Stack.Screen name="TagRecommendations" component={TagRecommendationsScreenWithBg} />
+                  <Stack.Screen
+                    name="TagRecommendations"
+                    component={TagRecommendationsScreenWithBg}
+                    options={BOTTOM_TAB_SCREEN_OPTIONS}
+                  />
                 </Stack.Navigator>
               </NavigationContainer>
-              {isGlobalDockVisible && (
-                <BottomNavigationBar
-                  navigation={navigationRef}
-                  activeTab={activeDockTab}
-                />
-              )}
+              <BottomNavigationBar navigation={navigationRef} />
             </View>
           </SafeAreaWrapper>
           {/* 全局顶部通知组件 - 覆盖在所有页面之上 */}

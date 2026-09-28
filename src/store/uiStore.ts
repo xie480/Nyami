@@ -9,6 +9,9 @@ export type AuthRefreshTask = {
 };
 
 interface UIState {
+  /** 当前导航路由；供全局导航栏独立订阅，避免路由变化刷新 App 根树。 */
+  currentRouteName: string | null;
+  setCurrentRouteName: (routeName: string | null) => void;
   /** 是否显示全局播放列表面板 */
   playlistVisible: boolean;
   /** 设置播放列表面板可见性 */
@@ -27,6 +30,13 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>(set => ({
+  currentRouteName: null,
+  setCurrentRouteName: routeName =>
+    set(state =>
+      state.currentRouteName === routeName
+        ? state
+        : {currentRouteName: routeName},
+    ),
   playlistVisible: false,
   setPlaylistVisible: visible => set({playlistVisible: visible}),
   loginModalVisible: false,

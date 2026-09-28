@@ -27,7 +27,8 @@ interface MiniPlayerProps {
   onOpenPlayer: () => void;
 }
 
-export const MiniPlayer: React.FC<MiniPlayerProps> = ({
+// 底栏路由切换只改变选中项；播放状态仍由本组件自己的订阅驱动更新。
+const MiniPlayerComponent: React.FC<MiniPlayerProps> = ({
   embedded = false,
   onOpenPlayer,
 }) => {
@@ -189,3 +190,5 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
     </View>
   );
 };
+
+export const MiniPlayer = React.memo(MiniPlayerComponent);

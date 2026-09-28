@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useCallback} from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useActiveTrack} from 'react-native-track-player';
@@ -6,12 +6,25 @@ import {GlassView} from './GlassView';
 import {MiniPlayer} from './MiniPlayer';
 import {useTheme} from '../theme';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {useUIStore} from '../store/uiStore';
 
 type ActiveTab = 'home' | 'folders' | 'profile' | 'settings' | null;
 
 interface BottomNavigationBarProps {
   navigation: any;
-  activeTab: ActiveTab;
+}
+
+const HIDDEN_DOCK_ROUTES = new Set(['Splash', 'Home', 'Player']);
+const HOME_DOCK_ROUTES = new Set(['Discover', 'Search', 'PlaylistRecommendations']);
+const FOLDER_DOCK_ROUTES = new Set(['Folders', 'Videos', 'VisibleFolders', 'NoCacheFolders', 'SyncDetails']);
+
+function getActiveTab(routeName: string | null): ActiveTab {
+  if (!routeName) return null;
+  if (HOME_DOCK_ROUTES.has(routeName)) return 'home';
+  if (routeName === 'Settings') return 'settings';
+  if (routeName === 'TagRecommendations') return 'profile';
+  if (FOLDER_DOCK_ROUTES.has(routeName)) return 'folders';
+  return null;
 }
 
 const NAV_ITEMS: Array<{
@@ -27,18 +40,27 @@ const NAV_ITEMS: Array<{
 ];
 
 /** 应用级固定磨砂播放导航面板；播放器与导航共用同一块玻璃背景。 */
-export const BottomNavigationBar: React.FC<BottomNavigationBarProps> = ({
+const BottomNavigationBarComponent: React.FC<BottomNavigationBarProps> = ({
   navigation,
-  activeTab,
 }) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const activeTrack = useActiveTrack();
+  const currentRouteName = useUIStore(state => state.currentRouteName);
+  const openPlayer = useCallback(
+    () => navigation.navigate('Player'),
+    [navigation],
+  );
   const hasActiveTrack = !!activeTrack;
+  const activeTab = getActiveTab(currentRouteName);
   const glassBackground = t.glass?.colors.glass.bg ??
     (t.isDark ? 'rgba(24,24,30,0.84)' : 'rgba(250,250,252,0.86)');
   const glassBorder = t.glass?.colors.glass.border ??
     (t.isDark ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.72)');
+
+  if (!currentRouteName || HIDDEN_DOCK_ROUTES.has(currentRouteName)) {
+    return null;
+  }
 
   return (
     <View
@@ -53,6 +75,7 @@ export const BottomNavigationBar: React.FC<BottomNavigationBarProps> = ({
         backgroundColor={glassBackground}
         borderColor={glassBorder}
         noShadow
+        noBlur
         style={{
           shadowColor: '#000',
           shadowOpacity: t.isDark ? 0.28 : 0.12,
@@ -65,7 +88,7 @@ export const BottomNavigationBar: React.FC<BottomNavigationBarProps> = ({
             <>
               <MiniPlayer
                 embedded
-                onOpenPlayer={() => navigation.navigate('Player')}
+                onOpenPlayer={openPlayer}
               />
               <View
                 style={{
@@ -131,3 +154,5 @@ export const BottomNavigationBar: React.FC<BottomNavigationBarProps> = ({
     </View>
   );
 };
+
+export const BottomNavigationBar = React.memo(BottomNavigationBarComponent);
