@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Animated, Platform, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {Animated, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useActiveTrack} from 'react-native-track-player';
 import {GlassView} from './GlassView';
@@ -131,11 +131,6 @@ const BottomNavigationBarComponent: React.FC<BottomNavigationBarProps> = ({
                   backgroundColor: t.isDark
                     ? 'rgba(255,255,255,0.12)'
                     : 'rgba(0,0,0,0.055)',
-                  shadowColor: t.colors.primary,
-                  shadowOffset: {width: 0, height: 2},
-                  shadowOpacity: 0.2,
-                  shadowRadius: 8,
-                  elevation: Platform.OS === 'android' ? 3 : 0,
                   transform: [{translateX: indicatorTranslateX}],
                 }}
               />
