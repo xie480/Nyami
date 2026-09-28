@@ -224,7 +224,7 @@ export const SongRecommendationsScreen = ({navigation}: any) => {
           />
         )}
         onEndReached={() => void loadMore()}
-        onEndReachedThreshold={0.6}
+        onEndReachedThreshold={1.2}
         initialNumToRender={10}
         maxToRenderPerBatch={10}
         windowSize={7}

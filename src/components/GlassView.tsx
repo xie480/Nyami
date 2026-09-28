@@ -16,6 +16,8 @@ interface GlassViewProps {
   noShadow?: boolean;
   /** If true, skips the native backdrop blur for lightweight surfaces. */
   noBlur?: boolean;
+  /** Use a single base/border layer for repeated surfaces in scrolling lists. */
+  minimal?: boolean;
 }
 
 /**
@@ -42,6 +44,7 @@ export const GlassView: React.FC<GlassViewProps> = ({
   borderColor: borderOverride,
   noShadow = false,
   noBlur = false,
+  minimal = false,
 }) => {
   const t = useTheme();
   const glassTheme = t.glass;
@@ -57,10 +60,11 @@ export const GlassView: React.FC<GlassViewProps> = ({
 
   const blurType = t.isDark ? ('dark' as const) : ('light' as const);
 
-  const [isAnimating, setIsAnimating] = useState(!noBlur);
+  const shouldBlur = !noBlur && !minimal;
+  const [isAnimating, setIsAnimating] = useState(shouldBlur);
 
   useEffect(() => {
-    if (noBlur) {
+    if (!shouldBlur) {
       setIsAnimating(false);
       return;
     }
@@ -70,12 +74,12 @@ export const GlassView: React.FC<GlassViewProps> = ({
       setIsAnimating(false);
     });
     return () => task.cancel();
-  }, [noBlur]);
+  }, [shouldBlur]);
 
   // ── Outer container: holds shadows + clips inner content ──────────
   const outerStyle: ViewStyle = {
     borderRadius: resolvedBorderRadius,
-    ...(noShadow
+    ...(noShadow || minimal
       ? {}
       : Platform.select({
           ios: {
@@ -91,13 +95,11 @@ export const GlassView: React.FC<GlassViewProps> = ({
   };
 
   return (
-    // 【性能优化】collapsable=false 防止 Android 上 View 融合优化（Overdraw 优化），
-    // 确保 BlurView 的 backdrop 模糊层始终正确渲染
-    <View style={[outerStyle, style]} {...(Platform.OS === 'android' ? { collapsable: false as any } : {})}>
+    <View style={[outerStyle, style]} {...(Platform.OS === 'android' && !minimal ? { collapsable: false as any } : {})}>
       {/* Inner clip region — overflow hidden lives here so outer shadow isn't clipped */}
       <View style={{ overflow: 'hidden', borderRadius: resolvedBorderRadius }}>
         {/* ── Backdrop blur layer ─────────────────────────────────── */}
-        {!noBlur && !isAnimating && (
+        {shouldBlur && !isAnimating && (
           <BlurView
             style={StyleSheet.absoluteFill}
             blurType={blurType}
@@ -111,8 +113,12 @@ export const GlassView: React.FC<GlassViewProps> = ({
           style={{
             backgroundColor: resolvedBg,
             borderRadius: resolvedBorderRadius,
+            ...(minimal
+              ? {borderWidth: StyleSheet.hairlineWidth, borderColor: resolvedBorder}
+              : {}),
           }}
         >
+          {!minimal && <>
           {/* ── 1. Chromatic aberration fringing ─────────────────────
                Ultra-thin colour shift at edges; cyan on top, magenta on
                bottom — simulates light dispersion through glass. ─── */}
@@ -191,6 +197,7 @@ export const GlassView: React.FC<GlassViewProps> = ({
               pointerEvents="none"
             />
           )}
+          </>}
 
           {/* ── Content ───────────────────────────────────────────── */}
           <View>{children}</View>

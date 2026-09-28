@@ -116,7 +116,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
       activeOpacity={0.8}
       onPress={() => openSource(source)}
       style={{marginBottom: t.spacing.md}}>
-      <GlassView borderRadius={22} backgroundColor={glassBackground} borderColor={glassBorder} noShadow>
+      <GlassView borderRadius={22} backgroundColor={glassBackground} borderColor={glassBorder} noShadow noBlur minimal>
         <View style={{flexDirection: 'row', padding: t.spacing.sm}}>
           <View style={{width: 116, height: 128, borderRadius: 16, overflow: 'hidden', backgroundColor: t.colors.surfaceHigh}}>
             {source.cover ? (
@@ -223,7 +223,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
           />
         )}
         onEndReached={() => void loadMore()}
-        onEndReachedThreshold={0.5}
+        onEndReachedThreshold={1.2}
         initialNumToRender={8}
         maxToRenderPerBatch={8}
         windowSize={7}

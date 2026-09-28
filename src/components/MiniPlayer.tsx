@@ -173,7 +173,7 @@ const MiniPlayerComponent: React.FC<MiniPlayerProps> = ({
 
   if (isGlass) {
     return (
-      <GlassView style={s.wrap} borderRadius={0}>
+      <GlassView style={s.wrap} borderRadius={0} noShadow noBlur minimal>
         {innerContent}
       </GlassView>
     );

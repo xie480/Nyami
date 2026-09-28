@@ -475,7 +475,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         {isGlass ? (
-          <GlassView style={{ maxHeight: '80%', borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingBottom: 20 }} borderRadius={12}>
+          <GlassView style={{ maxHeight: '80%', borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingBottom: 20 }} borderRadius={12} noShadow noBlur minimal>
             {playlistContent}
           </GlassView>
         ) : (

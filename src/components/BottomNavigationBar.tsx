@@ -93,7 +93,8 @@ const BottomNavigationBarComponent: React.FC<BottomNavigationBarProps> = ({
         backgroundColor={glassBackground}
         borderColor={glassBorder}
         noShadow
-        noBlur>
+        noBlur
+        minimal>
         <View>
           {hasActiveTrack && (
             <>
