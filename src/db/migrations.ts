@@ -1,4 +1,5 @@
 import { schemaMigrations, createTable, addColumns } from '@nozbe/watermelondb/Schema/migrations';
+import {recommendationFilterTableSpec} from './schema';
 
 export default schemaMigrations({
   migrations: [
@@ -81,6 +82,12 @@ export default schemaMigrations({
             { name: 'retry_after', type: 'number', isOptional: true },
           ],
         }),
+      ],
+    },
+    {
+      toVersion: 5,
+      steps: [
+        createTable(recommendationFilterTableSpec),
       ],
     },
   ],

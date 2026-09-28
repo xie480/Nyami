@@ -1,7 +1,35 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
+import type {TableSchemaSpec} from '@nozbe/watermelondb/Schema';
+
+const recommendationFilterUniqueIndexes = [
+  'CREATE UNIQUE INDEX IF NOT EXISTS recommendation_filter_item_uq ON recommendation_filter (uid, item_type, item_id);',
+  'CREATE UNIQUE INDEX IF NOT EXISTS recommendation_filter_title_uq ON recommendation_filter (uid, item_type, title_key);',
+].join('');
+
+export const recommendationFilterTableSpec: TableSchemaSpec = {
+  name: 'recommendation_filter',
+  columns: [
+    { name: 'uid', type: 'string', isIndexed: true },
+    { name: 'item_type', type: 'string', isIndexed: true },
+    { name: 'item_id', type: 'string' },
+    { name: 'title_key', type: 'string', isOptional: true },
+    { name: 'expires_at', type: 'number', isIndexed: true },
+  ],
+  unsafeSql: sql => `${sql}${recommendationFilterUniqueIndexes}`,
+};
+
+const dropRecommendationFilterUniqueIndexes = [
+  'DROP INDEX IF EXISTS recommendation_filter_item_uq;',
+  'DROP INDEX IF EXISTS recommendation_filter_title_uq;',
+].join('');
 
 export const schema = appSchema({
-  version: 4,
+  version: 5,
+  unsafeSql: (sql, kind) => {
+    if (kind === 'create_indices') return `${sql}${recommendationFilterUniqueIndexes}`;
+    if (kind === 'drop_indices') return `${sql}${dropRecommendationFilterUniqueIndexes}`;
+    return sql;
+  },
   tables: [
     tableSchema({
       name: 'playlist_meta',
@@ -63,5 +91,6 @@ export const schema = appSchema({
         { name: 'retry_after', type: 'number', isOptional: true },
       ],
     }),
+    tableSchema(recommendationFilterTableSpec),
   ],
 });

@@ -1,6 +1,7 @@
 import {config} from '../config';
 import {loadGlobalIndexCache, favoriteService} from './favoriteService';
 import {importedPlaylistService} from './importedPlaylistService';
+import {filterAndRecordRecommendations, filterAndRecordRecommendedVideos} from './recommendationFilterService';
 import {
   loadTagProfile,
   normalizeRecommendationTitleKey,
@@ -125,8 +126,7 @@ function rankCollections(
         right.score - left.score ||
         right.mediaCount - left.mediaCount ||
         left.title.localeCompare(right.title, 'zh-CN'),
-    )
-    .slice(0, config.recommendations.homePlaylistLimit);
+    );
 }
 
 /** 生成首页首屏：同步当前账号已有外部来源，按本地收藏画像排序并生成首批歌曲。 */
@@ -158,9 +158,17 @@ export async function generateHomeFeed(
   if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
 
+  const recommendations = await filterAndRecordRecommendations(
+    uid,
+    songResult.recommendations,
+    rankCollections(sources, context.profile),
+  );
+  if (signal.aborted) throw new Error('推荐刷新已取消');
+  assertCurrentRecommendationAccount(uid);
+
   return {
-    collections: rankCollections(sources, context.profile),
-    songs: songResult.recommendations,
+    collections: recommendations.collections,
+    songs: recommendations.videos,
     songPage: 1,
     songHasMore: songResult.hasMore,
     failedSearchCount: songResult.failedSearchCount,
@@ -180,7 +188,7 @@ export async function loadMorePersonalizedSongs(
   const context = await loadPersonalizationContext(uid, signal, importedSourcesPromise);
   if (signal.aborted) throw new Error('个性化队列补充已取消');
   assertCurrentRecommendationAccount(uid);
-  return searchTagRecommendations(
+  const result = await searchTagRecommendations(
     context.profile,
     context.favorites,
     signal,
@@ -190,4 +198,10 @@ export async function loadMorePersonalizedSongs(
       excludeVideoTitles: context.favoriteVideoTitles,
     },
   );
+  if (signal.aborted) throw new Error('个性化队列补充已取消');
+  assertCurrentRecommendationAccount(uid);
+  return {
+    ...result,
+    recommendations: await filterAndRecordRecommendedVideos(uid, result.recommendations),
+  };
 }
