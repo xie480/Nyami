@@ -6,8 +6,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef
 import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler, PermissionsAndroid, StatusBar } from 'react-native';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, useTheme } from './theme';
 import LoggerService from './services/LoggerService';
 import ToastNotification, { ToastNotificationRef, ToastConfig } from './components/ToastNotification';
@@ -39,10 +38,6 @@ import { PlaylistRecommendationsScreen } from './screens/PlaylistRecommendations
 import { SongRecommendationsScreen } from './screens/SongRecommendationsScreen';
 
 const Stack = createStackNavigator();
-const MAIN_PAGE_ROUTES = ['Discover', 'Folders', 'TagRecommendations', 'Settings'] as const;
-type MainPageRoute = typeof MAIN_PAGE_ROUTES[number];
-const SWIPE_EDGE_WIDTH = 44;
-const SWIPE_DISTANCE = 72;
 
 const GlobalPlaylistPanel = React.memo(function GlobalPlaylistPanel() {
   const visible = useUIStore(state => state.playlistVisible);
@@ -57,74 +52,33 @@ const BOTTOM_TAB_SCREEN_OPTIONS = {
   gestureEnabled: false,
 };
 
-const withBackground = (
-  Component: React.ComponentType<any>,
-  mainPageRoute?: MainPageRoute,
-) => {
+const withBackground = (Component: React.ComponentType<any>) => {
   return function ScreenWithBackground(props: any) {
     const { colors, glass } = useTheme();
     const bgColor = glass ? 'transparent' : colors.background;
-    const pageIndex = mainPageRoute
-      ? MAIN_PAGE_ROUTES.indexOf(mainPageRoute)
-      : -1;
-    const navigateToMainPage = useCallback((index: number) => {
-      const route = MAIN_PAGE_ROUTES[index];
-      if (route) props.navigation.navigate(route);
-    }, [props.navigation]);
-    const swipeGesture = useMemo(() => {
-      if (pageIndex < 0) return Gesture.Pan().enabled(false);
-
-      const swipeFromLeft = Gesture.Pan()
-        .enabled(pageIndex > 0)
-        .hitSlop({width: SWIPE_EDGE_WIDTH, left: 0})
-        .activeOffsetX(20)
-        .failOffsetY([-18, 18])
-        .onEnd((event, success) => {
-          if (success && event.translationX >= SWIPE_DISTANCE) {
-            runOnJS(navigateToMainPage)(pageIndex - 1);
-          }
-        });
-      const swipeFromRight = Gesture.Pan()
-        .enabled(pageIndex < MAIN_PAGE_ROUTES.length - 1)
-        .hitSlop({width: SWIPE_EDGE_WIDTH, right: 0})
-        .activeOffsetX(-20)
-        .failOffsetY([-18, 18])
-        .onEnd((event, success) => {
-          if (success && event.translationX <= -SWIPE_DISTANCE) {
-            runOnJS(navigateToMainPage)(pageIndex + 1);
-          }
-        });
-
-      return Gesture.Simultaneous(swipeFromLeft, swipeFromRight);
-    }, [navigateToMainPage, pageIndex]);
-    const screen = (
-      <View
-        collapsable={pageIndex >= 0 ? false : undefined}
-        style={{ flex: 1, backgroundColor: bgColor }}>
+    return (
+      <View style={{ flex: 1, backgroundColor: bgColor }}>
         <Component {...props} />
       </View>
     );
-    return pageIndex < 0
-      ? screen
-      : <GestureDetector gesture={swipeGesture}>{screen}</GestureDetector>;
   };
 };
 
 const HomeScreenWithBg = withBackground(HomeScreen);
-const DiscoverScreenWithBg = withBackground(DiscoverScreen, 'Discover');
+const DiscoverScreenWithBg = withBackground(DiscoverScreen);
 const SearchScreenWithBg = withBackground(SearchScreen);
 const PlaylistRecommendationsScreenWithBg = withBackground(PlaylistRecommendationsScreen);
 const SongRecommendationsScreenWithBg = withBackground(SongRecommendationsScreen);
-const FoldersScreenWithBg = withBackground(FoldersScreen, 'Folders');
+const FoldersScreenWithBg = withBackground(FoldersScreen);
 const VideosScreenWithBg = withBackground(VideosScreen);
 const PlayerScreenWithBg = withBackground(PlayerScreen);
-const SettingsScreenWithBg = withBackground(SettingsScreen, 'Settings');
+const SettingsScreenWithBg = withBackground(SettingsScreen);
 const SoundLabScreenWithBg = withBackground(SoundLabScreen);
 const VisibleFoldersScreenWithBg = withBackground(VisibleFoldersScreen);
 const NoCacheFoldersScreenWithBg = withBackground(NoCacheFoldersScreen);
 const SplashScreenWithBg = withBackground(SplashScreen);
 const SyncDetailsScreenWithBg = withBackground(SyncDetailsScreen);
-const TagRecommendationsScreenWithBg = withBackground(TagRecommendationsScreen, 'TagRecommendations');
+const TagRecommendationsScreenWithBg = withBackground(TagRecommendationsScreen);
 
 /**
  * 安全区域适配包装器
