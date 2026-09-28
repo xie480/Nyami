@@ -124,6 +124,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const insets = useSafeAreaInsets();
   const { mediaId, title } = route.params;
   const source = route.params.source as ImportedPlaylist | undefined;
+  const includeVideoParts = Boolean(route.params.includeVideoParts);
   const listTitle = source?.title ?? title ?? '播放列表';
   const setQueue = usePlayerStore((s) => s.setQueue);
   const playMode = usePlayerStore((s) => s.playMode);
@@ -244,8 +245,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
       const target = displayedList[idx];
       if (!target) return;
       const context = source
-        ? { sourceKey: source.sourceKey, sortOption, searchQuery }
-        : { folderId: mediaId, sourceKey: `ownedFavorite:${mediaId}`, sortOption, searchQuery };
+        ? { sourceKey: source.sourceKey, sortOption, searchQuery, includeVideoParts }
+        : { folderId: mediaId, sourceKey: `ownedFavorite:${mediaId}`, sortOption, searchQuery, includeVideoParts };
 
       // 【修复】强制切换为顺序播放模式，避免 shuffle 模式触发大量请求
       if (usePlayerStore.getState().playMode !== 'sequential') {
@@ -322,8 +323,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
 
       const target = currentList[0];
       const context = source
-        ? { sourceKey: source.sourceKey, sortOption, searchQuery }
-        : { folderId: mediaId, sourceKey: `ownedFavorite:${mediaId}`, sortOption, searchQuery };
+        ? { sourceKey: source.sourceKey, sortOption, searchQuery, includeVideoParts }
+        : { folderId: mediaId, sourceKey: `ownedFavorite:${mediaId}`, sortOption, searchQuery, includeVideoParts };
       setQueue(currentList, target.bvid, context);
       // 【P0防闪烁优化】跳转前清空旧播放上下文
       usePlayerStore.getState().setResolving(true);
@@ -367,8 +368,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
 
       const target = shuffled[0];
       const context = source
-        ? { sourceKey: source.sourceKey, sortOption, searchQuery }
-        : { folderId: mediaId, sourceKey: `ownedFavorite:${mediaId}`, sortOption, searchQuery };
+        ? { sourceKey: source.sourceKey, sortOption, searchQuery, includeVideoParts }
+        : { folderId: mediaId, sourceKey: `ownedFavorite:${mediaId}`, sortOption, searchQuery, includeVideoParts };
       
       usePlayerStore.getState().setPlayMode('shuffle');
       setQueue(shuffled, target.bvid, context);

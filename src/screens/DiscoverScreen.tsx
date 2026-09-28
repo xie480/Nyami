@@ -61,7 +61,11 @@ export const DiscoverScreen = ({navigation}: any) => {
   }, [feed.songHasMore, feed.songPage, feed.songs, navigation, setQueue, uid]);
 
   const openCollection = useCallback((source: CollectionRecommendation) => {
-    navigation.navigate('Videos', {source, title: source.title});
+    navigation.navigate('Videos', {
+      source,
+      title: source.title,
+      includeVideoParts: true,
+    });
   }, [navigation]);
 
   const glassBackground = t.glass?.colors.glass.bg ?? t.colors.surface;

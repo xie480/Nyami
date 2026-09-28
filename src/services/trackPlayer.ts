@@ -17,7 +17,7 @@ import {useSettingsStore} from '../store/settingsStore';
 import {config} from '../config';
 import {usePlayerStore} from '../store/playerStore';
 import {performanceMonitor} from './performanceMonitor';
-import type {FavoriteVideo} from '../types/domain';
+import type {FavoriteVideo, VideoPart} from '../types/domain';
 import {storage} from '../core/storage';
 import {useProgressStore} from '../store/progressStore';
 import {getCachedUrl, setCachedUrl, invalidateUrl} from './urlCache';
@@ -31,6 +31,7 @@ let _ready = false;
 const MIN_NATIVE_BUFFER = 8;
 const TARGET_NATIVE_BUFFER = 12;
 let queueRevision = 0;
+const videoPartsLoadPromises = new Map<string, Promise<void>>();
 let queueMaintenanceRequested = false;
 let queueMaintenancePromise: Promise<void> | null = null;
 let queueEndRecoveryPromise: Promise<void> | null = null;
@@ -390,12 +391,15 @@ async function hydrateVideo(
       useSettingsStore.getState().noCacheFolderIds?.includes(id),
     ) ?? false;
     const shouldCacheAudio = !isNoCacheFolder && !isPersonalizedNoCache;
+    if (!targetCid && !v.parts?.length) {
+      void ensureCurrentVideoParts(v.bvid, queueRevision);
+    }
 
     let url = '';
     let headers: Record<string, string> | undefined;
     let effectiveCid = cid;
     let title = v.title;
-    let partsToExpand: any[] = [];
+    let partsToExpand: VideoPart[] = [];
 
     const cachedPath = !isNoCacheFolder
       ? await audioCache.has(cacheKey, quality)
@@ -421,8 +425,7 @@ async function hydrateVideo(
 
         if (!cid && info.parts && info.parts.length > 1) {
           title = `${info.title} - ${info.parts[0].title}`;
-          usePlayerStore.getState().updateVideoParts(v.bvid, info.parts);
-          persistVideoPartsToDb(v.bvid, info.parts).catch(() => {});
+          storeVideoParts(v.bvid, info.parts);
           if (useSettingsStore.getState().expandMultiPart) {
             partsToExpand = info.parts.slice(1);
           }
@@ -780,6 +783,64 @@ export async function playWithIntent(): Promise<void> {
   await withNativeQueueMutation(async () => {
     await playTrackWithFadeIn(audioRevision);
   });
+}
+
+function storeVideoParts(bvid: string, parts: VideoPart[]): void {
+  if (parts.length <= 1) return;
+  usePlayerStore.getState().updateVideoParts(bvid, parts);
+  persistVideoPartsToDb(bvid, parts).catch(() => {});
+}
+
+function ensureCurrentVideoParts(
+  bvid: string,
+  expectedQueueRevision: number,
+): Promise<void> {
+  const currentPlayer = usePlayerStore.getState();
+  const currentVideo = currentPlayer.queue.find(video => video.bvid === bvid);
+  const context = currentPlayer.playContext;
+  if (
+    currentPlayer.currentBvid !== bvid ||
+    !currentVideo ||
+    currentVideo.parts?.length ||
+    !(context?.includeVideoParts || context?.onlineSearch || context?.isPersonalized)
+  ) {
+    return Promise.resolve();
+  }
+
+  const pendingLoad = videoPartsLoadPromises.get(bvid);
+  if (pendingLoad) return pendingLoad;
+
+  let loadPromise!: Promise<void>;
+  loadPromise = (async () => {
+    try {
+      const info = await audioService.getVideoInfo(bvid);
+      const latestPlayer = usePlayerStore.getState();
+      const latestVideo = latestPlayer.queue.find(video => video.bvid === bvid);
+      if (
+        expectedQueueRevision !== queueRevision ||
+        latestPlayer.currentBvid !== bvid ||
+        !latestVideo ||
+        latestVideo.parts?.length
+      ) {
+        return;
+      }
+      const parts = (info.pages ?? []).map(page => ({
+        cid: page.cid,
+        page: page.page,
+        title: page.part,
+        duration: page.duration,
+      }));
+      storeVideoParts(bvid, parts);
+    } catch {
+      // 分P列表属于附加信息，详情失败不影响当前音频继续播放。
+    } finally {
+      if (videoPartsLoadPromises.get(bvid) === loadPromise) {
+        videoPartsLoadPromises.delete(bvid);
+      }
+    }
+  })();
+  videoPartsLoadPromises.set(bvid, loadPromise);
+  return loadPromise;
 }
 
 export async function pausePlayback(): Promise<void> {
@@ -1648,6 +1709,7 @@ export async function PlaybackService() {
     }
 
     usePlayerStore.getState().setResolving(false);
+    void ensureCurrentVideoParts(bvid, queueRevision);
     naturalFadeOutTrackKey = null;
     if (playbackIntent) {
       void fadeInActiveTrack(audioTransitionRevision, activeTrack);

@@ -115,7 +115,20 @@ export function invalidateDomainCache(domain?: string) {
   }
 }
 
+async function getCachedVideoInfo(bvid: string) {
+  if (!bvid) throw new Error('bvid 不能为空');
+  return cache.getOrSet(
+    `videoInfo:${bvid}`,
+    config.cacheTTL.videoInfo,
+    () => biliApi.getVideoInfo(bvid),
+    true,
+  );
+}
+
 export const audioService = {
+  /** 获取视频详情但不请求播放地址，供分P列表按需加载复用。 */
+  getVideoInfo: getCachedVideoInfo,
+
   /**
    * 获取音频元信息
    *
@@ -133,12 +146,7 @@ export const audioService = {
         cacheKey,
         config.cacheTTL.audioUrl,
         async () => {
-          const info = await cache.getOrSet(
-            `videoInfo:${bvid}`,
-            config.cacheTTL.videoInfo,
-            () => biliApi.getVideoInfo(bvid),
-            true
-          );
+          const info = await getCachedVideoInfo(bvid);
   
           const targetCid = cid ?? info.cid;
           const playUrl = await biliApi.getPlayUrl(bvid, targetCid);
@@ -160,7 +168,7 @@ export const audioService = {
           }
           const audio = pickAudio(audios, quality);
 
-          const parts = (info as any).pages?.map((p: any) => ({
+          const parts = info.pages?.map(p => ({
             cid: p.cid,
             page: p.page,
             title: p.part,

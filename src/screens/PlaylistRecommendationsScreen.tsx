@@ -24,7 +24,11 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   const {uid, feed, refreshing, refresh} = useHomeRecommendations();
 
   const openSource = useCallback((source: CollectionRecommendation) => {
-    navigation.navigate('Videos', {source, title: source.title});
+    navigation.navigate('Videos', {
+      source,
+      title: source.title,
+      includeVideoParts: true,
+    });
   }, [navigation]);
 
   const glassBackground = t.glass?.colors.glass.bg ?? t.colors.surface;

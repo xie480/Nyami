@@ -225,6 +225,7 @@ export const SearchScreen = ({navigation}: any) => {
         : [video];
       const playContext = mode === 'bilibili'
         ? {
+            includeVideoParts: true,
             onlineSearch: {
               keyword: query.trim() || tagFilter.trim(),
               tagFilter: tagFilter.trim(),

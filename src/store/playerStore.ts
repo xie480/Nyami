@@ -22,6 +22,8 @@ export interface PlayContext {
   onlineSearch?: OnlineSearchQueueContext;
   /** 标识个性化队列，以便独立控制自动缓存与按画像续页。 */
   isPersonalized?: boolean;
+  /** 当前队列来自搜索/推荐页，播放时可按需读取视频分P详情。 */
+  includeVideoParts?: boolean;
   recommendationPage?: number;
   recommendationHasMore?: boolean;
 }
