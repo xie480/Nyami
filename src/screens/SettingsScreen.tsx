@@ -28,6 +28,8 @@ import ImageCropPicker from 'react-native-image-crop-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RNFS from 'react-native-fs';
 import { config } from '../config';
+import LinearGradient from 'react-native-linear-gradient';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 const QUALITY_OPTIONS: Array<{
   key: Quality;
@@ -79,6 +81,9 @@ export const SettingsScreen = ({ navigation }: any) => {
   const [blacklistImportInput, setBlacklistImportInput] = useState('');
   const { syncStatus, progressData, syncError, startSync, abortSync, resetSyncState } = useSyncStore();
   const [globalIndexCount, setGlobalIndexCount] = useState(0);
+  const syncProgressPercent = progressData && progressData.totalVideos > 0
+    ? Math.min(100, Math.round((progressData.processedVideos / progressData.totalVideos) * 100))
+    : 0;
 
   const [dialogConfig, setDialogConfig] = useState<{
     visible: boolean;
@@ -424,20 +429,36 @@ export const SettingsScreen = ({ navigation }: any) => {
             </View>
           )}
           {syncStatus === 'syncing' && (
-            <View style={{ paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md }}>
-              <View style={{ height: 4, backgroundColor: t.colors.divider, borderRadius: 2, overflow: 'hidden' }}>
-                <View
-                  style={{
-                    height: '100%',
-                    backgroundColor: t.colors.primary,
-                    width: progressData ? `${(progressData.processedVideos / Math.max(1, progressData.totalVideos)) * 100}%` : '0%',
-                  }}
+            <View style={{marginHorizontal: t.spacing.lg, marginBottom: t.spacing.md, padding: t.spacing.md, borderRadius: 18, backgroundColor: t.colors.surfaceHigh}}>
+              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                  <Icon name="database-sync-outline" size={18} color={t.colors.primary} />
+                  <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600', marginLeft: t.spacing.xs}}>索引同步进度</Text>
+                </View>
+                <Text style={{color: t.colors.primary, fontSize: t.fontSize.sm, fontWeight: '700'}}>{syncProgressPercent}%</Text>
+              </View>
+              <View style={{height: 8, marginTop: t.spacing.sm, borderRadius: 4, overflow: 'hidden', backgroundColor: t.colors.divider}}>
+                <LinearGradient
+                  colors={[t.colors.primary, t.glass?.colors.accent.secondary ?? t.colors.primary]}
+                  style={{height: '100%', width: `${syncProgressPercent}%`, borderRadius: 4}}
                 />
               </View>
-              <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: t.spacing.sm }}>
-                · B站限流可能导致同步较慢，请耐心等待
-                · 建议在WIFI环境下完成同步，避免中途停止
-                · 最终结果可能因失效视频与总数存在差异
+              <View style={{flexDirection: 'row', marginTop: t.spacing.sm}}>
+                <View style={{flex: 1}}>
+                  <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs}}>已处理视频</Text>
+                  <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600', marginTop: 2}}>
+                    {progressData?.processedVideos ?? 0} / {progressData?.totalVideos ?? 0}
+                  </Text>
+                </View>
+                <View style={{flex: 1}}>
+                  <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs}}>完成任务</Text>
+                  <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600', marginTop: 2}}>
+                    {progressData?.completedTasks ?? 0} / {progressData?.totalTasks ?? 0}
+                  </Text>
+                </View>
+              </View>
+              <Text style={{color: t.colors.textHint, fontSize: 10, marginTop: t.spacing.sm}}>
+                B 站限流可能延长同步时间；建议在 Wi-Fi 环境完成。
               </Text>
             </View>
           )}

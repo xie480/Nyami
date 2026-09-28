@@ -1,18 +1,20 @@
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
-  ActivityIndicator,
   Alert,
   ScrollView,
+  StyleSheet,
   StatusBar,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useFocusEffect, useIsFocused} from '@react-navigation/native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Button} from '../components/Button';
+import {Loading} from '../components/Loading';
 import {
   favoriteService,
   ensureGlobalIndexCacheLoaded,
@@ -140,22 +142,43 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     uid ? state.visibleSourceKeysByUid[uid] ?? EMPTY_VISIBLE_SOURCE_KEYS : EMPTY_VISIBLE_SOURCE_KEYS,
   );
   const setQueue = usePlayerStore(state => state.setQueue);
-  const [favorites, setFavorites] = useState<FavoriteVideo[]>([]);
-  const [profile, setProfile] = useState<TagProfile | null>(null);
+  const cachedScreenSnapshot = useMemo(() => {
+    if (!uid || !isGlobalIndexCacheLoaded()) return null;
+    const indexRevision = getGlobalIndexRevision();
+    const snapshotKey = getTagProfileSnapshotKey(
+      uid,
+      indexRevision,
+      hiddenFolderIds,
+      visibleSourceKeys,
+    );
+    const cachedProfile = getCachedTagProfile(uid, indexRevision, snapshotKey);
+    if (!cachedProfile) return null;
+    return {
+      snapshotKey,
+      profile: cachedProfile,
+      favorites: favoriteService.getGlobalIndex(hiddenFolderIds, visibleSourceKeys),
+    };
+  }, [hiddenFolderIds, uid, visibleSourceKeys]);
+  const [favorites, setFavorites] = useState<FavoriteVideo[]>(
+    () => cachedScreenSnapshot?.favorites ?? [],
+  );
+  const [profile, setProfile] = useState<TagProfile | null>(
+    () => cachedScreenSnapshot?.profile ?? null,
+  );
   const [recommendations, setRecommendations] = useState<TagRecommendation[]>(
     [],
   );
   const [progress, setProgress] = useState<TagBackfillProgress>(EMPTY_PROGRESS);
   const [stage, setStage] = useState<ScreenStage>('idle');
-  const [initialLoading, setInitialLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(!cachedScreenSnapshot);
   const [failedSearchCount, setFailedSearchCount] = useState(0);
   const [recommendationHasMore, setRecommendationHasMore] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
   const [profileView, setProfileView] = useState<'tags' | 'listening'>('tags');
   const [error, setError] = useState<string | null>(null);
   const requestController = useRef<AbortController | null>(null);
-  const loadedUid = useRef<string | null>(null);
-  const loadedSnapshotKey = useRef<string | null>(null);
+  const loadedUid = useRef<string | null>(cachedScreenSnapshot ? uid : null);
+  const loadedSnapshotKey = useRef<string | null>(cachedScreenSnapshot?.snapshotKey ?? null);
   const activeSnapshotKey = useRef<string | null>(null);
   const activeSnapshotController = useRef<AbortController | null>(null);
   const backgroundBackfillWasRunning = useRef(false);
@@ -233,7 +256,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     requestController.current = controller;
     activeSnapshotKey.current = requestKey;
     activeSnapshotController.current = controller;
-    if (!refreshProfile || loadedSnapshotKey.current === null) {
+    if (!refreshProfile || loadedUid.current !== requestUid || loadedSnapshotKey.current === null) {
       setInitialLoading(true);
     }
     setError(null);
@@ -544,12 +567,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       </View>
 
       {initialLoading ? (
-        <View style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
-          <ActivityIndicator color={t.colors.primary} />
-          <Text style={{color: t.colors.textHint, marginTop: t.spacing.md}}>
-            正在读取本地收藏与标签缓存
-          </Text>
-        </View>
+        <Loading text="正在读取本地收藏与标签缓存" />
       ) : (
         <ScrollView
           style={{flex: 1}}
@@ -645,49 +663,50 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
           )}
 
           {(stage === 'tags' || showBackgroundProgress) && (
-            <View style={{marginTop: t.spacing.md}}>
-              <View
-                style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-                <Text
-                  style={{color: t.colors.textSub, fontSize: t.fontSize.sm}}>
-                  {isBackgroundBackfillActive
-                    ? '同步后正在后台读取标签'
-                    : backgroundBackfillStatus === 'paused' && stage !== 'tags'
-                      ? '后台读取已暂停'
-                      : '正在读取标签'}
-                </Text>
-                <Text
-                  style={{color: t.colors.textHint, fontSize: t.fontSize.sm}}>
-                  {displayedProgress.completedVideoCount}/
-                  {displayedProgress.totalVideoCount}
+            <View style={{marginTop: t.spacing.md, padding: t.spacing.md, borderRadius: 20, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.divider}}>
+              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+                <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
+                  <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: t.colors.primary, marginRight: t.spacing.sm}} />
+                  <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600'}} numberOfLines={1}>
+                    {isBackgroundBackfillActive
+                      ? '同步后正在后台读取标签'
+                      : backgroundBackfillStatus === 'paused' && stage !== 'tags'
+                        ? '后台读取已暂停'
+                        : '正在读取标签'}
+                  </Text>
+                </View>
+                <Text style={{color: t.colors.primary, fontSize: t.fontSize.md, fontWeight: '700'}}>
+                  {progressPercent}%
                 </Text>
               </View>
+              <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: 3}}>
+                已完成 {displayedProgress.completedVideoCount} / {displayedProgress.totalVideoCount} 个视频
+              </Text>
               <View
                 style={{
-                  height: 6,
-                  marginTop: t.spacing.xs,
-                  borderRadius: 3,
+                  height: 8,
+                  marginTop: t.spacing.md,
+                  borderRadius: 4,
+                  overflow: 'hidden',
                   backgroundColor: t.colors.surfaceHigh,
                 }}>
-                <View
-                  style={{
-                    height: 6,
-                    width: `${progressPercent}%`,
-                    borderRadius: 3,
-                    backgroundColor: t.colors.primary,
-                  }}
+                <LinearGradient
+                  colors={[t.colors.primary, t.glass?.colors.accent.secondary ?? t.colors.primary]}
+                  style={{height: '100%', width: `${progressPercent}%`, borderRadius: 4}}
                 />
               </View>
-              <Text
-                style={{
-                  color: t.colors.textHint,
-                  fontSize: t.fontSize.xs,
-                  marginTop: t.spacing.xs,
-                }}>
-                有标签 {displayedProgress.successfulVideoCount} · 无标签{' '}
-                {displayedProgress.emptyVideoCount} · 失败{' '}
-                {displayedProgress.failedVideoCount}
-              </Text>
+              <View style={{flexDirection: 'row', marginTop: t.spacing.sm}}>
+                {[
+                  {label: '有标签', value: displayedProgress.successfulVideoCount, color: t.colors.primaryLight},
+                  {label: '无标签', value: displayedProgress.emptyVideoCount, color: t.colors.surfaceHigh},
+                  {label: '失败', value: displayedProgress.failedVideoCount, color: t.colors.error + '18'},
+                ].map(item => (
+                  <View key={item.label} style={{flex: 1, marginRight: item.label === '失败' ? 0 : t.spacing.xs, paddingHorizontal: t.spacing.sm, paddingVertical: t.spacing.xs, borderRadius: 12, backgroundColor: item.color}}>
+                    <Text style={{color: t.colors.textHint, fontSize: 10}}>{item.label}</Text>
+                    <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '700', marginTop: 1}}>{item.value}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
           )}
 
