@@ -24,7 +24,8 @@
     cacheQueryChunkSize: 500,
     maxProfileTags: 5,
     searchConcurrency: 5,
-    backfillConcurrency: 6,
+    backfillBatchSize: 24,
+    backfillConcurrency: 12,
     maxRecommendations: 30,
     musicTid: 3,
     transientRetryDelayMs: 30 * 60 * 1000,
@@ -58,9 +59,9 @@
   /** HTTP 请求超时 */
   httpTimeout: 60000,
 
-  /** 速率限制：自适应上限每秒 2 次请求；服务端限流时自动降速。 */
+  /** 速率限制：自适应上限每秒 3 次请求；服务端限流时自动降速。 */
   rateLimit: {
-    perSecond: 2,
+    perSecond: 3,
     burstSize: 2,
   },
 
