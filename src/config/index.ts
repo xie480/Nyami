@@ -23,8 +23,8 @@
   tagRecommendations: {
     cacheQueryChunkSize: 500,
     maxProfileTags: 5,
-    searchConcurrency: 3,
-    backfillConcurrency: 3,
+    searchConcurrency: 5,
+    backfillConcurrency: 6,
     maxRecommendations: 30,
     musicTid: 3,
     transientRetryDelayMs: 30 * 60 * 1000,
@@ -58,9 +58,9 @@
   /** HTTP 请求超时 */
   httpTimeout: 60000,
 
-  /** 速率限制：每秒最多 1 次请求 */
+  /** 速率限制：自适应上限每秒 2 次请求；服务端限流时自动降速。 */
   rateLimit: {
-    perSecond: 1,
+    perSecond: 2,
     burstSize: 2,
   },
 
