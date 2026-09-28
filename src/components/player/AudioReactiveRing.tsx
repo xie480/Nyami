@@ -11,7 +11,13 @@ import {AlbumTheme} from '../../utils/albumTheme';
 
 const BAR_COUNT = 64;
 const MIN_BAR_LENGTH = 3;
-const MAX_BAR_LENGTH = 17;
+const MAX_BAR_LENGTH = 36;
+const AMPLITUDE_RESPONSE_EXPONENT = 0.62;
+const RING_INNER_GAP = 2;
+const LEGACY_RING_DIAMETER_GUTTER = 48;
+export const AUDIO_REACTIVE_RING_OUTSET = 44;
+export const AUDIO_REACTIVE_RING_LAYOUT_GROWTH =
+  AUDIO_REACTIVE_RING_OUTSET * 2 - LEGACY_RING_DIAMETER_GUTTER;
 const EMPTY_SPECTRUM: number[] = [];
 
 interface Props {
@@ -36,20 +42,25 @@ function buildRingPath(
   intensity: number,
 ): string {
   const center = size / 2;
-  const innerRadius = center - MAX_BAR_LENGTH - MIN_BAR_LENGTH - 2;
+  const innerRadius = center - MAX_BAR_LENGTH - MIN_BAR_LENGTH - RING_INNER_GAP;
+  const lastBinIndex = Math.max(0, spectrum.length - 1);
   const pathParts: string[] = [];
 
   for (let index = 0; index < BAR_COUNT; index += 1) {
     const angle = (index / BAR_COUNT) * Math.PI * 2 - Math.PI / 2;
-    const bin =
-      spectrum.length > 0
-        ? Math.min(
-            spectrum.length - 1,
-            Math.floor((index / BAR_COUNT) ** 1.65 * spectrum.length),
-          )
+    const binPosition =
+      spectrum.length > 1
+        ? (index / (BAR_COUNT - 1)) ** 1.45 * (spectrum.length - 1)
         : 0;
-    const rawAmplitude = spectrum.length > 0 ? Number(spectrum[bin]) || 0 : 0;
-    const amplitude = Math.min(1, Math.max(0, rawAmplitude)) * intensity;
+    const lowerBin = Math.floor(binPosition);
+    const upperBin = Math.min(lastBinIndex, lowerBin + 1);
+    const lowerValue = Number(spectrum[lowerBin]) || 0;
+    const upperValue = Number(spectrum[upperBin]) || 0;
+    const binFraction = binPosition - lowerBin;
+    const rawAmplitude = lowerValue + (upperValue - lowerValue) * binFraction;
+    const normalizedAmplitude = Math.min(1, Math.max(0, rawAmplitude));
+    const amplitude =
+      Math.pow(normalizedAmplitude, AMPLITUDE_RESPONSE_EXPONENT) * intensity;
     const length = MIN_BAR_LENGTH + amplitude * MAX_BAR_LENGTH;
     const innerX = center + Math.cos(angle) * innerRadius;
     const innerY = center + Math.sin(angle) * innerRadius;
@@ -163,12 +174,12 @@ export const AudioReactiveRing: React.FC<Props> = React.memo(
       [fallbackPhase],
     );
     const displaySpectrum = useMemo(() => {
-      if (Platform.OS === 'android' && spectrum.length > 0) {
+      if (Platform.OS === 'android') {
         return displayedSpectrum;
       }
       return shouldAnimate ? fallback : EMPTY_SPECTRUM;
-    }, [displayedSpectrum, fallback, shouldAnimate, spectrum]);
-    const ringSize = artworkSize + 48;
+    }, [displayedSpectrum, fallback, shouldAnimate]);
+    const ringSize = artworkSize + AUDIO_REACTIVE_RING_OUTSET * 2;
     const ringPath = useMemo(
       () => buildRingPath(displaySpectrum, ringSize, intensity),
       [displaySpectrum, intensity, ringSize],

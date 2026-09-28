@@ -10,7 +10,10 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import {AlbumTheme} from '../../utils/albumTheme';
-import {AudioReactiveRing} from './AudioReactiveRing';
+import {
+  AUDIO_REACTIVE_RING_OUTSET,
+  AudioReactiveRing,
+} from './AudioReactiveRing';
 
 interface Props {
   artworkUri?: string;
@@ -122,10 +125,10 @@ export const VinylRecord: React.FC<Props> = ({
     transform: [{rotateZ: `${rotationOffset.value + rotation.value * 360}deg`}],
   }));
   const recordSize = Math.max(154, size);
+  const stageSize = recordSize + AUDIO_REACTIVE_RING_OUTSET * 2;
 
   return (
-    <View
-      style={[styles.stage, {width: recordSize + 48, height: recordSize + 48}]}>
+    <View style={[styles.stage, {width: stageSize, height: stageSize}]}>
       <AudioReactiveRing
         artworkSize={recordSize}
         enabled={isVisible}

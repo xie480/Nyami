@@ -35,6 +35,7 @@ import {PlayerMoreSheet} from '../components/player/PlayerMoreSheet';
 import {SleepTimerSheet} from '../components/player/SleepTimerSheet';
 import {TrackInfo} from '../components/player/TrackInfo';
 import {VinylRecord} from '../components/player/VinylRecord';
+import {AUDIO_REACTIVE_RING_LAYOUT_GROWTH} from '../components/player/AudioReactiveRing';
 import {
   pausePlayback,
   playSpecificPart,
@@ -185,7 +186,8 @@ export const PlayerScreen = () => {
     0,
     screenHeight - statusBarHeight - insets.bottom,
   );
-  const reservedHeight = isPersonalized ? 382 : 348;
+  const reservedHeight =
+    (isPersonalized ? 382 : 348) + AUDIO_REACTIVE_RING_LAYOUT_GROWTH;
   const recordSize = Math.max(
     154,
     Math.min(screenWidth * 0.74, (availableHeight - reservedHeight) * 0.73),
