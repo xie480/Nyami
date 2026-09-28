@@ -51,9 +51,9 @@ const GlobalPlaylistPanel = React.memo(function GlobalPlaylistPanel() {
   return <PlaylistPanel visible={visible} onClose={close} />;
 });
 
-// 底栏目标页与导航方向保持一致，切换时从水平方向进入。
+// 页面直接切换，避免 Stack 转场带来的延迟和额外合成开销。
 const BOTTOM_TAB_SCREEN_OPTIONS = {
-  animation: 'slide_from_right' as const,
+  animation: 'none' as const,
   gestureEnabled: false,
 };
 
@@ -173,7 +173,7 @@ export default function App() {
   const stackScreenOptions = useMemo(() => ({
     headerShown: false,
     cardStyle: { backgroundColor: 'transparent' },
-    animation: 'slide_from_right' as const,
+    animation: 'none' as const,
     // 页面不可见时冻结，减少后台页面持续渲染。
     freezeOnBlur: true,
   }), []);
@@ -297,7 +297,7 @@ export default function App() {
                   <Stack.Screen
                     name="Player"
                     component={PlayerScreenWithBg}
-                    options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+                    options={{ presentation: 'modal', animation: 'none' }}
                   />
                   <Stack.Screen
                     name="Settings"
