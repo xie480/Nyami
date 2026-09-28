@@ -45,8 +45,8 @@ const GlobalPlaylistPanel = React.memo(function GlobalPlaylistPanel() {
   return <PlaylistPanel visible={visible} onClose={close} />;
 });
 
-// 底栏目标页采用轻量淡入上移转场，避免整页横向推入带来的视觉负担。
-const BOTTOM_TAB_SCREEN_OPTIONS = {animation: 'fade_from_bottom' as const};
+// 底栏目标页与导航方向保持一致，切换时从水平方向进入。
+const BOTTOM_TAB_SCREEN_OPTIONS = {animation: 'slide_from_right' as const};
 
 const withBackground = (Component: React.ComponentType<any>) => {
   return function ScreenWithBackground(props: any) {
