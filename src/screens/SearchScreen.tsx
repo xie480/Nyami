@@ -68,6 +68,8 @@ export const SearchScreen = ({navigation}: any) => {
   const [selectedVideo, setSelectedVideo] = useState<OnlineVideoSearchResult | null>(null);
   const requestId = useRef(0);
   const requestController = useRef<AbortController | null>(null);
+  const onlineLoadingRef = useRef(false);
+  const onlineEndReachedArmedRef = useRef(false);
   const favoriteRequestId = useRef(0);
   const favoriteRequestController = useRef<AbortController | null>(null);
   const recommendationDurationFilterEnabled = useSettingsStore(state => state.recommendationDurationFilterEnabled);
@@ -147,12 +149,16 @@ export const SearchScreen = ({navigation}: any) => {
       setError('请先登录 B 站账号后再搜索');
       return;
     }
-    if (page > 1 && onlineLoading) return;
-    if (page === 1) requestController.current?.abort();
+    if (page > 1 && onlineLoadingRef.current) return;
+    if (page === 1) {
+      requestController.current?.abort();
+      onlineEndReachedArmedRef.current = false;
+    }
 
     const controller = new AbortController();
     requestController.current = controller;
     const currentRequestId = ++requestId.current;
+    onlineLoadingRef.current = true;
     setOnlineLoading(true);
     setError(null);
     if (page === 1) {
@@ -184,9 +190,12 @@ export const SearchScreen = ({navigation}: any) => {
         setError(searchError instanceof Error ? searchError.message : 'B 站搜索失败');
       }
     } finally {
-      if (currentRequestId === requestId.current) setOnlineLoading(false);
+      if (currentRequestId === requestId.current) {
+        onlineLoadingRef.current = false;
+        setOnlineLoading(false);
+      }
     }
-  }, [onlineLoading, query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, tagFilter, uid]);
+  }, [query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, tagFilter, uid]);
 
   useEffect(() => {
     const changed =
@@ -317,6 +326,8 @@ export const SearchScreen = ({navigation}: any) => {
               const nextMode: SearchMode = mode === 'bilibili' ? 'favorites' : 'bilibili';
               requestController.current?.abort();
               requestId.current += 1;
+              onlineLoadingRef.current = false;
+              onlineEndReachedArmedRef.current = false;
               setOnlineLoading(false);
               setMode(nextMode);
               setError(null);
@@ -402,6 +413,16 @@ export const SearchScreen = ({navigation}: any) => {
           initialNumToRender={8}
           maxToRenderPerBatch={8}
           windowSize={7}
+          onScrollBeginDrag={() => {
+            if (mode === 'bilibili') onlineEndReachedArmedRef.current = true;
+          }}
+          onEndReached={() => {
+            if (mode === 'bilibili' && didSearch && onlineHasMore && onlineEndReachedArmedRef.current) {
+              onlineEndReachedArmedRef.current = false;
+              void runOnlineSearch(onlinePage + 1);
+            }
+          }}
+          onEndReachedThreshold={0.45}
           contentContainerStyle={{flexGrow: 1, paddingBottom: Math.max(insets.bottom, t.spacing.xl)}}
           ListEmptyComponent={!isLoadingResults ? (
             <View style={{alignItems: 'center', paddingVertical: t.spacing.xxl}}>
@@ -417,9 +438,9 @@ export const SearchScreen = ({navigation}: any) => {
             <View>
               {isLoadingResults && <ActivityIndicator color={t.colors.primary} style={{padding: t.spacing.lg}} />}
               {mode === 'bilibili' && didSearch && onlineHasMore && !onlineLoading && (
-                <TouchableOpacity onPress={() => void runOnlineSearch(onlinePage + 1)} style={{alignItems: 'center', paddingVertical: t.spacing.md}}>
-                  <Text style={{fontSize: t.fontSize.sm, color: t.colors.primary}}>加载更多 B 站结果</Text>
-                </TouchableOpacity>
+                <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, textAlign: 'center', paddingVertical: t.spacing.md}}>
+                  下滑加载更多结果
+                </Text>
               )}
             </View>
           )}
