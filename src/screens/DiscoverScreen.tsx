@@ -44,6 +44,7 @@ export const DiscoverScreen = ({navigation}: any) => {
     const videos = feed.songs.map(searchVideoToFavoriteVideo);
     if (videos.length === 0 || !uid) return;
     try {
+      usePlayerStore.getState().setPlayMode('sequential');
       setQueue(videos, selectedVideo.bvid, {
         isPersonalized: true,
         recommendationPage: feed.songPage || 1,
