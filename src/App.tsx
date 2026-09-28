@@ -36,6 +36,7 @@ import { startProgressPolling, stopProgressPolling } from './store/progressStore
 import { DiscoverScreen } from './screens/DiscoverScreen';
 import { SearchScreen } from './screens/SearchScreen';
 import { PlaylistRecommendationsScreen } from './screens/PlaylistRecommendationsScreen';
+import { SongRecommendationsScreen } from './screens/SongRecommendationsScreen';
 
 const Stack = createStackNavigator();
 const MAIN_PAGE_ROUTES = ['Discover', 'Folders', 'TagRecommendations', 'Settings'] as const;
@@ -113,6 +114,7 @@ const HomeScreenWithBg = withBackground(HomeScreen);
 const DiscoverScreenWithBg = withBackground(DiscoverScreen, 'Discover');
 const SearchScreenWithBg = withBackground(SearchScreen);
 const PlaylistRecommendationsScreenWithBg = withBackground(PlaylistRecommendationsScreen);
+const SongRecommendationsScreenWithBg = withBackground(SongRecommendationsScreen);
 const FoldersScreenWithBg = withBackground(FoldersScreen, 'Folders');
 const VideosScreenWithBg = withBackground(VideosScreen);
 const PlayerScreenWithBg = withBackground(PlayerScreen);
@@ -286,6 +288,7 @@ export default function App() {
                   />
                   <Stack.Screen name="Search" component={SearchScreenWithBg} />
                   <Stack.Screen name="PlaylistRecommendations" component={PlaylistRecommendationsScreenWithBg} />
+                  <Stack.Screen name="SongRecommendations" component={SongRecommendationsScreenWithBg} />
                   <Stack.Screen
                     name="Folders"
                     component={FoldersScreenWithBg}

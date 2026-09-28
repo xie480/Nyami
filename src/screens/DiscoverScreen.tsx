@@ -302,6 +302,15 @@ export const DiscoverScreen = ({navigation}: any) => {
                 </View>
                 <Icon name="play-circle" size={25} color={t.colors.primary} />
               </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="查看全部歌曲推荐"
+                activeOpacity={0.75}
+                onPress={() => navigation.navigate('SongRecommendations')}
+                style={{flexDirection: 'row', alignItems: 'center', marginLeft: t.spacing.sm, paddingVertical: t.spacing.sm}}>
+                <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub}}>查看全部</Text>
+                <Icon name="chevron-right" size={18} color={t.colors.textSub} />
+              </TouchableOpacity>
             </View>
             {previewSongs.length > 0 ? (
               previewSongs.map(renderSong)
