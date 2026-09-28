@@ -42,6 +42,15 @@
     homeSongPreviewCount: 4,
   },
 
+  /** 播放器淡入淡出过渡参数。 */
+  playback: {
+    fadeInDurationMs: 300,
+    fadeOutDurationMs: 240,
+    fadeOutLeadMs: 700,
+    fadeStepCount: 8,
+    progressUpdateIntervalSeconds: 0.25,
+  },
+
   /** HTTP 请求超时 */
   httpTimeout: 60000,
 

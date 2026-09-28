@@ -38,8 +38,185 @@ let nativeQueueMutation: Promise<void> = Promise.resolve();
 let playbackIntent = false;
 let userPauseRevision = 0;
 let personalizedPageController: AbortController | null = null;
+let audioTransitionRevision = 0;
+let volumeFadeRevision = 0;
+let preferredPlayerVolume = 1;
+let lastFadeInTrackKey: string | null = null;
+let lastFadeInStartedAt = 0;
+let naturalFadeOutTrackKey: string | null = null;
+let activeVolumeFade: {
+  revision: number;
+  targetVolume: number;
+  promise: Promise<void>;
+} | null = null;
 const playbackErrorAttempts = new Map<string, number>();
 const playbackErrorRecoveries = new Map<string, Promise<void>>();
+
+function beginAudioTransition(): number {
+  audioTransitionRevision += 1;
+  lastFadeInTrackKey = null;
+  return audioTransitionRevision;
+}
+
+function trackFadeKey(track?: Track): string | null {
+  if (!track?.id) return null;
+  return `${track.id}:${(track as any).cid ?? ''}`;
+}
+
+function fadePlayerVolumeTo(
+  targetVolume: number,
+  durationMs: number,
+  transitionRevision: number,
+): Promise<void> {
+  const currentFade = activeVolumeFade;
+  if (
+    currentFade &&
+    currentFade.revision === transitionRevision &&
+    currentFade.targetVolume === targetVolume
+  ) {
+    return currentFade.promise;
+  }
+
+  const fadeRevision = ++volumeFadeRevision;
+  const promise = (async () => {
+    try {
+      const startVolume = await TrackPlayer.getVolume();
+      if (
+        transitionRevision !== audioTransitionRevision ||
+        fadeRevision !== volumeFadeRevision
+      ) {
+        return;
+      }
+      const steps = config.playback.fadeStepCount;
+      const stepDelayMs = durationMs / steps;
+      for (let step = 1; step <= steps; step += 1) {
+        if (
+          transitionRevision !== audioTransitionRevision ||
+          fadeRevision !== volumeFadeRevision
+        ) {
+          return;
+        }
+        const progress = step / steps;
+        const volume = startVolume + (targetVolume - startVolume) * progress;
+        await TrackPlayer.setVolume(volume);
+        if (step < steps) {
+          await new Promise<void>(resolve => setTimeout(resolve, stepDelayMs));
+        }
+      }
+    } catch {
+      // Volume transition failures must not block playback controls.
+    }
+  })();
+  const transition = {revision: transitionRevision, targetVolume, promise};
+  activeVolumeFade = transition;
+  void promise.finally(() => {
+    if (activeVolumeFade === transition) {
+      activeVolumeFade = null;
+    }
+  });
+  return promise;
+}
+
+async function fadeInActiveTrack(
+  transitionRevision: number,
+  knownTrack?: Track,
+): Promise<void> {
+  if (transitionRevision !== audioTransitionRevision) return;
+  let track: Track | undefined;
+  try {
+    track = knownTrack ?? await TrackPlayer.getActiveTrack();
+  } catch {
+    return;
+  }
+  const key = trackFadeKey(track);
+  if (!key || transitionRevision !== audioTransitionRevision) return;
+  if (
+    lastFadeInTrackKey === key &&
+    Date.now() - lastFadeInStartedAt < config.playback.fadeInDurationMs
+  ) {
+    return;
+  }
+  lastFadeInTrackKey = key;
+  lastFadeInStartedAt = Date.now();
+  try {
+    await TrackPlayer.setVolume(0);
+  } catch {
+    return;
+  }
+  if (transitionRevision === audioTransitionRevision) {
+    void fadePlayerVolumeTo(
+      preferredPlayerVolume,
+      config.playback.fadeInDurationMs,
+      transitionRevision,
+    );
+  }
+}
+
+async function playTrackWithFadeIn(transitionRevision: number): Promise<boolean> {
+  if (transitionRevision !== audioTransitionRevision) return false;
+  try {
+    await TrackPlayer.setVolume(0);
+  } catch {
+    // Volume transition support must not prevent the track from playing.
+  }
+  if (transitionRevision !== audioTransitionRevision) return false;
+  await TrackPlayer.play();
+  if (transitionRevision !== audioTransitionRevision) return false;
+  playbackIntent = true;
+  void fadeInActiveTrack(transitionRevision);
+  return true;
+}
+
+async function fadeOutForTransition(transitionRevision: number): Promise<void> {
+  if (transitionRevision !== audioTransitionRevision) return;
+  if (!playbackIntent) {
+    try {
+      await TrackPlayer.setVolume(0);
+    } catch {}
+    return;
+  }
+  await fadePlayerVolumeTo(
+    0,
+    config.playback.fadeOutDurationMs,
+    transitionRevision,
+  );
+}
+
+function handlePlaybackProgress(
+  position: number,
+  duration: number,
+  trackIndex: number,
+) {
+  if (!playbackIntent || !Number.isFinite(position) || !Number.isFinite(duration)) {
+    return;
+  }
+
+  const remainingSeconds = duration - position;
+  const fadeOutLeadSeconds = config.playback.fadeOutLeadMs / 1000;
+  const trackKey = `index:${trackIndex}`;
+  if (remainingSeconds > fadeOutLeadSeconds) {
+    if (naturalFadeOutTrackKey === trackKey) {
+      naturalFadeOutTrackKey = null;
+      void fadePlayerVolumeTo(
+        preferredPlayerVolume,
+        config.playback.fadeInDurationMs,
+        audioTransitionRevision,
+      );
+    }
+    return;
+  }
+
+  if (remainingSeconds <= 0 || naturalFadeOutTrackKey === trackKey) {
+    return;
+  }
+
+  naturalFadeOutTrackKey = trackKey;
+  void fadePlayerVolumeTo(
+    0,
+    config.playback.fadeOutDurationMs,
+    audioTransitionRevision,
+  );
+}
 
 function advanceQueueRevision(): number {
   queueRevision += 1;
@@ -121,8 +298,9 @@ export async function setupPlayer() {
         Capability.SkipToNext,
         Capability.SkipToPrevious,
       ],
-      progressUpdateEventInterval: 1,
+      progressUpdateEventInterval: config.playback.progressUpdateIntervalSeconds,
     });
+    await TrackPlayer.setVolume(preferredPlayerVolume);
 
     AppState.addEventListener('change', async nextAppState => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
@@ -539,10 +717,20 @@ export async function loadQueue(
     }
 
     // 2. 串行重置并播放首曲；过期的加载不能覆盖较新的队列。
+    const audioRevision = beginAudioTransition();
     const loaded = await withNativeQueueMutation(async () => {
       if (revision !== queueRevision) {
         return false;
       }
+      await fadeOutForTransition(audioRevision);
+      if (
+        revision !== queueRevision ||
+        (audioRevision !== audioTransitionRevision &&
+          pauseRevision === userPauseRevision)
+      ) {
+        return false;
+      }
+      playbackIntent = false;
       await TrackPlayer.reset();
       if (revision !== queueRevision) {
         return false;
@@ -554,9 +742,8 @@ export async function loadQueue(
       if (pauseRevision !== userPauseRevision && !playbackIntent) {
         return true;
       }
-      await TrackPlayer.play();
-      playbackIntent = true;
-      return true;
+      const started = await playTrackWithFadeIn(audioRevision);
+      return started || (pauseRevision !== userPauseRevision && !playbackIntent);
     });
     if (!loaded || revision !== queueRevision) {
       return 0;
@@ -588,16 +775,31 @@ export async function loadQueue(
 }
 
 export async function playWithIntent(): Promise<void> {
+  if (playbackIntent) return;
+  const audioRevision = beginAudioTransition();
   await withNativeQueueMutation(async () => {
-    await TrackPlayer.play();
-    playbackIntent = true;
+    await playTrackWithFadeIn(audioRevision);
   });
 }
 
 export async function pausePlayback(): Promise<void> {
+  const wasPlaying = playbackIntent;
+  const audioRevision = beginAudioTransition();
   userPauseRevision += 1;
   playbackIntent = false;
   await withNativeQueueMutation(async () => {
+    if (wasPlaying) {
+      await fadePlayerVolumeTo(
+        0,
+        config.playback.fadeOutDurationMs,
+        audioRevision,
+      );
+    } else {
+      try {
+        await TrackPlayer.setVolume(0);
+      } catch {}
+    }
+    if (audioRevision !== audioTransitionRevision) return;
     await TrackPlayer.pause();
     playbackIntent = false;
   });
@@ -606,8 +808,13 @@ export async function pausePlayback(): Promise<void> {
 export async function playQueuedTrack(bvid: string): Promise<boolean> {
   const revision = queueRevision;
   const pauseRevision = userPauseRevision;
+  const audioRevision = beginAudioTransition();
   return withNativeQueueMutation(async () => {
     if (revision !== queueRevision) {
+      return false;
+    }
+    await fadeOutForTransition(audioRevision);
+    if (revision !== queueRevision || audioRevision !== audioTransitionRevision) {
       return false;
     }
     const nativeQueue = await TrackPlayer.getQueue();
@@ -627,6 +834,7 @@ export async function playQueuedTrack(bvid: string): Promise<boolean> {
     }
     await TrackPlayer.play();
     playbackIntent = true;
+    void fadeInActiveTrack(audioTransitionRevision);
     usePlayerStore.getState().setCurrentBvid(bvid);
     usePlayerStore.getState().setPlaybackError(null);
     return true;
@@ -698,7 +906,10 @@ export async function reorderQueue(
   advanceQueueRevision();
   if (videos.length === 0) {
     usePlayerStore.getState().setQueue([], undefined);
+    const audioRevision = beginAudioTransition();
     await withNativeQueueMutation(async () => {
+      await fadeOutForTransition(audioRevision);
+      if (audioRevision !== audioTransitionRevision) return;
       await TrackPlayer.reset();
       playbackIntent = false;
     });
@@ -778,9 +989,10 @@ async function autoCache(bvid: string, cid?: number) {
 }
 
 export async function resumePlayback(): Promise<void> {
+  if (playbackIntent) return;
+  const audioRevision = beginAudioTransition();
   await withNativeQueueMutation(async () => {
-    await TrackPlayer.play();
-    playbackIntent = true;
+    await playTrackWithFadeIn(audioRevision);
   }).catch(() => {});
 }
 
@@ -830,6 +1042,14 @@ async function skipNativeQueueToNext(pauseRevision: number): Promise<boolean> {
     if (remaining <= 0) {
       return false;
     }
+    const audioRevision = beginAudioTransition();
+    await fadeOutForTransition(audioRevision);
+    if (
+      revision !== queueRevision ||
+      audioRevision !== audioTransitionRevision
+    ) {
+      return false;
+    }
     if (typeof activeIndex === 'number' && activeIndex >= 0) {
       await TrackPlayer.skipToNext();
     } else {
@@ -838,8 +1058,12 @@ async function skipNativeQueueToNext(pauseRevision: number): Promise<boolean> {
     if (pauseRevision !== userPauseRevision && !playbackIntent) {
       return true;
     }
+    if (!playbackIntent) {
+      return playTrackWithFadeIn(audioRevision);
+    }
     await TrackPlayer.play();
     playbackIntent = true;
+    void fadeInActiveTrack(audioRevision);
     return true;
   });
 }
@@ -896,6 +1120,14 @@ export async function skipToPrevious() {
       if (revision !== queueRevision) {
         return;
       }
+      const audioRevision = beginAudioTransition();
+      await fadeOutForTransition(audioRevision);
+      if (
+        revision !== queueRevision ||
+        audioRevision !== audioTransitionRevision
+      ) {
+        return;
+      }
       await TrackPlayer.skipToPrevious();
       if (revision !== queueRevision) {
         return;
@@ -903,8 +1135,13 @@ export async function skipToPrevious() {
       if (pauseRevision !== userPauseRevision && !playbackIntent) {
         return;
       }
+      if (!playbackIntent) {
+        await playTrackWithFadeIn(audioRevision);
+        return;
+      }
       await TrackPlayer.play();
       playbackIntent = true;
+      void fadeInActiveTrack(audioRevision);
     });
   } catch (e) {
     LoggerService.error(
@@ -1190,6 +1427,15 @@ async function processPlaybackError(
         return 'failed' as const;
       }
 
+      const audioRevision = beginAudioTransition();
+      await fadeOutForTransition(audioRevision);
+      if (
+        revision !== queueRevision ||
+        audioRevision !== audioTransitionRevision
+      ) {
+        return 'stale' as const;
+      }
+
       await TrackPlayer.remove(latestActiveIndex);
       if (revision !== queueRevision) {
         return 'stale' as const;
@@ -1207,6 +1453,7 @@ async function processPlaybackError(
       }
       await TrackPlayer.play();
       playbackIntent = true;
+      void fadeInActiveTrack(audioRevision);
       return 'replaced' as const;
     });
 
@@ -1309,12 +1556,30 @@ export async function PlaybackService() {
   TrackPlayer.addEventListener(Event.RemotePlay, resumePlayback);
   TrackPlayer.addEventListener(Event.RemotePause, pausePlayback);
   TrackPlayer.addEventListener(Event.RemoteStop, () => {
+    const wasPlaying = playbackIntent;
+    const audioRevision = beginAudioTransition();
     userPauseRevision += 1;
     playbackIntent = false;
     return withNativeQueueMutation(async () => {
+      if (wasPlaying) {
+        await fadePlayerVolumeTo(
+          0,
+          config.playback.fadeOutDurationMs,
+          audioRevision,
+        );
+      } else {
+        try {
+          await TrackPlayer.setVolume(0);
+        } catch {}
+      }
+      if (audioRevision !== audioTransitionRevision) return;
       await TrackPlayer.stop();
       playbackIntent = false;
     });
+  });
+
+  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, event => {
+    handlePlaybackProgress(event.position, event.duration, event.track);
   });
 
   // 极简切歌：原生队列中已经是真实 URL，直接 skip
@@ -1383,6 +1648,10 @@ export async function PlaybackService() {
     }
 
     usePlayerStore.getState().setResolving(false);
+    naturalFadeOutTrackKey = null;
+    if (playbackIntent) {
+      void fadeInActiveTrack(audioTransitionRevision, activeTrack);
+    }
     if (e.lastTrack?.id) {
       autoCache(e.lastTrack.id as string);
     }
@@ -1435,6 +1704,7 @@ export async function playSpecificPart(
         if (revision !== queueRevision) {
           return false;
         }
+        const audioRevision = beginAudioTransition();
         const latestQueue = await TrackPlayer.getQueue();
         if (revision !== queueRevision) {
           return false;
@@ -1445,11 +1715,22 @@ export async function playSpecificPart(
         if (latestIndex === -1) {
           return false;
         }
+        await fadeOutForTransition(audioRevision);
+        if (
+          revision !== queueRevision ||
+          audioRevision !== audioTransitionRevision
+        ) {
+          return false;
+        }
         await TrackPlayer.skip(latestIndex);
         if (pauseRevision !== userPauseRevision && !playbackIntent) {
           return false;
         }
+        if (!playbackIntent) {
+          return playTrackWithFadeIn(audioRevision);
+        }
         await TrackPlayer.play();
+        void fadeInActiveTrack(audioRevision);
         return true;
       });
       if (switched && revision === queueRevision) {
@@ -1479,6 +1760,14 @@ export async function playSpecificPart(
       if (revision !== queueRevision) {
         return false;
       }
+      const audioRevision = beginAudioTransition();
+      await fadeOutForTransition(audioRevision);
+      if (
+        revision !== queueRevision ||
+        audioRevision !== audioTransitionRevision
+      ) {
+        return false;
+      }
       const rawIdx = await TrackPlayer.getActiveTrackIndex();
       if (revision !== queueRevision) {
         return false;
@@ -1505,8 +1794,12 @@ export async function playSpecificPart(
       if (pauseRevision !== userPauseRevision && !playbackIntent) {
         return false;
       }
+      if (!playbackIntent) {
+        return playTrackWithFadeIn(audioRevision);
+      }
       await TrackPlayer.play();
       playbackIntent = true;
+      void fadeInActiveTrack(audioRevision);
       return true;
     });
     if (switched && revision === queueRevision) {
