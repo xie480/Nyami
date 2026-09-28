@@ -138,6 +138,8 @@ dependencies {
 
     // ExoPlayer 用于 AudioProcessor 编译期依赖
     implementation "com.google.android.exoplayer:exoplayer-core:2.19.0"
+    // AndroidX Palette 用于在歌曲切换时提取封面色彩
+    implementation "androidx.palette:palette:1.0.0"
 }
 
 apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesAppBuildGradle(project)

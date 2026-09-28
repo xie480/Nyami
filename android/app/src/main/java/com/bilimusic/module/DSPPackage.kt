@@ -16,7 +16,10 @@ import com.facebook.react.uimanager.ViewManager
 class DSPPackage : ReactPackage {
 
     override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-        return listOf(AudioDSPModule(reactContext))
+        return listOf(
+            AudioDSPModule(reactContext),
+            AlbumPaletteModule(reactContext),
+        )
     }
 
     override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
