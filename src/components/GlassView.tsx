@@ -178,17 +178,19 @@ export const GlassView: React.FC<GlassViewProps> = ({
           />
 
           {/* ── 5. Ambient occlusion rim (bottom shadow accent) ────── */}
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              {
-                borderRadius: resolvedBorderRadius,
-                borderBottomWidth: 2,
-                borderBottomColor: 'rgba(0, 0, 0, 0.35)',
-              },
-            ]}
-            pointerEvents="none"
-          />
+          {!noShadow && (
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                {
+                  borderRadius: resolvedBorderRadius,
+                  borderBottomWidth: 2,
+                  borderBottomColor: 'rgba(0, 0, 0, 0.35)',
+                },
+              ]}
+              pointerEvents="none"
+            />
+          )}
 
           {/* ── Content ───────────────────────────────────────────── */}
           <View>{children}</View>
