@@ -37,14 +37,12 @@ export const SongRecommendationsScreen = ({navigation}: any) => {
   const [hasMore, setHasMore] = useState(feed.songHasMore);
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
-  const listEndReachedArmedRef = useRef(false);
   const loadControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     loadControllerRef.current?.abort();
     loadControllerRef.current = null;
     loadingMoreRef.current = false;
-    listEndReachedArmedRef.current = false;
     setLoadingMore(false);
     setSongs(feed.songs);
     setPage(feed.songPage);
@@ -228,14 +226,7 @@ export const SongRecommendationsScreen = ({navigation}: any) => {
             tintColor={t.colors.primary}
           />
         )}
-        onScrollBeginDrag={() => {
-          listEndReachedArmedRef.current = true;
-        }}
-        onEndReached={() => {
-          if (!listEndReachedArmedRef.current) return;
-          listEndReachedArmedRef.current = false;
-          void loadMore();
-        }}
+        onEndReached={() => void loadMore()}
         onEndReachedThreshold={0.6}
         initialNumToRender={10}
         maxToRenderPerBatch={10}

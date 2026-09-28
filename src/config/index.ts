@@ -23,6 +23,7 @@
   tagRecommendations: {
     cacheQueryChunkSize: 500,
     maxProfileTags: 5,
+    searchConcurrency: 3,
     maxRecommendations: 30,
     musicTid: 3,
     transientRetryDelayMs: 30 * 60 * 1000,

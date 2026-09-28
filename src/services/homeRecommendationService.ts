@@ -1,7 +1,7 @@
 import {config} from '../config';
 import {
   getGlobalIndexRevision,
-  loadGlobalIndexCache,
+  ensureGlobalIndexCacheLoaded,
   favoriteService,
 } from './favoriteService';
 import {importedPlaylistService} from './importedPlaylistService';
@@ -81,7 +81,7 @@ async function loadPersonalizationContext(
 ): Promise<PersonalizationContext> {
   await waitForCurrentRecommendationAccount(uid, signal);
   const [, importedSources] = await Promise.all([
-    loadGlobalIndexCache(),
+    ensureGlobalIndexCacheLoaded(),
     importedSourcesPromise,
   ]);
   if (signal.aborted) throw new Error('推荐刷新已取消');

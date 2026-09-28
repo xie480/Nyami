@@ -509,19 +509,43 @@ export async function searchTagRecommendations(
   let failedSearchCount = 0;
   let hasMore = false;
 
-  for (const preference of preferences) {
-    if (signal.aborted) {
-      break;
+  type SearchPage = Awaited<ReturnType<typeof biliApi.searchVideos>>;
+  const searchResponses: (SearchPage | null)[] = Array(preferences.length).fill(null);
+  let nextPreferenceIndex = 0;
+  let stopSchedulingSearches = false;
+  const searchWorker = async () => {
+    while (!signal.aborted && !stopSchedulingSearches) {
+      const preferenceIndex = nextPreferenceIndex++;
+      const preference = preferences[preferenceIndex];
+      if (!preference) return;
+      try {
+        searchResponses[preferenceIndex] = await biliApi.searchVideos(
+          preference.tagName,
+          page,
+          signal,
+          config.tagRecommendations.musicTid,
+        );
+      } catch (error) {
+        if (signal.aborted) return;
+        failedSearchCount += 1;
+        if (shouldPauseBackfill(error)) {
+          stopSchedulingSearches = true;
+        }
+      }
     }
-    try {
-      const response = await biliApi.searchVideos(
-        preference.tagName,
-        page,
-        signal,
-        config.tagRecommendations.musicTid,
-      );
-      hasMore ||= (response.numPages ?? page) > page;
-      for (const searchItem of response.result ?? []) {
+  };
+  const workerCount = Math.min(
+    preferences.length,
+    config.tagRecommendations.searchConcurrency,
+  );
+  await Promise.all(Array.from({length: workerCount}, () => searchWorker()));
+
+  // 请求并行执行，结果按画像标签原顺序合并，确保同分推荐仍然稳定。
+  for (let preferenceIndex = 0; preferenceIndex < preferences.length; preferenceIndex += 1) {
+    const response = searchResponses[preferenceIndex];
+    if (!response) continue;
+    hasMore ||= (response.numPages ?? page) > page;
+    for (const searchItem of response.result ?? []) {
         if (
           !searchItem.aid ||
           !searchItem.bvid ||
@@ -582,15 +606,6 @@ export async function searchTagRecommendations(
         } else {
           recommendationById.set(video.bvid, {...video, matchedTags, score});
         }
-      }
-    } catch (error) {
-      if (signal.aborted) {
-        break;
-      }
-      failedSearchCount += 1;
-      if (shouldPauseBackfill(error)) {
-        break;
-      }
     }
   }
 
