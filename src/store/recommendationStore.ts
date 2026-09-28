@@ -10,6 +10,8 @@ import type {CollectionRecommendation, TagRecommendation} from '../types/domain'
  */
 export interface HomeRecommendationFeed {
   collections: CollectionRecommendation[];
+  /** 是否还有未触发七日去重的合集；可选以兼容历史持久化快照。 */
+  collectionsHasMore?: boolean;
   songs: TagRecommendation[];
   songPage: number;
   songHasMore: boolean;
@@ -20,6 +22,7 @@ export interface HomeRecommendationFeed {
 
 export const EMPTY_HOME_RECOMMENDATION_FEED: HomeRecommendationFeed = {
   collections: [],
+  collectionsHasMore: false,
   songs: [],
   songPage: 0,
   songHasMore: false,

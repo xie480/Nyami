@@ -1,5 +1,9 @@
 import {config} from '../config';
-import {loadGlobalIndexCache, favoriteService} from './favoriteService';
+import {
+  getGlobalIndexRevision,
+  loadGlobalIndexCache,
+  favoriteService,
+} from './favoriteService';
 import {importedPlaylistService} from './importedPlaylistService';
 import {filterAndRecordRecommendations, filterAndRecordRecommendedVideos} from './recommendationFilterService';
 import {
@@ -22,6 +26,7 @@ import type {TagRecommendationSearchResult} from './tagRecommendationService';
 
 export interface GeneratedHomeFeed {
   collections: CollectionRecommendation[];
+  collectionsHasMore: boolean;
   songs: TagRecommendation[];
   songPage: number;
   songHasMore: boolean;
@@ -39,6 +44,11 @@ interface PersonalizationContext {
   favoriteVideoTitles: string[];
   profile: TagProfile;
 }
+
+let cachedPersonalizationContext: {
+  key: string;
+  context: PersonalizationContext;
+} | null = null;
 
 function assertCurrentRecommendationAccount(uid: string) {
   if (!uid || useAuthStore.getState().userId !== uid) {
@@ -79,9 +89,21 @@ async function loadPersonalizationContext(
 
   const settings = useSettingsStore.getState();
   const importedStore = useImportedPlaylistStore.getState();
-  const visibleSourceKeys = importedStore.visibleSourceKeysByUid[uid] ?? [];
+  const hiddenFolderIds = [...new Set(settings.hiddenFolderIds)].sort((left, right) => left - right);
+  const visibleSourceKeys = [...new Set(importedStore.visibleSourceKeysByUid[uid] ?? [])].sort();
+  const cacheKey = JSON.stringify([
+    uid,
+    getGlobalIndexRevision(),
+    hiddenFolderIds,
+    visibleSourceKeys,
+    importedSources.map(source => source.sourceKey).sort(),
+  ]);
+  if (cachedPersonalizationContext?.key === cacheKey) {
+    return cachedPersonalizationContext.context;
+  }
+
   const favorites = favoriteService.getGlobalIndex(
-    settings.hiddenFolderIds,
+    hiddenFolderIds,
     visibleSourceKeys,
   );
   const allFavoriteVideos = favoriteService.getGlobalIndex(
@@ -93,13 +115,16 @@ async function loadPersonalizationContext(
     allFavoriteVideos.map(video => normalizeRecommendationTitleKey(video.title)).filter(Boolean),
   ));
   const {profile} = await loadTagProfile(favorites);
+  if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
-  return {
+  const context = {
     favorites,
     favoriteVideoIds: allFavoriteVideoIds,
     favoriteVideoTitles: allFavoriteVideoTitles,
     profile,
   };
+  cachedPersonalizationContext = {key: cacheKey, context};
+  return context;
 }
 
 function rankCollections(
@@ -168,12 +193,42 @@ export async function generateHomeFeed(
 
   return {
     collections: recommendations.collections,
+    collectionsHasMore: recommendations.collectionsHasMore,
     songs: recommendations.videos,
     songPage: 1,
     songHasMore: songResult.hasMore,
     failedSearchCount: songResult.failedSearchCount,
     updatedAt: Date.now(),
     error: null,
+  };
+}
+
+/** 加载合集中下一批未在七日内推荐过的来源，复用当前索引版本的画像快照。 */
+export async function loadMoreRecommendedCollections(
+  uid: string,
+  signal: AbortSignal,
+): Promise<{collections: CollectionRecommendation[]; hasMore: boolean}> {
+  if (!uid || useAuthStore.getState().userId !== uid) {
+    throw new Error('B 站账号已变化，请刷新推荐');
+  }
+  const importedSourcesPromise = importedPlaylistService.getCollectedPlaylists(uid, false, signal);
+  const [context, sources] = await Promise.all([
+    loadPersonalizationContext(uid, signal, importedSourcesPromise),
+    importedSourcesPromise,
+  ]);
+  if (signal.aborted) throw new Error('合集推荐加载已取消');
+  assertCurrentRecommendationAccount(uid);
+
+  const recommendations = await filterAndRecordRecommendations(
+    uid,
+    [],
+    rankCollections(sources, context.profile),
+  );
+  if (signal.aborted) throw new Error('合集推荐加载已取消');
+  assertCurrentRecommendationAccount(uid);
+  return {
+    collections: recommendations.collections,
+    hasMore: recommendations.collectionsHasMore,
   };
 }
 

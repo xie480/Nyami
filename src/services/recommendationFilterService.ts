@@ -11,6 +11,7 @@ import type {CollectionRecommendation, TagRecommendation} from '../types/domain'
 interface FilteredRecommendations {
   videos: TagRecommendation[];
   collections: CollectionRecommendation[];
+  collectionsHasMore: boolean;
 }
 
 /** 按账号过滤 7 日内已推荐条目，并原子写入本轮新推荐的 ID 与视频名。 */
@@ -20,7 +21,7 @@ export async function filterAndRecordRecommendations(
   collections: CollectionRecommendation[],
   maxCollections = config.recommendations.homePlaylistLimit,
 ): Promise<FilteredRecommendations> {
-  if (!uid) return {videos: [], collections: []};
+  if (!uid) return {videos: [], collections: [], collectionsHasMore: false};
   const now = Date.now();
   const expiresAt = now + config.recommendations.recommendationHistoryTtlMs;
 
@@ -48,6 +49,7 @@ export async function filterAndRecordRecommendations(
     const filteredVideos: TagRecommendation[] = [];
     const filteredCollections: CollectionRecommendation[] = [];
     const writes: RecommendationFilter[] = [];
+    let collectionsHasMore = false;
 
     for (const video of videos) {
       const itemId = video.bvid.trim();
@@ -68,9 +70,12 @@ export async function filterAndRecordRecommendations(
     }
 
     for (const collection of collections) {
-      if (filteredCollections.length >= maxCollections) break;
       const itemId = collection.sourceKey.trim();
       if (!itemId || seenCollectionIds.has(itemId)) continue;
+      if (filteredCollections.length >= maxCollections) {
+        collectionsHasMore = true;
+        break;
+      }
       seenCollectionIds.add(itemId);
       filteredCollections.push(collection);
       writes.push(recommendationFilterCollection.prepareCreate(record => {
@@ -83,7 +88,11 @@ export async function filterAndRecordRecommendations(
     }
 
     if (writes.length > 0) await writer.batch(...writes);
-    return {videos: filteredVideos, collections: filteredCollections};
+    return {
+      videos: filteredVideos,
+      collections: filteredCollections,
+      collectionsHasMore,
+    };
   });
 }
 
