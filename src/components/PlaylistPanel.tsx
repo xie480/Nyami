@@ -1,6 +1,6 @@
 // src/components/PlaylistPanel.tsx (refactored)
 import React, { useCallback, memo, useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo, ActivityIndicator, Alert, Platform, ToastAndroid } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../theme';
 import { GlassView } from './GlassView';
@@ -8,9 +8,80 @@ import { usePlayerStore } from '../store/playerStore';
 import { IconButton } from './IconButton';
 import type { FavoriteVideo } from '../types/domain';
 import { formatDuration } from '../utils/format';
-import { playSpecificPart, playWithIntent, loadQueue, playQueuedTrack } from '../services/trackPlayer';
+import { playSpecificPart, loadQueue, playQueuedTrack } from '../services/trackPlayer';
 import { useFolderDataStore } from '../store/folderDataStore';
 import { useSyncStore } from '../store/syncStore';
+
+const QUEUE_LOAD_AHEAD_TRACKS = 5;
+
+interface PlaylistItemProps {
+  item: FavoriteVideo;
+  onPlay: (bvid: string) => void;
+  isExpanded: boolean;
+  onPartPress: (bvid: string, cid: number, partTitle: string) => void;
+  onExpandToggle: (bvid: string) => void;
+  onRemove: (bvid: string) => void;
+  isCurrent: boolean;
+  primaryColor: string;
+}
+
+const PlaylistItem = memo(function PlaylistItem({
+  item,
+  onPlay,
+  isExpanded,
+  onPartPress,
+  onExpandToggle,
+  onRemove,
+  isCurrent,
+  primaryColor,
+}: PlaylistItemProps) {
+  const t = useTheme();
+  return (
+    <View>
+      <View style={[styles.item, { backgroundColor: isCurrent ? t.colors.primaryLight : t.colors.surface }]}>
+        <RNTouchableOpacity style={styles.infoTouchable} onPress={() => onPlay(item.bvid)} activeOpacity={0.6}>
+          <View style={styles.info}>
+            <Text
+              style={[{ color: t.colors.text }, styles.title, isCurrent && { color: primaryColor, fontWeight: '700' }]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {item.title}
+            </Text>
+            <Text style={[styles.sub, { color: t.colors.textSub }]} numberOfLines={1} ellipsizeMode="tail">
+              {item.upper.name}
+            </Text>
+          </View>
+        </RNTouchableOpacity>
+        <View style={styles.actions}>
+          {item.parts && item.parts.length > 1 && (
+            <RNTouchableOpacity onPress={() => onExpandToggle(item.bvid)} style={styles.expandButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Icon name={isExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={t.colors.textHint} />
+            </RNTouchableOpacity>
+          )}
+          <IconButton name="delete" size={20} color={t.colors.error} onPress={() => onRemove(item.bvid)} />
+        </View>
+      </View>
+      {isExpanded && item.parts && item.parts.length > 1 && (
+        <View style={[styles.partsContainer, { borderLeftColor: t.colors.divider }]}>
+          {item.parts.map(part => (
+            <RNTouchableOpacity
+              key={part.cid}
+              style={styles.partItem}
+              onPress={() => onPartPress(item.bvid, part.cid, part.title)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.partTitle, { color: t.colors.textSub }]} numberOfLines={1}>
+                {part.title}
+              </Text>
+              <Text style={[styles.partDuration, { color: t.colors.textHint }]}>{formatDuration(part.duration)}</Text>
+            </RNTouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+});
 
 /**
  * 全局播放列表面板，支持当前播放高亮、自动定位。
@@ -29,7 +100,9 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const syncStatus = useSyncStore((s) => s.syncStatus);
   const [expandedBvid, setExpandedBvid] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
   const listRef = useRef<any>(null);
+  const lastAutoLoadPageRef = useRef<string | null>(null);
   // 用于精确判断自动滚动触发时机，拦截分页加载时的无意识滚动
   const prevVisibleRef = useRef(visible);
   const prevBvidRef = useRef(currentBvid);
@@ -45,82 +118,40 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
 
   // 点击歌曲条目：立即跳转播放
   const handlePress = useCallback(async (bvid: string) => {
-    const played = await playQueuedTrack(bvid);
-    if (!played) {
-      const q = usePlayerStore.getState().queue;
-      const loaded = await loadQueue(q, bvid);
-      if (loaded === 0) {
-        return;
+    try {
+      let played = false;
+      try {
+        played = await playQueuedTrack(bvid);
+      } catch {
+        played = false;
       }
-      await playWithIntent();
+      if (!played) {
+        const q = usePlayerStore.getState().queue;
+        if (!q.some(video => video.bvid === bvid)) return;
+        const loaded = await loadQueue(q, bvid);
+        if (loaded === 0) throw new Error('歌曲暂时无法切换，请稍后重试');
+      }
+      usePlayerStore.getState().setCurrentBvid(bvid);
+      onClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '切换歌曲失败';
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(message, ToastAndroid.SHORT);
+      } else {
+        Alert.alert('切换失败', message);
+      }
     }
-    usePlayerStore.getState().setCurrentBvid(bvid);
-    onClose();
   }, [onClose]);
 
-  const PlaylistItem = memo(({
-    item,
-    onPlay,
-    isExpanded,
-    onPartPress,
-    onExpandToggle,
-    isCurrent,
-    primaryColor,
-  }: {
-    item: FavoriteVideo;
-    onPlay: () => void;
-    isExpanded: boolean;
-    onPartPress: (cid: number, partTitle: string) => void;
-    onExpandToggle: () => void;
-    isCurrent: boolean;
-    primaryColor: string;
-  }) => (
-    <View>
-      <View style={[styles.item, { backgroundColor: isCurrent ? t.colors.primaryLight : t.colors.surface }]}> 
-        {/* 信息区 - 点击播放歌曲 */}
-        <RNTouchableOpacity style={styles.infoTouchable} onPress={onPlay} activeOpacity={0.6}>
-          <View style={styles.info}>
-            <Text
-              style={[{ color: t.colors.text }, styles.title, isCurrent && { color: primaryColor, fontWeight: '700' }]} 
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              {item.title}
-            </Text>
-            <Text style={[styles.sub, { color: t.colors.textSub }]} numberOfLines={1} ellipsizeMode="tail">
-              {item.upper.name}
-            </Text>
-          </View>
-        </RNTouchableOpacity>
-        {/* 操作按钮 - 绝对定位在右侧 */}
-        <View style={styles.actions}>
-          {item.parts && item.parts.length > 1 && (
-            <RNTouchableOpacity onPress={onExpandToggle} style={styles.expandButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Icon name={isExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={t.colors.textHint} />
-            </RNTouchableOpacity>
-          )}
-          <IconButton name="delete" size={20} color={t.colors.error} onPress={() => removeFromQueue(item.bvid)} />
-        </View>
-      </View>
-      {isExpanded && item.parts && item.parts.length > 1 && (
-        <View style={[styles.partsContainer, { borderLeftColor: t.colors.divider }]}> 
-          {item.parts.map((part) => (
-            <RNTouchableOpacity
-              key={part.cid}
-              style={styles.partItem}
-              onPress={() => onPartPress(part.cid, part.title)}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.partTitle, { color: t.colors.textSub }]} numberOfLines={1}>
-                {part.title}
-              </Text>
-              <Text style={[styles.partDuration, { color: t.colors.textHint }]}>{formatDuration(part.duration)}</Text>
-            </RNTouchableOpacity>
-          ))}
-        </View>
-      )}
-    </View>
-  ));
+  const handlePlayBvid = useCallback((bvid: string) => {
+    void handlePress(bvid);
+  }, [handlePress]);
+  const handleRemove = useCallback((bvid: string) => {
+    void removeFromQueue(bvid);
+  }, [removeFromQueue]);
+  const handleExpandToggle = useCallback((bvid: string) => {
+    setExpandedBvid(previous => previous === bvid ? null : bvid);
+  }, []);
 
   const handlePartPress = useCallback(async (bvid: string, cid: number, partTitle: string) => {
     try {
@@ -129,19 +160,24 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     } catch {}
   }, [onClose]);
 
+  useEffect(() => {
+    if (visible) setHasOpened(true);
+  }, [visible]);
+
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<FavoriteVideo>) => (
       <PlaylistItem
         item={item}
-        onPlay={() => handlePress(item.bvid)}
+        onPlay={handlePlayBvid}
         isExpanded={expandedBvid === item.bvid}
-        onPartPress={(cid, partTitle) => handlePartPress(item.bvid, cid, partTitle)}
-        onExpandToggle={() => setExpandedBvid((prev) => (prev === item.bvid ? null : item.bvid))}
+        onPartPress={handlePartPress}
+        onExpandToggle={handleExpandToggle}
+        onRemove={handleRemove}
         isCurrent={item.bvid === currentBvid}
         primaryColor={t.colors.primary}
       />
     ),
-    [t.colors, expandedBvid, handlePress, handlePartPress, currentBvid]
+    [t.colors.primary, expandedBvid, handlePlayBvid, handlePartPress, handleExpandToggle, handleRemove, currentBvid]
   );
 
   // 精确控制的自动滚动逻辑：
@@ -199,11 +235,11 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
       ? folderStore.sourceKey === playContext.sourceKey
       : folderStore.folderId === playContext.folderId;
     if (!matchesSource) return;
-    if (!folderStore.hasMore) return;
+    if (!folderStore.hasMore || folderStore.loading) return;
 
     setLoadingMore(true);
     try {
-      const beforeList = folderStore.getDisplayedList();
+      const beforeBvids = new Set(folderStore.getDisplayedList().map(video => video.bvid));
       await folderStore.loadMore();
       const latestFolderStore = useFolderDataStore.getState();
       const latestPlayContext = usePlayerStore.getState().playContext;
@@ -213,7 +249,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
       if (!stillMatchesSource) return;
       const afterList = latestFolderStore.getDisplayedList();
 
-      const newItems = afterList.slice(beforeList.length);
+      const newItems = afterList.filter(video => !beforeBvids.has(video.bvid));
       if (newItems.length > 0) {
         await appendQueue(newItems);
       }
@@ -221,6 +257,25 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
       setLoadingMore(false);
     }
   }, [loadingMore, playContext, appendQueue]);
+
+  useEffect(() => {
+    if (!currentBvid || playMode !== 'sequential' || !playContext?.sourceKey) return;
+    const currentIndex = queue.findIndex(video => video.bvid === currentBvid);
+    if (currentIndex < 0 || queue.length - currentIndex > QUEUE_LOAD_AHEAD_TRACKS) return;
+
+    const folderStore = useFolderDataStore.getState();
+    if (
+      folderStore.sourceKey !== playContext.sourceKey ||
+      !folderStore.hasMore ||
+      folderStore.loading
+    ) {
+      return;
+    }
+    const pageKey = `${playContext.sourceKey}:${folderStore.page}`;
+    if (lastAutoLoadPageRef.current === pageKey) return;
+    lastAutoLoadPageRef.current = pageKey;
+    void handleLoadMore();
+  }, [queue, currentBvid, playContext, playMode, handleLoadMore]);
 
   // 列表底部加载指示器：仅在分页请求进行中（loadingMore）时渲染
   const renderFooter = useCallback(() => {
@@ -253,9 +308,8 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
         </View>
         <IconButton name="close" size={24} color={t.colors.text} onPress={onClose} />
       </View>
-      {visible && (
+      {hasOpened && (
         <FlatList
-          key={`list-${visible}`}
           ref={listRef}
           data={queue}
           keyExtractor={(item) => item.bvid}

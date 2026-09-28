@@ -38,6 +38,13 @@ import { PlaylistRecommendationsScreen } from './screens/PlaylistRecommendations
 
 const Stack = createStackNavigator();
 
+const GlobalPlaylistPanel = React.memo(function GlobalPlaylistPanel() {
+  const visible = useUIStore(state => state.playlistVisible);
+  const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
+  const close = useCallback(() => setPlaylistVisible(false), [setPlaylistVisible]);
+  return <PlaylistPanel visible={visible} onClose={close} />;
+});
+
 // 底栏目标页采用轻量淡入上移转场，避免整页横向推入带来的视觉负担。
 const BOTTOM_TAB_SCREEN_OPTIONS = {animation: 'fade_from_bottom' as const};
 
@@ -105,8 +112,6 @@ export default function App() {
   const uid = useAuthStore((s) => s.userId);
   const initAuth = useAuthStore((s) => s.initAuth);
   const authReady = useAuthStore((s) => s.authReady);
-  const playlistVisible = useUIStore(state => state.playlistVisible);
-  const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
   const isGlassMode = themeMode === 'glass-light' || themeMode === 'glass-dark';
   const navTheme = useMemo(() => ({
     ...(isDark ? DarkTheme : DefaultTheme),
@@ -264,7 +269,7 @@ export default function App() {
           </SafeAreaWrapper>
           {/* 全局顶部通知组件 - 覆盖在所有页面之上 */}
           <ToastNotification ref={toastRef} />
-          <PlaylistPanel visible={playlistVisible} onClose={() => setPlaylistVisible(false)} />
+          <GlobalPlaylistPanel />
           <LoginModal />
         </ThemeProvider>
       </SafeAreaProvider>

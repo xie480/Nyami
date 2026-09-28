@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useCallback, useRef, memo } from 'react';
-import LoggerService from '../services/LoggerService';
 import {
   View,
   FlatList,
@@ -26,7 +25,7 @@ import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
-import { loadQueue, insertNext, appendQueue as tpAppendQueue, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
+import { loadQueue, insertNext, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
 import { usePlayerStore } from '../store/playerStore';
 import { useProgressStore } from '../store/progressStore';
 import { prefetchAudioUrl } from '../services/dataPrefetcher';
@@ -233,52 +232,12 @@ export const VideosScreen = ({ route, navigation }: any) => {
     };
   }, [mediaId, source, initFolder, initImportedSource]);
 
-  const MAX_QUEUE_SIZE = 200;
-
   const displayedList = getDisplayedList();
   const totalVideoCount = source?.mediaCount ?? route.params.mediaCount ?? list.length;
   const heroCover = source?.cover || route.params.cover || displayedList[0]?.cover;
   const statusBarHeight = Platform.OS === 'android'
     ? Math.max(insets.top, StatusBar.currentHeight ?? 0)
     : insets.top;
-
-  /** 后台异步加载更多分页数据并追加到播放队列尾部 */
-  const loadMoreInBackground = useCallback(async (expectedSourceKey: string) => {
-    try {
-      const initialStore = useFolderDataStore.getState();
-      if (initialStore.sourceKey !== expectedSourceKey) return;
-      let currentList = initialStore.getDisplayedList();
-      while (currentList.length < MAX_QUEUE_SIZE) {
-        const currentStore = useFolderDataStore.getState();
-        if (currentStore.sourceKey !== expectedSourceKey || !currentStore.hasMore || currentStore.loading) break;
-        await currentStore.loadMore();
-        const newState = useFolderDataStore.getState();
-        if (newState.sourceKey !== expectedSourceKey) return;
-        currentList = newState.getDisplayedList();
-      }
-      // 【性能优化】页面卸载后跳过队列追加操作
-      if (!mountedRef.current) return;
-      const finalFolderStore = useFolderDataStore.getState();
-      if (finalFolderStore.sourceKey !== expectedSourceKey) return;
-      const playerStore = usePlayerStore.getState();
-      if (playerStore.playContext?.sourceKey !== expectedSourceKey) return;
-      const fullList = finalFolderStore.getDisplayedList();
-      const existingBvids = new Set(playerStore.queue.map(v => v.bvid));
-      const newItems = fullList.filter(v => !existingBvids.has(v.bvid));
-      if (newItems.length > 0) {
-        await tpAppendQueue(newItems, playerStore.currentBvid ?? undefined);
-      }
-    } catch (e) {
-      LoggerService.error('VideosScreen', 'loadQueueInBackground', '后台加载播放队列失败:', e);
-    } finally {
-      // 【性能优化】通过 InteractionManager 延迟队列加载状态的清理，
-      // 避免在页面切换动画期间抢占主线程
-      InteractionManager.runAfterInteractions(() => {
-        const currentPlayer = usePlayerStore.getState();
-        if (currentPlayer.playContext?.sourceKey === expectedSourceKey) currentPlayer.setQueueLoading(false);
-      });
-    }
-  }, []);
 
   const playFrom = useCallback(async (idx: number) => {
     try {
@@ -337,12 +296,6 @@ export const VideosScreen = ({ route, navigation }: any) => {
         // 从"等报错再处理"进化为"主动快速处理"。
         resolveCurrentTrack(version).catch(() => {});
 
-        // 后台异步加载更多数据并追加到队列尾部
-        usePlayerStore.getState().setQueueLoading(true);
-        loadMoreInBackground(context.sourceKey).catch(() => {
-          const currentPlayer = usePlayerStore.getState();
-          if (currentPlayer.playContext?.sourceKey === context.sourceKey) currentPlayer.setQueueLoading(false);
-        });
       });
     } catch (e: any) {
       const msg = e.message || '播放失败';
@@ -355,7 +308,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       // 发生错误时清除乐观加载状态
       usePlayerStore.getState().setResolving(false);
     }
-  }, [displayedList, mediaId, source, sortOption, searchQuery, loadMoreInBackground]);
+  }, [displayedList, mediaId, source, sortOption, searchQuery]);
 
   const playAll = useCallback(async () => {
     try {
@@ -384,11 +337,6 @@ export const VideosScreen = ({ route, navigation }: any) => {
         await playWithIntent();
         resolveCurrentTrack(version).catch(() => {});
 
-        usePlayerStore.getState().setQueueLoading(true);
-        loadMoreInBackground(context.sourceKey).catch(() => {
-          const currentPlayer = usePlayerStore.getState();
-          if (currentPlayer.playContext?.sourceKey === context.sourceKey) currentPlayer.setQueueLoading(false);
-        });
       });
     } catch (e: any) {
       const msg = e.message || '播放全部失败';
