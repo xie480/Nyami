@@ -38,6 +38,7 @@ export interface TagRecommendationSearchResult {
 export interface TagRecommendationSearchOptions {
   page?: number;
   excludeVideoIds?: string[];
+  excludeVideoTitles?: string[];
   /** Null disables the duration ceiling; omitted values use the persisted app preference. */
   durationLimitSeconds?: number | null;
   tagBlacklist?: string[];
@@ -73,6 +74,10 @@ function uniqueVideos(videos: FavoriteVideo[]): FavoriteVideo[] {
 
 function normalizedTagKey(tagName: string): string {
   return tagName.trim().toLocaleLowerCase();
+}
+
+export function normalizeRecommendationTitleKey(title: string): string {
+  return title.normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
 }
 
 function decodeTags(entry: VideoTagCacheEntry | undefined): VideoTag[] {
@@ -472,6 +477,11 @@ export async function searchTagRecommendations(
   }
   const favorites = uniqueVideos(favoriteVideos);
   const favoriteIds = new Set(favorites.map(video => video.bvid));
+  const favoriteTitles = new Set(
+    [...favorites.map(video => video.title), ...(options.excludeVideoTitles ?? [])]
+      .map(normalizeRecommendationTitleKey)
+      .filter(Boolean),
+  );
   for (const videoId of options.excludeVideoIds ?? []) {
     if (videoId) favoriteIds.add(videoId);
   }
@@ -520,6 +530,9 @@ export async function searchTagRecommendations(
           continue;
         }
         const video = trimSearchVideo(searchItem);
+        if (favoriteTitles.has(normalizeRecommendationTitleKey(video.title))) {
+          continue;
+        }
         if (
           durationLimitSeconds !== null &&
           (video.duration <= 0 || video.duration > durationLimitSeconds)

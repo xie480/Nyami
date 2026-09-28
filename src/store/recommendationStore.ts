@@ -1,11 +1,12 @@
 import {create} from 'zustand';
 import {createJSONStorage, persist, StateStorage} from 'zustand/middleware';
+import {config} from '../config';
 import {storage} from '../core/storage';
 import type {CollectionRecommendation, TagRecommendation} from '../types/domain';
 
 /**
- * 按 B 站 UID 保存发现页推荐快照，并在发起日常请求前记录日期，避免页面聚焦导致重复请求。
- * 仅推荐数据和自动触发日期持久化；运行中的 loading 标记在进程重启后自动复位。
+ * 按 B 站 UID 保存发现页推荐快照，并用上次成功刷新时间控制自动刷新频率。
+ * 仅推荐数据和成功刷新时间持久化；运行中的 loading 标记在进程重启后自动复位。
  */
 export interface HomeRecommendationFeed {
   collections: CollectionRecommendation[];
@@ -35,12 +36,12 @@ const mmkvStorage: StateStorage = {
 
 interface RecommendationState {
   feedsByUid: Record<string, HomeRecommendationFeed>;
-  lastAutoRefreshDateByUid: Record<string, string>;
+  lastSuccessfulRefreshAtByUid: Record<string, number>;
   refreshingUid: string | null;
   getFeed: (uid: string) => HomeRecommendationFeed;
-  tryBeginDailyRefresh: (uid: string, date: string) => boolean;
-  beginManualRefresh: (uid: string, date: string) => boolean;
-  finishRefresh: (uid: string, date: string, feed: HomeRecommendationFeed) => void;
+  tryBeginAutomaticRefresh: (uid: string, now: number) => boolean;
+  beginManualRefresh: (uid: string) => boolean;
+  finishRefresh: (uid: string, feed: HomeRecommendationFeed) => void;
   failRefresh: (uid: string, error: string) => void;
 }
 
@@ -48,45 +49,34 @@ export const useRecommendationStore = create<RecommendationState>()(
   persist(
     (set, get) => ({
       feedsByUid: {},
-      lastAutoRefreshDateByUid: {},
+      lastSuccessfulRefreshAtByUid: {},
       refreshingUid: null,
       getFeed: uid => get().feedsByUid[uid] ?? EMPTY_HOME_RECOMMENDATION_FEED,
-      tryBeginDailyRefresh: (uid, date) => {
+      tryBeginAutomaticRefresh: (uid, now) => {
         const state = get();
+        const lastRefreshAt = state.lastSuccessfulRefreshAtByUid[uid] ?? 0;
         if (
           !uid ||
-          state.lastAutoRefreshDateByUid[uid] === date ||
+          now - lastRefreshAt < config.recommendations.homeRefreshIntervalMs ||
           state.refreshingUid !== null
         ) {
           return false;
         }
-        set(state => ({
-          lastAutoRefreshDateByUid: {
-            ...state.lastAutoRefreshDateByUid,
-            [uid]: date,
-          },
-          refreshingUid: uid,
-        }));
+        set({refreshingUid: uid});
         return true;
       },
-      beginManualRefresh: (uid, date) => {
+      beginManualRefresh: uid => {
         const state = get();
         if (!uid || state.refreshingUid !== null) return false;
-        set(state => ({
-          lastAutoRefreshDateByUid: {
-            ...state.lastAutoRefreshDateByUid,
-            [uid]: date,
-          },
-          refreshingUid: uid,
-        }));
+        set({refreshingUid: uid});
         return true;
       },
-      finishRefresh: (uid, date, feed) =>
+      finishRefresh: (uid, feed) =>
         set(state => ({
           feedsByUid: {...state.feedsByUid, [uid]: feed},
-          lastAutoRefreshDateByUid: {
-            ...state.lastAutoRefreshDateByUid,
-            [uid]: date,
+          lastSuccessfulRefreshAtByUid: {
+            ...state.lastSuccessfulRefreshAtByUid,
+            [uid]: feed.updatedAt,
           },
           refreshingUid: state.refreshingUid === uid ? null : state.refreshingUid,
         })),
@@ -107,7 +97,7 @@ export const useRecommendationStore = create<RecommendationState>()(
       storage: createJSONStorage(() => mmkvStorage),
       partialize: state => ({
         feedsByUid: state.feedsByUid,
-        lastAutoRefreshDateByUid: state.lastAutoRefreshDateByUid,
+        lastSuccessfulRefreshAtByUid: state.lastSuccessfulRefreshAtByUid,
       }),
     },
   ),

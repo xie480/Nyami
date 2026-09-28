@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import {useFocusEffect} from '@react-navigation/native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {GlassView} from '../components/GlassView';
 import {Header} from '../components/Header';
@@ -23,12 +22,6 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const {uid, feed, refreshing, refresh} = useHomeRecommendations();
-
-  useFocusEffect(
-    useCallback(() => {
-      void refresh('daily');
-    }, [refresh]),
-  );
 
   const openSource = useCallback((source: CollectionRecommendation) => {
     navigation.navigate('Videos', {source, title: source.title});
@@ -75,7 +68,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
           <View style={{flexDirection: 'row', alignItems: 'center', marginTop: t.spacing.md}}>
             <Icon name="creation" size={18} color={t.colors.primary} />
             <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginLeft: 6}}>
-              {refreshing ? '正在更新推荐…' : feed.updatedAt ? `今日推荐 · ${new Date(feed.updatedAt).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}` : '每日自动更新一次'}
+              {refreshing ? '正在更新推荐…' : feed.updatedAt ? `推荐已更新 · ${new Date(feed.updatedAt).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}` : '每 5 小时自动更新一次'}
             </Text>
           </View>
         </View>

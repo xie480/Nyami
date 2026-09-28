@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import {useFocusEffect} from '@react-navigation/native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {GlassView} from '../components/GlassView';
 import {IconButton} from '../components/IconButton';
@@ -25,7 +24,7 @@ import {config} from '../config';
 import type {CollectionRecommendation, TagRecommendation} from '../types/domain';
 
 function updateTimeLabel(timestamp: number | null): string {
-  if (!timestamp) return '每日首次打开时为你生成';
+  if (!timestamp) return '首页打开时为你生成';
   return new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 }
 
@@ -35,12 +34,6 @@ export const DiscoverScreen = ({navigation}: any) => {
   const insets = useSafeAreaInsets();
   const {uid, feed, refreshing, refresh} = useHomeRecommendations();
   const setQueue = usePlayerStore(state => state.setQueue);
-
-  useFocusEffect(
-    useCallback(() => {
-      void refresh('daily');
-    }, [refresh]),
-  );
 
   const startPlayback = useCallback(async (selectedVideo: TagRecommendation) => {
     const videos = feed.songs.map(searchVideoToFavoriteVideo);
@@ -156,7 +149,7 @@ export const DiscoverScreen = ({navigation}: any) => {
         <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: t.spacing.md}}>
           <View>
             <Text style={{fontSize: t.fontSize.xxl, fontWeight: '800', color: t.colors.text}}>发现好音乐</Text>
-            <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 3}}>按你的收藏画像，每天挑一份灵感</Text>
+            <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 3}}>按你的收藏画像，每 5 小时挑一份灵感</Text>
           </View>
           <IconButton name="account-circle-outline" size={28} color={t.colors.textSub} accessibilityLabel="用户画像" onPress={() => navigation.navigate('TagRecommendations')} />
         </View>
@@ -184,10 +177,10 @@ export const DiscoverScreen = ({navigation}: any) => {
             </View>
             <View style={{flex: 1, marginHorizontal: t.spacing.md}}>
               <Text style={{fontSize: t.fontSize.sm, color: t.colors.text, fontWeight: '700'}}>
-                {refreshing ? '正在为你生成今日推荐' : feed.updatedAt ? `今日推荐已生成 · ${updateTimeLabel(feed.updatedAt)}` : '今日推荐尚未生成'}
+                {refreshing ? '正在为你生成推荐' : feed.updatedAt ? `推荐已更新 · ${updateTimeLabel(feed.updatedAt)}` : '首页打开时生成推荐'}
               </Text>
               <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 4}}>
-                {refreshing ? '读取收藏画像与 B 站推荐内容…' : '每日自动更新一次，需要时可手动刷新'}
+                {refreshing ? '读取收藏画像与 B 站推荐内容…' : '每 5 小时自动更新，需要时可手动刷新'}
               </Text>
             </View>
             <TouchableOpacity

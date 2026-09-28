@@ -1,7 +1,11 @@
 import {config} from '../config';
 import {loadGlobalIndexCache, favoriteService} from './favoriteService';
 import {importedPlaylistService} from './importedPlaylistService';
-import {loadTagProfile, searchTagRecommendations} from './tagRecommendationService';
+import {
+  loadTagProfile,
+  normalizeRecommendationTitleKey,
+  searchTagRecommendations,
+} from './tagRecommendationService';
 import {useAuthStore} from '../store/authStore';
 import {useImportedPlaylistStore} from '../store/importedPlaylistStore';
 import {useSettingsStore} from '../store/settingsStore';
@@ -31,6 +35,7 @@ const ACCOUNT_INDEX_READY_POLL_MS = 100;
 interface PersonalizationContext {
   favorites: FavoriteVideo[];
   favoriteVideoIds: string[];
+  favoriteVideoTitles: string[];
   profile: TagProfile;
 }
 
@@ -78,15 +83,22 @@ async function loadPersonalizationContext(
     settings.hiddenFolderIds,
     visibleSourceKeys,
   );
-  const allFavoriteVideoIds = Array.from(new Set(
-    favoriteService.getGlobalIndex(
-      [],
-      importedSources.map(source => source.sourceKey),
-    ).map(video => video.bvid),
+  const allFavoriteVideos = favoriteService.getGlobalIndex(
+    [],
+    importedSources.map(source => source.sourceKey),
+  );
+  const allFavoriteVideoIds = Array.from(new Set(allFavoriteVideos.map(video => video.bvid)));
+  const allFavoriteVideoTitles = Array.from(new Set(
+    allFavoriteVideos.map(video => normalizeRecommendationTitleKey(video.title)).filter(Boolean),
   ));
   const {profile} = await loadTagProfile(favorites);
   assertCurrentRecommendationAccount(uid);
-  return {favorites, favoriteVideoIds: allFavoriteVideoIds, profile};
+  return {
+    favorites,
+    favoriteVideoIds: allFavoriteVideoIds,
+    favoriteVideoTitles: allFavoriteVideoTitles,
+    profile,
+  };
 }
 
 function rankCollections(
@@ -138,7 +150,10 @@ export async function generateHomeFeed(
     context.profile,
     context.favorites,
     signal,
-    {excludeVideoIds: context.favoriteVideoIds},
+    {
+      excludeVideoIds: context.favoriteVideoIds,
+      excludeVideoTitles: context.favoriteVideoTitles,
+    },
   );
   if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
@@ -169,6 +184,10 @@ export async function loadMorePersonalizedSongs(
     context.profile,
     context.favorites,
     signal,
-    {page, excludeVideoIds: [...context.favoriteVideoIds, ...excludeVideoIds]},
+    {
+      page,
+      excludeVideoIds: [...context.favoriteVideoIds, ...excludeVideoIds],
+      excludeVideoTitles: context.favoriteVideoTitles,
+    },
   );
 }

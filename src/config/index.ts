@@ -31,6 +31,7 @@
 
   /** 首页推荐和搜索的产品边界值。 */
   recommendations: {
+    homeRefreshIntervalMs: 5 * 60 * 60 * 1000,
     defaultDurationLimitMinutes: 5,
     maxDurationLimitMinutes: 1440,
     maxBlacklistKeywords: 100,
