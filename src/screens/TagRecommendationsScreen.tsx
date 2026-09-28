@@ -96,11 +96,20 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   const [error, setError] = useState<string | null>(null);
   const requestController = useRef<AbortController | null>(null);
   const loadedUid = useRef<string | null>(null);
+  const loadedSnapshotKey = useRef<string | null>(null);
+  const activeSnapshotKey = useRef<string | null>(null);
+  const activeSnapshotController = useRef<AbortController | null>(null);
   const backgroundBackfillWasRunning = useRef(false);
 
   const loadSnapshot = useCallback(async () => {
     if (!uid) {
       loadedUid.current = null;
+      loadedSnapshotKey.current = null;
+      activeSnapshotKey.current = null;
+      activeSnapshotController.current?.abort();
+      activeSnapshotController.current = null;
+      requestController.current?.abort();
+      requestController.current = null;
       setFavorites([]);
       setProfile(null);
       setRecommendations([]);
@@ -112,9 +121,23 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     }
 
     const requestUid = uid;
+    const snapshotKey = JSON.stringify([
+      requestUid,
+      [...new Set(hiddenFolderIds)].sort((left, right) => left - right),
+      [...new Set(visibleSourceKeys)].sort(),
+    ]);
+    if (
+      loadedSnapshotKey.current === snapshotKey ||
+      activeSnapshotKey.current === snapshotKey
+    ) {
+      return;
+    }
+
     const controller = new AbortController();
     requestController.current?.abort();
     requestController.current = controller;
+    activeSnapshotKey.current = snapshotKey;
+    activeSnapshotController.current = controller;
     setInitialLoading(true);
     setError(null);
     if (loadedUid.current !== requestUid) {
@@ -151,6 +174,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         return;
       }
       setProfile(cachedProfile);
+      loadedSnapshotKey.current = snapshotKey;
     } catch (loadError) {
       if (!controller.signal.aborted) {
         setError(
@@ -160,6 +184,10 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     } finally {
       if (requestController.current === controller) {
         requestController.current = null;
+      }
+      if (activeSnapshotController.current === controller) {
+        activeSnapshotKey.current = null;
+        activeSnapshotController.current = null;
       }
       if (!controller.signal.aborted) {
         setInitialLoading(false);
@@ -172,12 +200,16 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     useCallback(() => {
       loadSnapshot();
       return () => {
-        requestController.current?.abort();
-        requestController.current = null;
+        // 路由失焦时保留首轮本地读取，避免下一次进入画像页再次加载。
         setStage('idle');
       };
     }, [loadSnapshot]),
   );
+
+  useEffect(() => () => {
+    requestController.current?.abort();
+    requestController.current = null;
+  }, []);
 
   useEffect(() => {
     if (backgroundBackfillStatus === 'running') {
@@ -186,6 +218,12 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     }
     if (backgroundBackfillWasRunning.current) {
       backgroundBackfillWasRunning.current = false;
+      loadedSnapshotKey.current = null;
+      if (activeSnapshotController.current) {
+        activeSnapshotController.current.abort();
+        activeSnapshotController.current = null;
+        activeSnapshotKey.current = null;
+      }
       if (isFocused) {
         loadSnapshot();
       }
