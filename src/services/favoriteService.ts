@@ -557,6 +557,7 @@ export const favoriteService = {
     if (!uid) return;
 
     await syncMutex.acquire();
+    let indexMayHaveChanged = false;
     try {
       const allFolders = await this.getFolders(uid, true, signal);
       const folders = allFolders.filter(f => !hiddenFolderIds.includes(f.id));
@@ -635,13 +636,16 @@ export const favoriteService = {
 
         const playlistId = target.playlistId;
         let localMeta = await getPlaylistMeta(playlistId);
+        const remoteCountDecreased =
+          localMeta !== null && target.mediaCount < localMeta.remoteVideoCount;
 
         // 1. 判断是否需要同步
         let needSync = false;
         if (force || !localMeta) {
           needSync = true;
         } else if (
-          localMeta.localSyncedCount < target.mediaCount ||
+          localMeta.remoteVideoCount !== target.mediaCount ||
+          localMeta.syncCursor !== null ||
           localMeta.needResync ||
           localMeta.playlistSyncStatus === 'failed' ||
           localMeta.playlistSyncStatus === 'running' // 上次崩溃
@@ -675,7 +679,7 @@ export const favoriteService = {
 
         let page = 1;
         // 断点续传：如果不是强制全量，且有游标，则从游标处继续
-        if (!force && localMeta.syncCursor && localMeta.syncCursor.startsWith('page_')) {
+        if (!force && !remoteCountDecreased && localMeta.syncCursor && localMeta.syncCursor.startsWith('page_')) {
           const cursorPage = parseInt(localMeta.syncCursor.replace('page_', ''), 10);
           if (!isNaN(cursorPage) && cursorPage > 0) {
             page = cursorPage + 1; // 从下一页开始
@@ -693,43 +697,44 @@ export const favoriteService = {
               : await importedPlaylistService.getVideos(target.source, page, force, signal);
             
             if (pageRes.list.length === 0) {
-              break;
+              hasMore = pageRes.hasMore || pageRes.rawCount === 20;
+              if (!hasMore) break;
+            }
+
+            const currentBvids = Array.from(new Set(pageRes.list.map(video => video.bvid)));
+            const existingBvids = new Set<string>();
+            if (!force && currentBvids.length > 0) {
+              const existingVideos = await videoMetaCollection.query(
+                Q.where('playlist_id', playlistId),
+                Q.where('video_id', Q.oneOf(currentBvids)),
+                Q.where('is_deleted', false),
+              ).fetch();
+              existingVideos.forEach(video => existingBvids.add(video.videoId));
+            }
+
+            const uniquePageBvids = new Set(currentBvids);
+            if (!force && !remoteCountDecreased && localMeta.localSyncedCount > 0 && page === 1) {
+              isIncrementalDone = existingBvids.size === uniquePageBvids.size && uniquePageBvids.size > 0;
+            } else if (!force && !remoteCountDecreased && localMeta.localSyncedCount > 0 && page > 1) {
+              isIncrementalDone = existingBvids.size > 0;
             }
 
             const videosToUpsert: FavoriteVideo[] = [];
-            const currentBvids = pageRes.list.map(v => v.bvid);
-
+            const seenPageIds = new Set<string>();
             for (const video of pageRes.list) {
               remoteVideoIds.push(video.bvid);
-              videosToUpsert.push(video);
+              if (seenPageIds.has(video.bvid)) continue;
+              seenPageIds.add(video.bvid);
+              if (force || !existingBvids.has(video.bvid)) {
+                videosToUpsert.push(video);
+              }
             }
 
-            // 检查增量同步是否完成：如果当前页的视频在本地都已经存在，说明增量部分已经拉取完毕
-            if (!force && localMeta.localSyncedCount > 0 && page === 1) {
-               // 仅在第一页检查，如果第一页有部分视频已存在，说明是增量
-               // 为了更准确，我们查询数据库看这些 bvid 是否都存在
-               const existingCount = await videoMetaCollection.query(
-                 Q.where('playlist_id', playlistId),
-                 Q.where('video_id', Q.oneOf(currentBvids))
-               ).fetchCount();
-               
-               // 如果当前页的所有视频都在本地存在，说明没有新视频，可以提前结束
-               if (existingCount === currentBvids.length && currentBvids.length > 0) {
-                 isIncrementalDone = true;
-               }
-            } else if (!force && localMeta.localSyncedCount > 0 && page > 1) {
-               // 如果不是第一页，且遇到了已存在的视频，也可以认为增量结束
-               const existingCount = await videoMetaCollection.query(
-                 Q.where('playlist_id', playlistId),
-                 Q.where('video_id', Q.oneOf(currentBvids))
-               ).fetchCount();
-               if (existingCount > 0) {
-                 isIncrementalDone = true;
-               }
+            // 增量扫描只写本地未存在的视频；已删除记录不在 existingBvids 中，会被重新激活。
+            if (videosToUpsert.length > 0) {
+              await upsertVideosBatch(playlistId, videosToUpsert);
+              indexMayHaveChanged = true;
             }
-
-            // 批量写入
-            await upsertVideosBatch(playlistId, videosToUpsert);
             
             // 获取当前收藏夹的绝对有效视频数量
             const absoluteSyncedCount = await getPlaylistVideoCount(playlistId);
@@ -749,6 +754,7 @@ export const favoriteService = {
             // 4. 软删除（仅在全量拉取时执行）
             if (force || (!isIncrementalDone && !hasMore)) {
                await softDeleteMissingVideos(playlistId, remoteVideoIds);
+               indexMayHaveChanged = true;
             }
 
             await finishSyncJob(jobId, 'success');
@@ -792,7 +798,9 @@ export const favoriteService = {
 
     } finally {
       try {
-        await loadGlobalIndexCache();
+        if (indexMayHaveChanged) {
+          await loadGlobalIndexCache();
+        }
       } finally {
         syncMutex.release();
       }
