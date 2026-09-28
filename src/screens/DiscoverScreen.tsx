@@ -2,6 +2,7 @@ import React, {useCallback, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
+  InteractionManager,
   ScrollView,
   StatusBar,
   Text,
@@ -18,7 +19,7 @@ import {usePlayerStore} from '../store/playerStore';
 import {useProgressStore} from '../store/progressStore';
 import {useAuthStore} from '../store/authStore';
 import {prefetchAudioUrl} from '../services/dataPrefetcher';
-import {loadQueue, playWithIntent, resolveCurrentTrack} from '../services/trackPlayer';
+import {loadQueue, resolveCurrentTrack} from '../services/trackPlayer';
 import {searchVideoToFavoriteVideo} from '../services/transformers';
 import {useTheme} from '../theme';
 import {config} from '../config';
@@ -38,7 +39,7 @@ export const DiscoverScreen = ({navigation}: any) => {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState('');
   const setQueue = usePlayerStore(state => state.setQueue);
 
-  const startPlayback = useCallback(async (selectedVideo: TagRecommendation) => {
+  const startPlayback = useCallback((selectedVideo: TagRecommendation) => {
     const videos = feed.songs.map(searchVideoToFavoriteVideo);
     if (videos.length === 0 || !uid) return;
     try {
@@ -50,10 +51,24 @@ export const DiscoverScreen = ({navigation}: any) => {
       usePlayerStore.getState().setResolving(true);
       useProgressStore.getState().resetProgress();
       prefetchAudioUrl(selectedVideo.bvid).catch(() => {});
-      const revision = await loadQueue(videos, selectedVideo.bvid);
-      await playWithIntent();
-      resolveCurrentTrack(revision).catch(() => {});
+      const selectedIndex = videos.findIndex(video => video.bvid === selectedVideo.bvid);
+      const previousVideo = selectedIndex > 0 ? videos[selectedIndex - 1] : undefined;
+      if (previousVideo) prefetchAudioUrl(previousVideo.bvid, previousVideo.parts?.[0]?.cid).catch(() => {});
       navigation.navigate('Player');
+      InteractionManager.runAfterInteractions(() => {
+        void (async () => {
+          try {
+            const revision = await loadQueue(videos, selectedVideo.bvid);
+            if (!revision) {
+              throw new Error(usePlayerStore.getState().playbackError || '推荐歌曲暂时无法播放');
+            }
+            resolveCurrentTrack(revision).catch(() => {});
+          } catch (error) {
+            usePlayerStore.getState().setResolving(false);
+            Alert.alert('播放失败', error instanceof Error ? error.message : '推荐歌曲暂时无法播放');
+          }
+        })();
+      });
     } catch (error) {
       usePlayerStore.getState().setResolving(false);
       Alert.alert('播放失败', error instanceof Error ? error.message : '推荐歌曲暂时无法播放');

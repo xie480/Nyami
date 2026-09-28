@@ -15,6 +15,7 @@ import { useFolderDataStore } from '../store/folderDataStore';
 import { useSyncStore } from '../store/syncStore';
 
 const QUEUE_LOAD_AHEAD_TRACKS = 5;
+const EMPTY_PLAYLIST_QUEUE: FavoriteVideo[] = [];
 
 interface PlaylistItemProps {
   item: FavoriteVideo;
@@ -91,13 +92,14 @@ const PlaylistItem = memo(function PlaylistItem({
  */
 export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => {
   const t = useTheme();
-  const queue = usePlayerStore((s) => s.queue);
-  const currentBvid = usePlayerStore((s) => s.currentBvid);
-  const playContext = usePlayerStore((s) => s.playContext);
+  // 面板关闭时返回稳定的空值，避免全局队列变化让隐藏的 FlatList 反复重渲染。
+  const queue = usePlayerStore((s) => visible ? s.queue : EMPTY_PLAYLIST_QUEUE);
+  const currentBvid = usePlayerStore((s) => visible ? s.currentBvid : null);
+  const playContext = usePlayerStore((s) => visible ? s.playContext : null);
   const appendQueue = usePlayerStore((s) => s.appendQueue);
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
-  const queueLoading = usePlayerStore((s) => s.queueLoading);
-  const playMode = usePlayerStore((s) => s.playMode);
+  const queueLoading = usePlayerStore((s) => visible && s.queueLoading);
+  const playMode = usePlayerStore((s) => visible ? s.playMode : 'sequential');
   const togglePlayMode = usePlayerStore((s) => s.togglePlayMode);
   const syncStatus = useSyncStore((s) => s.syncStatus);
   const [expandedBvid, setExpandedBvid] = useState<string | null>(null);
@@ -122,6 +124,8 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
 
   // 点击歌曲条目：立即跳转播放
   const handlePress = useCallback(async (bvid: string) => {
+    // 不等待解析或音量淡出完成，先让播放列表开始收起。
+    onClose();
     try {
       let played = false;
       try {
@@ -136,7 +140,6 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
         if (loaded === 0) throw new Error('歌曲暂时无法切换，请稍后重试');
       }
       usePlayerStore.getState().setCurrentBvid(bvid);
-      onClose();
     } catch (error) {
       const message = error instanceof Error ? error.message : '切换歌曲失败';
       if (Platform.OS === 'android') {

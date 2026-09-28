@@ -25,7 +25,7 @@ import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
-import { loadQueue, insertNext, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
+import { loadQueue, insertNext, resolveCurrentTrack } from '../services/trackPlayer';
 import { usePlayerStore } from '../store/playerStore';
 import { useProgressStore } from '../store/progressStore';
 import { prefetchAudioUrl } from '../services/dataPrefetcher';
@@ -118,6 +118,17 @@ const VideoItem = memo(function VideoItem({
   );
 });
 // ========== Item 组件结束 ==========
+
+function showQueueStartError(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  if (Platform.OS === 'android') {
+    ToastAndroid.show(message, ToastAndroid.SHORT);
+  } else {
+    Alert.alert('播放错误', message);
+  }
+  usePlayerStore.getState().setQueueLoading(false);
+  usePlayerStore.getState().setResolving(false);
+}
 
 export const VideosScreen = ({ route, navigation }: any) => {
   const t = useTheme();
@@ -269,6 +280,10 @@ export const VideosScreen = ({ route, navigation }: any) => {
       // Promise 去重（cache.ts）确保后续 resolveCurrentTrack 的 getInfo 调用
       // 直接复用此 Promise，而非发起第二次网络请求。
       prefetchAudioUrl(target.bvid, target.parts?.[0]?.cid).catch(() => {});
+      const previousTarget = idx > 0 ? displayedList[idx - 1] : undefined;
+      if (previousTarget) {
+        prefetchAudioUrl(previousTarget.bvid, previousTarget.parts?.[0]?.cid).catch(() => {});
+      }
       // ↑ fire-and-forget，不阻塞主流程，网络请求在后台与 Bridge 并行执行
 
       // 【关键修复】立即导航，不等待 loadQueue Bridge 调用完成
@@ -276,27 +291,19 @@ export const VideosScreen = ({ route, navigation }: any) => {
       // 在 TrackPlayer 还未就绪时显示歌曲信息，避免"未播放"闪烁
       navigation.navigate('Player');
 
-      // ======== 【P0动画优化】将高耗时 Bridge 操作延迟到路由动画完成后执行 ========
-      // loadQueue（全量 reset + addTracksBatched + skip）和 playWithIntent
-      // 都是 React Native Bridge 调用，在主线程上执行时会阻塞 JS 线程。
-      // 如果导航动画尚未完成，这些操作会抢占主线程导致丢帧卡顿。
-      // 使用 InteractionManager.runAfterInteractions 确保路由过渡动画
-      // 优先完成，再执行这些耗时操作。
-      InteractionManager.runAfterInteractions(async () => {
-        // loadQueue 不再内置 lazyResolve，仅建队列 + 跳转到目标索引
-        const version = await loadQueue(displayedList, target.bvid);
-
-        // 显式播放 + 主动解析：不再被动等待 PlaybackError 事件
-        await playWithIntent();
-
-        // ======== 【P0性能优化】主动触发解析 ========
-        // 主动调用 resolveCurrentTrack，直接触发 lazyResolve。
-        // lazyResolve 会先查 urlCache（预取结果可能已就绪），
-        // 若预取未完成则通过 Promise 去重复用预取的网络请求。
-        // 完全跳过 PlaybackError 事件的等待周期（通常 100-300ms），
-        // 从"等报错再处理"进化为"主动快速处理"。
-        resolveCurrentTrack(version).catch(() => {});
-
+      // 导航动画完成后再创建原生队列，避免队列操作和页面切换争用 JS 线程。
+      InteractionManager.runAfterInteractions(() => {
+        void (async () => {
+          try {
+            const version = await loadQueue(displayedList, target.bvid);
+            if (!version) {
+              throw new Error(usePlayerStore.getState().playbackError || '歌曲暂时无法播放');
+            }
+            resolveCurrentTrack(version).catch(() => {});
+          } catch (error) {
+            showQueueStartError(error, '播放失败');
+          }
+        })();
       });
     } catch (e: any) {
       const msg = e.message || '播放失败';
@@ -333,11 +340,18 @@ export const VideosScreen = ({ route, navigation }: any) => {
       prefetchAudioUrl(target.bvid, target.parts?.[0]?.cid).catch(() => {});
       navigation.navigate('Player');
       // 【P0动画优化】高耗时 Bridge 操作延迟到路由动画完成后执行
-      InteractionManager.runAfterInteractions(async () => {
-        const version = await loadQueue(currentList, target.bvid);
-        await playWithIntent();
-        resolveCurrentTrack(version).catch(() => {});
-
+      InteractionManager.runAfterInteractions(() => {
+        void (async () => {
+          try {
+            const version = await loadQueue(currentList, target.bvid);
+            if (!version) {
+              throw new Error(usePlayerStore.getState().playbackError || '歌曲暂时无法播放');
+            }
+            resolveCurrentTrack(version).catch(() => {});
+          } catch (error) {
+            showQueueStartError(error, '播放全部失败');
+          }
+        })();
       });
     } catch (e: any) {
       const msg = e.message || '播放全部失败';
@@ -380,10 +394,18 @@ export const VideosScreen = ({ route, navigation }: any) => {
       prefetchAudioUrl(target.bvid, target.parts?.[0]?.cid).catch(() => {});
       navigation.navigate('Player');
       // 【P0动画优化】高耗时 Bridge 操作延迟到路由动画完成后执行
-      InteractionManager.runAfterInteractions(async () => {
-        const version = await loadQueue(shuffled, target.bvid);
-        await playWithIntent();
-        resolveCurrentTrack(version).catch(() => {});
+      InteractionManager.runAfterInteractions(() => {
+        void (async () => {
+          try {
+            const version = await loadQueue(shuffled, target.bvid);
+            if (!version) {
+              throw new Error(usePlayerStore.getState().playbackError || '歌曲暂时无法播放');
+            }
+            resolveCurrentTrack(version).catch(() => {});
+          } catch (error) {
+            showQueueStartError(error, '随机播放失败');
+          }
+        })();
       });
     } catch (e: any) {
       const msg = e.message || '随机播放失败';

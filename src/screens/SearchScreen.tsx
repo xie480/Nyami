@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  InteractionManager,
   Modal,
   StatusBar,
   Text,
@@ -22,7 +23,8 @@ import {IconButton} from '../components/IconButton';
 import {favoriteService, loadGlobalIndexCache} from '../services/favoriteService';
 import {importedPlaylistService} from '../services/importedPlaylistService';
 import {fetchOnlineVideoSearchPage, sortOnlineVideoSearchResults} from '../services/onlineVideoSearchService';
-import {loadQueue, playWithIntent, resolveCurrentTrack} from '../services/trackPlayer';
+import {loadQueue, resolveCurrentTrack} from '../services/trackPlayer';
+import {prefetchAudioUrl} from '../services/dataPrefetcher';
 import {searchVideoToFavoriteVideo} from '../services/transformers';
 import {useAuthStore} from '../store/authStore';
 import {useImportedPlaylistStore} from '../store/importedPlaylistStore';
@@ -218,7 +220,7 @@ export const SearchScreen = ({navigation}: any) => {
     [onlineResults, sort],
   );
 
-  const playVideo = useCallback(async (video: FavoriteVideo) => {
+  const playVideo = useCallback((video: FavoriteVideo) => {
     try {
       const queue = mode === 'bilibili'
         ? sortedOnlineResults.map(searchVideoToFavoriteVideo)
@@ -242,10 +244,27 @@ export const SearchScreen = ({navigation}: any) => {
       setQueue(queue, video.bvid, playContext);
       usePlayerStore.getState().setResolving(true);
       useProgressStore.getState().resetProgress();
-      const revision = await loadQueue(queue, video.bvid);
-      await playWithIntent();
-      resolveCurrentTrack(revision).catch(() => {});
+      const selectedIndex = queue.findIndex(item => item.bvid === video.bvid);
+      prefetchAudioUrl(video.bvid, video.parts?.[0]?.cid).catch(() => {});
+      const previousVideo = selectedIndex > 0 ? queue[selectedIndex - 1] : undefined;
+      if (previousVideo) {
+        prefetchAudioUrl(previousVideo.bvid, previousVideo.parts?.[0]?.cid).catch(() => {});
+      }
       navigation.navigate('Player');
+      InteractionManager.runAfterInteractions(() => {
+        void (async () => {
+          try {
+            const revision = await loadQueue(queue, video.bvid);
+            if (!revision) {
+              throw new Error(usePlayerStore.getState().playbackError || '视频暂时无法播放');
+            }
+            resolveCurrentTrack(revision).catch(() => {});
+          } catch (playError) {
+            usePlayerStore.getState().setResolving(false);
+            Alert.alert('播放失败', playError instanceof Error ? playError.message : '视频暂时无法播放');
+          }
+        })();
+      });
     } catch (playError) {
       usePlayerStore.getState().setResolving(false);
       Alert.alert('播放失败', playError instanceof Error ? playError.message : '视频暂时无法播放');
