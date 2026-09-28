@@ -62,11 +62,6 @@ const MiniPlayerComponent: React.FC<MiniPlayerProps> = ({
     wrap: {
       borderTopWidth: isGlass ? 0 : t.isDark ? 0 : 0.5,
       borderTopColor: t.colors.divider,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 12,
-      shadowOffset: {width: 0, height: -2},
-      elevation: 6,
     },
     progress: {
       height: 2,
