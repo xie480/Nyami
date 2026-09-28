@@ -1,5 +1,5 @@
-import React, {useCallback} from 'react';
-import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {Animated, Platform, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useActiveTrack} from 'react-native-track-player';
 import {GlassView} from './GlassView';
@@ -53,10 +53,28 @@ const BottomNavigationBarComponent: React.FC<BottomNavigationBarProps> = ({
   );
   const hasActiveTrack = !!activeTrack;
   const activeTab = getActiveTab(currentRouteName);
+  const activeIndex = activeTab
+    ? NAV_ITEMS.findIndex(item => item.key === activeTab)
+    : -1;
+  const [navigationWidth, setNavigationWidth] = useState(0);
+  const indicatorTranslateX = useRef(new Animated.Value(0)).current;
+  const indicatorWidth = Math.max(
+    0,
+    (navigationWidth - 8) / NAV_ITEMS.length,
+  );
   const glassBackground = t.glass?.colors.glass.bg ??
     (t.isDark ? 'rgba(24,24,30,0.84)' : 'rgba(250,250,252,0.86)');
   const glassBorder = t.glass?.colors.glass.border ??
     (t.isDark ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.72)');
+
+  useEffect(() => {
+    if (activeIndex < 0 || indicatorWidth === 0) return;
+    Animated.timing(indicatorTranslateX, {
+      toValue: activeIndex * indicatorWidth,
+      duration: 240,
+      useNativeDriver: true,
+    }).start();
+  }, [activeIndex, indicatorTranslateX, indicatorWidth]);
 
   if (!currentRouteName || HIDDEN_DOCK_ROUTES.has(currentRouteName)) {
     return null;
@@ -98,7 +116,30 @@ const BottomNavigationBarComponent: React.FC<BottomNavigationBarProps> = ({
               flexDirection: 'row',
               alignItems: 'center',
               paddingHorizontal: 4,
-            }}>
+            }}
+            onLayout={event => setNavigationWidth(event.nativeEvent.layout.width)}>
+            {activeIndex >= 0 && indicatorWidth > 0 && (
+              <Animated.View
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  left: 4,
+                  top: 4,
+                  bottom: 4,
+                  width: indicatorWidth,
+                  borderRadius: 27,
+                  backgroundColor: t.isDark
+                    ? 'rgba(255,255,255,0.12)'
+                    : 'rgba(0,0,0,0.055)',
+                  shadowColor: t.colors.primary,
+                  shadowOffset: {width: 0, height: 2},
+                  shadowOpacity: 0.2,
+                  shadowRadius: 8,
+                  elevation: Platform.OS === 'android' ? 3 : 0,
+                  transform: [{translateX: indicatorTranslateX}],
+                }}
+              />
+            )}
             {NAV_ITEMS.map(item => {
               const selected = item.key === activeTab;
               const disabled = !item.route;
@@ -123,9 +164,7 @@ const BottomNavigationBarComponent: React.FC<BottomNavigationBarProps> = ({
                     alignItems: 'center',
                     justifyContent: 'center',
                     borderRadius: 27,
-                    backgroundColor: selected
-                      ? t.isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.055)'
-                      : 'transparent',
+                    backgroundColor: 'transparent',
                     opacity: disabled ? 0.58 : 1,
                   }}>
                   <Icon name={item.icon} size={22} color={tintColor} />
