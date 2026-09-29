@@ -29,7 +29,6 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {IconButton} from '../components/IconButton';
 import {FavoriteFolderPickerSheet} from '../components/FavoriteFolderPickerSheet';
 import {ProgressBar} from '../components/ProgressBar';
-import {Switch} from '../components/Switch';
 import {AlbumBackground} from '../components/player/AlbumBackground';
 import {PlaybackControls} from '../components/player/PlaybackControls';
 import {PlayerActionPanel} from '../components/player/PlayerActionPanel';
@@ -200,8 +199,7 @@ export const PlayerScreen = () => {
     0,
     screenHeight - statusBarHeight - insets.bottom,
   );
-  const reservedHeight =
-    (isPersonalized ? 382 : 348) + AUDIO_REACTIVE_RING_LAYOUT_GROWTH;
+  const reservedHeight = 348 + AUDIO_REACTIVE_RING_LAYOUT_GROWTH;
   const recordSize = Math.max(
     154,
     Math.min(screenWidth * 0.74, (availableHeight - reservedHeight) * 0.73),
@@ -359,38 +357,6 @@ export const PlayerScreen = () => {
           />
         </View>
 
-        {isPersonalized ? (
-          <View style={styles.personalizedRow}>
-            <View style={styles.personalizedCopy}>
-              <Text
-                style={[
-                  styles.personalizedTitle,
-                  {color: albumTheme.foreground},
-                ]}>
-                个性化推荐 · 无限预加载
-              </Text>
-              <Text
-                style={[
-                  styles.personalizedHint,
-                  {color: albumTheme.secondaryForeground},
-                ]}>
-                按当前画像持续补充队列
-              </Text>
-            </View>
-            <Text
-              style={[
-                styles.cacheLabel,
-                {color: albumTheme.secondaryForeground},
-              ]}>
-              缓存
-            </Text>
-            <Switch
-              value={cachePersonalizedRecommendations}
-              onValueChange={setCachePersonalizedRecommendations}
-            />
-          </View>
-        ) : null}
-
         {playbackError ? (
           <TouchableOpacity
             accessibilityRole="button"
@@ -436,11 +402,14 @@ export const PlayerScreen = () => {
 
       <PlayerMoreSheet
         visible={isMoreSheetVisible}
+        isPersonalized={isPersonalized}
+        cachePersonalizedRecommendations={cachePersonalizedRecommendations}
         blurAmount={playerArtworkBlurAmount}
         parts={currentVideo?.parts ?? []}
         bvid={currentVideo?.bvid}
         currentCid={currentCid}
         theme={albumTheme}
+        onTogglePersonalizedCaching={setCachePersonalizedRecommendations}
         onBlurAmountChange={setPlayerArtworkBlurAmount}
         onOpenBilibiliVideo={openCurrentVideoOnBilibili}
         onSelectPart={part => {
@@ -488,17 +457,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   progressSection: {marginTop: 5},
-  personalizedRow: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-    marginBottom: 2,
-  },
-  personalizedCopy: {flex: 1, minWidth: 0},
-  personalizedTitle: {fontSize: 11, fontWeight: '600'},
-  personalizedHint: {fontSize: 9, marginTop: 1},
-  cacheLabel: {fontSize: 10, marginHorizontal: 6},
   playbackError: {paddingVertical: 4, alignItems: 'center'},
   playbackErrorText: {color: '#FFE0DC', fontSize: 12, textAlign: 'center'},
 });

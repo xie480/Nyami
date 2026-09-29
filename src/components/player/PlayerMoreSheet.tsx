@@ -11,6 +11,7 @@ import {
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Slider} from '../Slider';
+import {Switch} from '../Switch';
 import {useTheme} from '../../theme';
 import {PLAYER_ARTWORK_BLUR} from '../../store/settingsStore';
 import {AlbumTheme} from '../../utils/albumTheme';
@@ -19,11 +20,14 @@ import type {VideoPart} from '../../types/domain';
 
 interface Props {
   visible: boolean;
+  isPersonalized: boolean;
+  cachePersonalizedRecommendations: boolean;
   blurAmount: number;
   parts: VideoPart[];
   bvid: string | null | undefined;
   currentCid: number | null;
   theme: AlbumTheme;
+  onTogglePersonalizedCaching: (enabled: boolean) => void;
   onBlurAmountChange: (value: number) => void;
   onOpenBilibiliVideo: () => void;
   onSelectPart: (part: VideoPart) => void;
@@ -32,11 +36,14 @@ interface Props {
 
 export const PlayerMoreSheet: React.FC<Props> = ({
   visible,
+  isPersonalized,
+  cachePersonalizedRecommendations,
   blurAmount,
   parts,
   bvid,
   currentCid,
   theme,
+  onTogglePersonalizedCaching,
   onBlurAmountChange,
   onOpenBilibiliVideo,
   onSelectPart,
@@ -82,6 +89,34 @@ export const PlayerMoreSheet: React.FC<Props> = ({
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.content}>
+            {isPersonalized ? (
+              <View style={[styles.personalizedSetting, {borderColor: t.colors.divider}]}>
+                <View
+                  style={[
+                    styles.sectionIcon,
+                    {backgroundColor: `${theme.primaryAccent}18`},
+                  ]}>
+                  <MaterialCommunityIcons
+                    name="creation"
+                    size={20}
+                    color={theme.primaryAccent}
+                  />
+                </View>
+                <View style={styles.sectionCopy}>
+                  <Text style={[styles.sectionTitle, {color: t.colors.text}]}>
+                    个性化推荐 · 无限预加载
+                  </Text>
+                  <Text style={[styles.caption, {color: t.colors.textSub}]}>
+                    按当前画像持续补充队列并缓存
+                  </Text>
+                </View>
+                <Switch
+                  value={cachePersonalizedRecommendations}
+                  onValueChange={onTogglePersonalizedCaching}
+                />
+              </View>
+            ) : null}
+
             <View style={styles.sectionHeading}>
               <View style={styles.sectionIcon}>
                 <MaterialCommunityIcons
@@ -265,6 +300,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   content: {paddingHorizontal: 20, paddingBottom: 8},
+  personalizedSetting: {
+    minHeight: 66,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    paddingHorizontal: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+  },
   sectionHeading: {
     flexDirection: 'row',
     alignItems: 'center',
