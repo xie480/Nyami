@@ -1,5 +1,6 @@
 import React from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {ActivityIndicator, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {IconButton} from '../IconButton';
 import {AlbumTheme} from '../../utils/albumTheme';
 
@@ -8,6 +9,8 @@ interface Props {
   artist: string;
   theme: AlbumTheme;
   onFavorite?: () => void;
+  isFavorited?: boolean;
+  favoriteLoading?: boolean;
 }
 
 export const TrackInfo: React.FC<Props> = ({
@@ -15,6 +18,8 @@ export const TrackInfo: React.FC<Props> = ({
   artist,
   theme,
   onFavorite,
+  isFavorited = false,
+  favoriteLoading = false,
 }) => (
   <View style={styles.row}>
     <View style={styles.copy}>
@@ -32,14 +37,32 @@ export const TrackInfo: React.FC<Props> = ({
       </Text>
     </View>
     {onFavorite ? (
-      <IconButton
-        name="heart-outline"
-        size={25}
-        color={theme.foreground}
-        accessibilityLabel="收藏当前歌曲到收藏夹"
-        onPress={onFavorite}
-        style={styles.favorite}
-      />
+      isFavorited ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="已收藏，点击取消收藏当前歌曲"
+          accessibilityState={{disabled: favoriteLoading}}
+          disabled={favoriteLoading}
+          activeOpacity={0.72}
+          onPress={onFavorite}
+          style={styles.savedFavorite}>
+          {favoriteLoading ? (
+            <ActivityIndicator size="small" color={theme.primaryAccent} />
+          ) : (
+            <Icon name="heart" size={21} color={theme.primaryAccent} />
+          )}
+          <Text style={[styles.savedFavoriteLabel, {color: theme.foreground}]}>已收藏</Text>
+        </TouchableOpacity>
+      ) : (
+        <IconButton
+          name="heart-outline"
+          size={25}
+          color={theme.foreground}
+          accessibilityLabel="收藏当前歌曲到收藏夹"
+          onPress={onFavorite}
+          style={styles.favorite}
+        />
+      )
     ) : null}
   </View>
 );
@@ -69,4 +92,17 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.24)',
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
+  savedFavorite: {
+    minWidth: 88,
+    height: 42,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 21,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  savedFavoriteLabel: {fontSize: 12, fontWeight: '600', marginLeft: 5},
 });

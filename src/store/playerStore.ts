@@ -104,6 +104,7 @@ interface PlayerState {
   replaceQueueFromSearchRefresh: (refreshKey: string, videos: FavoriteVideo[]) => boolean;
   /** 在队列中更新特定视频的 parts 信息 */
   updateVideoParts: (bvid: string, parts: any[]) => void;
+  updateFavoriteFolderMembership: (bvid: string, folderId: number, included: boolean) => void;
 }
 
 export const usePlayerStore = create<PlayerState>()(
@@ -148,6 +149,19 @@ export const usePlayerStore = create<PlayerState>()(
         queue: state.queue.map(v => (v.bvid === bvid ? { ...v, parts } : v)),
         originalQueue: state.originalQueue.map(v => (v.bvid === bvid ? { ...v, parts } : v)),
       })),
+      updateFavoriteFolderMembership: (bvid, folderId, included) => {
+        const updateMembership = (video: FavoriteVideo): FavoriteVideo => {
+          if (video.bvid !== bvid) return video;
+          const folderIds = new Set(video.folderIds ?? []);
+          if (included) folderIds.add(folderId);
+          else folderIds.delete(folderId);
+          return {...video, folderIds: Array.from(folderIds)};
+        };
+        set(state => ({
+          queue: state.queue.map(updateMembership),
+          originalQueue: state.originalQueue.map(updateMembership),
+        }));
+      },
       setPlaybackError: (msg) => set({ playbackError: msg }),
       setPlayMode: (mode) => {
         playModeSwitchRevision += 1;

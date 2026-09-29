@@ -26,6 +26,7 @@ import {
   deletePlaylistAndVideos,
   getPlaylistVideoCount,
   getVideosByPlaylistId,
+  softDeleteVideoFromPlaylist,
 } from '../db/operations';
 import { Mutex } from '../utils/mutex';
 import { AuthRequiredError } from '../core/errors';
@@ -54,7 +55,11 @@ let globalIndexLoadGeneration = 0;
 const globalIndexRevisionListeners = new Set<(revision: number) => void>();
 
 export class FavoriteStateReadbackError extends Error {
-  constructor(message: string, public readonly causeValue?: unknown) {
+  constructor(
+    message: string,
+    public readonly causeValue?: unknown,
+    public readonly remoteConfirmed = false,
+  ) {
     super(message);
     this.name = 'FavoriteStateReadbackError';
   }
@@ -575,6 +580,75 @@ export const favoriteService = {
       );
     }
     return trimFolder(confirmedFolder);
+  },
+
+  /** 从当前账号的自有收藏夹取消单个视频，并以 B 站 fav_state 回读确认后更新本地索引。 */
+  async removeVideoFromFavoriteFolder(
+    uid: string,
+    bvid: string,
+    aid: number,
+    folderId: number,
+  ): Promise<void> {
+    await assertCurrentAccount(uid);
+    if (!bvid.trim()) throw new Error('视频 BVID 无效，无法取消收藏');
+    const folders = await this.getFolders(uid);
+    const targetFolder = folders.find(folder => folder.id === folderId);
+    if (!targetFolder || String(targetFolder.mid) !== uid) {
+      throw new Error('目标收藏夹已失效或不属于当前账号');
+    }
+
+    const resolvedAid = Number.isSafeInteger(aid) && aid > 0
+      ? aid
+      : (await biliApi.getVideoInfo(bvid)).aid ?? 0;
+    if (!Number.isSafeInteger(resolvedAid) || resolvedAid <= 0) {
+      throw new Error('无法确认视频 AID，未发送取消收藏请求');
+    }
+
+    let writeError: unknown = null;
+    try {
+      await biliApi.removeVideoFromFavoriteFolder(uid, resolvedAid, folderId);
+    } catch (error) {
+      writeError = error;
+    }
+
+    let folderList;
+    try {
+      await assertCurrentAccount(uid);
+      folderList = await biliApi.getFavoriteFolders(uid, undefined, resolvedAid);
+      await assertCurrentAccount(uid);
+    } catch (error) {
+      this.invalidateFolderList(uid);
+      throw new FavoriteStateReadbackError(
+        '取消收藏请求已发送，但 B 站状态回读失败；请刷新收藏夹确认。',
+        error,
+      );
+    }
+
+    const remoteFolders = folderList.list || [];
+    const confirmedFolder = remoteFolders.find(
+      folder => folder.id === folderId && String(folder.mid) === uid,
+    );
+    if (!confirmedFolder || confirmedFolder.fav_state !== 0) {
+      throw new FavoriteStateReadbackError(
+        writeError instanceof Error
+          ? `B 站尚未确认取消收藏：${writeError.message}`
+          : 'B 站尚未确认取消收藏，请刷新后重试。',
+        writeError,
+      );
+    }
+
+    cacheFolderSnapshot(uid, remoteFolders);
+    this.invalidateFolder(folderId);
+    try {
+      await softDeleteVideoFromPlaylist(String(folderId), bvid);
+      await loadGlobalIndexCache();
+    } catch (error) {
+      throw new FavoriteStateReadbackError(
+        `B 站已确认取消收藏，但本地索引更新失败：${error instanceof Error ? error.message : '未知错误'}`,
+        error,
+        true,
+      );
+    }
   },
 
   /** 写入 B 站收藏后按 AID 回读实际状态，并仅索引远端确认的目标目录。 */

@@ -10,6 +10,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
   useWindowDimensions,
@@ -46,11 +47,17 @@ import {
   skipToPrevious,
 } from '../services/trackPlayer';
 import {scheduleSleepTimer} from '../services/sleepTimer';
+import {
+  FavoriteStateReadbackError,
+  favoriteService,
+} from '../services/favoriteService';
 import {createBilibiliVideoUrl} from '../utils/bilibiliVideoUrl';
 import {useTheme} from '../theme';
 import {useAlbumTheme} from '../hooks/useAlbumTheme';
 import {useSettingsStore} from '../store/settingsStore';
 import {usePlayerStore} from '../store/playerStore';
+import {useFolderDataStore} from '../store/folderDataStore';
+import {useAuthStore} from '../store/authStore';
 import {useSyncStore} from '../store/syncStore';
 import {useProgressStore} from '../store/progressStore';
 import {useUIStore} from '../store/uiStore';
@@ -121,6 +128,13 @@ export const PlayerScreen = () => {
   const isPersonalized = usePlayerStore(
     state => !!state.playContext?.isPersonalized,
   );
+  const currentFolderId = usePlayerStore(
+    state => state.playContext?.folderId ?? null,
+  );
+  const updateFavoriteFolderMembership = usePlayerStore(
+    state => state.updateFavoriteFolderMembership,
+  );
+  const uid = useAuthStore(state => state.userId);
   const activeTrack = useActiveTrack();
   const playback = usePlaybackState();
 
@@ -128,6 +142,13 @@ export const PlayerScreen = () => {
   const [isSleepTimerSheetVisible, setIsSleepTimerSheetVisible] =
     useState(false);
   const [favoritePickerVisible, setFavoritePickerVisible] = useState(false);
+  const [folderFavoriteOverride, setFolderFavoriteOverride] = useState<{
+    bvid: string;
+    folderId: number;
+    included: boolean;
+  } | null>(null);
+  const [folderFavoriteLoading, setFolderFavoriteLoading] = useState(false);
+  const favoriteMutationRef = useRef(false);
   const [isReduceMotionEnabled, setIsReduceMotionEnabled] = useState(false);
   const [isAppActive, setIsAppActive] = useState(
     AppState.currentState === 'active',
@@ -144,6 +165,14 @@ export const PlayerScreen = () => {
       trackId ? state.queue.find(video => video.bvid === trackId) : undefined,
     ),
   );
+  const isLocalFavoriteFolderPlayback =
+    currentFolderId !== null && !isPersonalized;
+  const isSavedInCurrentFolder = isLocalFavoriteFolderPlayback && currentVideo
+    ? folderFavoriteOverride?.bvid === currentVideo.bvid &&
+      folderFavoriteOverride.folderId === currentFolderId
+      ? folderFavoriteOverride.included
+      : true
+    : false;
   const favoriteTarget = useMemo<OnlineVideoSearchResult | null>(() => {
     if (!currentVideo) {
       return null;
@@ -173,6 +202,90 @@ export const PlayerScreen = () => {
       Alert.alert('无法打开视频', '请检查设备是否可以打开 B 站视频链接。');
     }
   }, [currentVideoUrl]);
+
+  const handleLocalFolderFavorite = useCallback(async () => {
+    if (!currentVideo || currentFolderId === null || !uid) {
+      Alert.alert('需要登录', '请登录当前 B 站账号后管理收藏状态。');
+      return;
+    }
+    if (!isSavedInCurrentFolder) {
+      setFavoritePickerVisible(true);
+      return;
+    }
+    if (favoriteMutationRef.current) return;
+
+    const targetBvid = currentVideo.bvid;
+    const targetFolderId = currentFolderId;
+    favoriteMutationRef.current = true;
+    setFolderFavoriteLoading(true);
+    try {
+      await favoriteService.removeVideoFromFavoriteFolder(
+        uid,
+        targetBvid,
+        currentVideo.aid ?? 0,
+        targetFolderId,
+      );
+      useFolderDataStore.getState().removeVideoFromCurrentFolder(
+        targetFolderId,
+        targetBvid,
+      );
+      updateFavoriteFolderMembership(targetBvid, targetFolderId, false);
+      setFolderFavoriteOverride({
+        bvid: targetBvid,
+        folderId: targetFolderId,
+        included: false,
+      });
+      const message = '已从当前 B 站收藏夹取消收藏';
+      if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
+      else Alert.alert('已取消收藏', message);
+    } catch (error) {
+      if (error instanceof FavoriteStateReadbackError && error.remoteConfirmed) {
+        useFolderDataStore.getState().removeVideoFromCurrentFolder(
+          targetFolderId,
+          targetBvid,
+        );
+        updateFavoriteFolderMembership(targetBvid, targetFolderId, false);
+        setFolderFavoriteOverride({
+          bvid: targetBvid,
+          folderId: targetFolderId,
+          included: false,
+        });
+      } else {
+        setFolderFavoriteOverride({
+          bvid: targetBvid,
+          folderId: targetFolderId,
+          included: true,
+        });
+      }
+      const message = error instanceof Error ? error.message : '取消收藏失败';
+      if (error instanceof FavoriteStateReadbackError && error.remoteConfirmed) {
+        const confirmedMessage = `${message}。B 站已完成修改，请刷新播放列表校准本地数据。`;
+        if (Platform.OS === 'android') ToastAndroid.show(confirmedMessage, ToastAndroid.LONG);
+        else Alert.alert('B 站已取消收藏', confirmedMessage);
+      } else if (Platform.OS === 'android') {
+        ToastAndroid.show(message, ToastAndroid.LONG);
+      } else {
+        Alert.alert('取消收藏失败', message);
+      }
+    } finally {
+      favoriteMutationRef.current = false;
+      setFolderFavoriteLoading(false);
+    }
+  }, [currentFolderId, currentVideo, isSavedInCurrentFolder, uid, updateFavoriteFolderMembership]);
+
+  const handleFavoritePickerSaved = useCallback((folderIds: number[]) => {
+    if (!currentVideo) return;
+    for (const folderId of folderIds) {
+      updateFavoriteFolderMembership(currentVideo.bvid, folderId, true);
+    }
+    if (currentFolderId !== null && folderIds.includes(currentFolderId)) {
+      setFolderFavoriteOverride({
+        bvid: currentVideo.bvid,
+        folderId: currentFolderId,
+        included: true,
+      });
+    }
+  }, [currentFolderId, currentVideo, updateFavoriteFolderMembership]);
 
   const artworkUri =
     typeof track?.artwork === 'string' ? track.artwork : undefined;
@@ -338,10 +451,14 @@ export const PlayerScreen = () => {
           artist={track.artist || '未知歌手'}
           theme={albumTheme}
           onFavorite={
-            isPersonalized && favoriteTarget
-              ? () => setFavoritePickerVisible(true)
-              : undefined
+            isLocalFavoriteFolderPlayback && currentVideo
+              ? handleLocalFolderFavorite
+              : isPersonalized && favoriteTarget
+                ? () => setFavoritePickerVisible(true)
+                : undefined
           }
+          isFavorited={isLocalFavoriteFolderPlayback && isSavedInCurrentFolder}
+          favoriteLoading={isLocalFavoriteFolderPlayback && folderFavoriteLoading}
         />
 
         <View style={styles.progressSection}>
@@ -424,6 +541,7 @@ export const PlayerScreen = () => {
       <FavoriteFolderPickerSheet
         visible={favoritePickerVisible}
         video={favoriteTarget}
+        onSaved={handleFavoritePickerSaved}
         onClose={() => setFavoritePickerVisible(false)}
       />
     </View>

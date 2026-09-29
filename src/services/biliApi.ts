@@ -183,6 +183,32 @@ export const biliApi = {
     );
   },
 
+  /** 从一个自有收藏夹取消单个视频收藏；是否成功由调用方回读 fav_state 确认。 */
+  async removeVideoFromFavoriteFolder(
+    expectedUid: string,
+    aid: number,
+    folderId: number,
+  ) {
+    if (!Number.isSafeInteger(aid) || aid <= 0) {
+      throw new Error('视频 AID 无效，无法取消收藏');
+    }
+    if (!Number.isSafeInteger(folderId) || folderId <= 0) {
+      throw new Error('收藏夹 ID 无效，无法取消收藏');
+    }
+    const {cookie, csrf} = await getWriteCredentials(expectedUid);
+    return biliPost<unknown>(
+      '/x/v3/fav/resource/deal',
+      encodeForm({
+        rid: aid,
+        type: 2,
+        add_media_ids: '',
+        del_media_ids: String(folderId),
+        csrf,
+      }),
+      {headers: {Cookie: cookie}},
+    );
+  },
+
   /** 获取当前账号收藏的他人收藏夹及视频合集目录（B 站网页端接口）。 */
   getCollectedPlaylists(
     upMid: string,

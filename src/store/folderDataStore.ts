@@ -31,6 +31,7 @@ interface FolderDataState {
   loadMore: () => Promise<void>;
   setSearchQuery: (query: string) => void;
   setSortOption: (option: SortOption) => void;
+  removeVideoFromCurrentFolder: (folderId: number, bvid: string) => void;
   getDisplayedList: () => FavoriteVideo[];
   /**
    * 增量刷新当前收藏夹，并将远端重叠页中的最新元数据与新增视频合并到 list。
@@ -233,6 +234,11 @@ export const useFolderDataStore = create<FolderDataState>((set, get) => ({
 
   setSearchQuery: (query: string) => set({ searchQuery: query }),
   setSortOption: (option: SortOption) => set({ sortOption: option }),
+  removeVideoFromCurrentFolder: (folderId, bvid) => set(state =>
+    state.folderId === folderId
+      ? {list: state.list.filter(video => video.bvid !== bvid)}
+      : state,
+  ),
 
   getDisplayedList: () => {
     const { list, searchQuery, sortOption } = get();

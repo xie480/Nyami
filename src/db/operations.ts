@@ -378,6 +378,26 @@ export async function softDeleteMissingVideos(playlistId: string, remoteVideoIds
   });
 }
 
+/** 将单个视频从本地收藏夹索引中软删除，不影响它在其他收藏夹中的关系。 */
+export async function softDeleteVideoFromPlaylist(
+  playlistId: string,
+  videoId: string,
+): Promise<void> {
+  if (!playlistId || !videoId) return;
+  await database.write(async writer => {
+    const records = await videoMetaCollection.query(
+      Q.where('playlist_id', playlistId),
+      Q.where('video_id', videoId),
+      Q.where('is_deleted', false),
+    ).fetch();
+    if (records.length > 0) {
+      await writer.batch(...records.map(record => record.prepareUpdate(video => {
+        video.isDeleted = true;
+      })));
+    }
+  });
+}
+
 /**
  * 获取所有有效视频（未删除）
  */

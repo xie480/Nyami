@@ -23,6 +23,7 @@ interface FavoriteFolderPickerSheetProps {
   visible: boolean;
   video: OnlineVideoSearchResult | null;
   onClose: () => void;
+  onSaved?: (folderIds: number[]) => void;
 }
 
 /** 搜索与个性化播放共用的 B 站自有收藏夹选择、新建及写入弹层。 */
@@ -30,6 +31,7 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
   visible,
   video,
   onClose,
+  onSaved,
 }) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -118,6 +120,7 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
         );
         return;
       }
+      onSaved?.(result.confirmedFolderIds);
       onClose();
       const message = '已收藏到 B 站收藏夹';
       if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
@@ -127,7 +130,7 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
     } finally {
       setSaving(false);
     }
-  }, [onClose, saving, selectedIds, uid, video]);
+  }, [onClose, onSaved, saving, selectedIds, uid, video]);
 
   const toggleFolder = (folderId: number) => {
     setSelectedIds(current => current.includes(folderId)
