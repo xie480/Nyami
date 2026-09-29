@@ -122,11 +122,10 @@ export const DiscoverScreen = ({navigation}: any) => {
           {item.title}
         </Text>
       </TouchableOpacity>
-      <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 3}}>
-        <Text style={{flex: 1, minWidth: 0, fontSize: t.fontSize.xs, color: t.colors.textSub}} numberOfLines={1}>
+      <View style={{marginTop: 3}}>
+        <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub}} numberOfLines={1}>
           {item.ownerName || 'B 站 UP 主'} · {item.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹'}
         </Text>
-        <SubscribePlaylistButton source={item} compact />
       </View>
       <TouchableOpacity activeOpacity={0.82} onPress={() => openCollection(item)}>
         <Text style={{fontSize: t.fontSize.xs, lineHeight: 18, color: t.colors.textHint, marginTop: 5, minHeight: 36}} numberOfLines={2}>
@@ -140,6 +139,9 @@ export const DiscoverScreen = ({navigation}: any) => {
           ))}
         </View>
       </TouchableOpacity>
+      <View style={{alignItems: 'flex-end', marginTop: 2}}>
+        <SubscribePlaylistButton source={item} compact />
+      </View>
     </View>
   );
 

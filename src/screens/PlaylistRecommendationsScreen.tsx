@@ -133,7 +133,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
               </View>
             </View>
           </TouchableOpacity>
-          <View style={{flex: 1, minWidth: 0, marginLeft: t.spacing.md, paddingVertical: 3}}>
+          <View style={{flex: 1, minWidth: 0, marginLeft: t.spacing.md, paddingVertical: 3, justifyContent: 'space-between'}}>
             <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
               <TouchableOpacity
                 accessibilityRole="button"
@@ -146,15 +146,12 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
                 </Text>
                 <Icon name="chevron-right" size={21} color={t.colors.textHint} />
               </TouchableOpacity>
-              <View style={{marginLeft: t.spacing.xs}}>
-                <SubscribePlaylistButton source={source} compact />
-              </View>
             </View>
             <TouchableOpacity activeOpacity={0.8} onPress={() => openSource(source)}>
               <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 4}} numberOfLines={1}>
                 {source.ownerName || 'B 站 UP 主'} · {source.kind === 'subscribedSeason' ? '订阅合集' : '他人收藏夹'}
               </Text>
-              <Text style={{fontSize: t.fontSize.xs, lineHeight: 17, color: t.colors.textHint, marginTop: 5, flex: 1}} numberOfLines={3}>
+              <Text style={{fontSize: t.fontSize.xs, lineHeight: 17, color: t.colors.textHint, marginTop: 5}} numberOfLines={3}>
                 {source.description?.trim() || `B 站暂未提供简介 · 收录 ${source.mediaCount} 个视频`}
               </Text>
               <View style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 4}}>
@@ -165,6 +162,9 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
                 ))}
               </View>
             </TouchableOpacity>
+            <View style={{alignItems: 'flex-end', marginTop: t.spacing.xs}}>
+              <SubscribePlaylistButton source={source} compact />
+            </View>
           </View>
         </View>
       </GlassView>
