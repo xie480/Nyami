@@ -57,6 +57,8 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     refreshingCollectionsRef.current = false;
     setLoadingMore(false);
     setRefreshingCollections(false);
+    hasScrolledListRef.current = false;
+    canRefreshAtEndRef.current = true;
     setCollections(feed.collections);
     setHasMore(
       feed.collectionsHasMore ?? feed.collections.length >= config.recommendations.homePlaylistLimit,
@@ -110,6 +112,12 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     }
   }, [uid]);
 
+  const refreshAtEnd = useCallback(() => {
+    if (!uid || refreshingCollectionsRef.current || loadingMoreRef.current) return;
+    canRefreshAtEndRef.current = false;
+    void refreshCollections();
+  }, [refreshCollections, uid]);
+
   const handleListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const {contentOffset, contentSize, layoutMeasurement} = event.nativeEvent;
     if (contentOffset.y > 8) {
@@ -118,14 +126,16 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y;
     if (distanceFromEnd > 120) {
       canRefreshAtEndRef.current = true;
+      return;
     }
-  }, []);
-
-  const refreshAtEnd = useCallback(() => {
-    if (!uid || refreshingCollectionsRef.current || loadingMoreRef.current) return;
-    canRefreshAtEndRef.current = false;
-    void refreshCollections();
-  }, [refreshCollections, uid]);
+    if (
+      hasScrolledListRef.current &&
+      !hasMore &&
+      canRefreshAtEndRef.current
+    ) {
+      refreshAtEnd();
+    }
+  }, [hasMore, refreshAtEnd]);
 
   const loadMore = useCallback(async () => {
     if (!uid || refreshingCollectionsRef.current || !hasMore || loadingMoreRef.current) return;
@@ -324,7 +334,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
         onScroll={handleListScroll}
         scrollEventThrottle={16}
         onEndReached={handleEndReached}
-        onEndReachedThreshold={0.4}
+        onEndReachedThreshold={0.8}
         initialNumToRender={8}
         maxToRenderPerBatch={8}
         windowSize={7}

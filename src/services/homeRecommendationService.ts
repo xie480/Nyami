@@ -49,6 +49,10 @@ let cachedPersonalizationContext: {
   key: string;
   context: PersonalizationContext;
 } | null = null;
+let cachedTagProfile: {
+  key: string;
+  profile: TagProfile;
+} | null = null;
 
 function assertCurrentRecommendationAccount(uid: string) {
   if (!uid || useAuthStore.getState().userId !== uid) {
@@ -91,11 +95,14 @@ async function loadPersonalizationContext(
   const importedStore = useImportedPlaylistStore.getState();
   const hiddenFolderIds = [...new Set(settings.hiddenFolderIds)].sort((left, right) => left - right);
   const visibleSourceKeys = [...new Set(importedStore.visibleSourceKeysByUid[uid] ?? [])].sort();
-  const cacheKey = JSON.stringify([
+  const profileCacheKey = JSON.stringify([
     uid,
     getGlobalIndexRevision(),
     hiddenFolderIds,
     visibleSourceKeys,
+  ]);
+  const cacheKey = JSON.stringify([
+    profileCacheKey,
     importedSources.map(source => source.sourceKey).sort(),
   ]);
   if (cachedPersonalizationContext?.key === cacheKey) {
@@ -114,7 +121,15 @@ async function loadPersonalizationContext(
   const allFavoriteVideoTitles = Array.from(new Set(
     allFavoriteVideos.map(video => normalizeRecommendationTitleKey(video.title)).filter(Boolean),
   ));
-  const {profile} = await loadTagProfile(favorites, signal);
+  let profile = cachedTagProfile?.key === profileCacheKey
+    ? cachedTagProfile.profile
+    : null;
+  if (!profile) {
+    const loadedProfile = await loadTagProfile(favorites, signal);
+    if (signal.aborted) throw new Error('推荐刷新已取消');
+    profile = loadedProfile.profile;
+    cachedTagProfile = {key: profileCacheKey, profile};
+  }
   if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
   const context = {
