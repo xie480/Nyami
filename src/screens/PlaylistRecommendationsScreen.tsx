@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import type {NativeScrollEvent, NativeSyntheticEvent} from 'react-native';
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -36,6 +37,8 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
   const loadControllerRef = useRef<AbortController | null>(null);
+  const hasScrolledListRef = useRef(false);
+  const canRefreshAtEndRef = useRef(true);
 
   useEffect(() => {
     loadControllerRef.current?.abort();
@@ -60,6 +63,23 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     setLoadingMore(false);
     void refresh('manual');
   }, [refresh]);
+
+  const handleListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const {contentOffset, contentSize, layoutMeasurement} = event.nativeEvent;
+    if (contentOffset.y > 8) {
+      hasScrolledListRef.current = true;
+    }
+    const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    if (distanceFromEnd > 120) {
+      canRefreshAtEndRef.current = true;
+    }
+  }, []);
+
+  const refreshAtEnd = useCallback(() => {
+    if (!uid || refreshing || loadingMoreRef.current) return;
+    canRefreshAtEndRef.current = false;
+    refreshRecommendations();
+  }, [refreshRecommendations, refreshing, uid]);
 
   const loadMore = useCallback(async () => {
     if (!uid || refreshing || !hasMore || loadingMoreRef.current) return;
@@ -98,6 +118,16 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
       }
     }
   }, [collections, hasMore, refreshing, uid]);
+
+  const handleEndReached = useCallback(() => {
+    if (hasMore) {
+      void loadMore();
+      return;
+    }
+    if (hasScrolledListRef.current && canRefreshAtEndRef.current) {
+      refreshAtEnd();
+    }
+  }, [hasMore, loadMore, refreshAtEnd]);
 
   const openSource = useCallback((source: CollectionRecommendation) => {
     navigation.navigate('Videos', {
@@ -201,7 +231,16 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   ) : hasMore && collections.length > 0 ? (
     <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, textAlign: 'center', paddingVertical: t.spacing.lg}}>继续下滑加载更多合集</Text>
   ) : collections.length > 0 ? (
-    <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, textAlign: 'center', paddingVertical: t.spacing.lg}}>已经到底了</Text>
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel="检查新的合集推荐"
+      disabled={!uid || refreshing}
+      onPress={refreshAtEnd}
+      style={{alignItems: 'center', paddingVertical: t.spacing.lg}}>
+      <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, textAlign: 'center'}}>
+        {refreshing ? '正在检查新合集…' : '已经到底了 · 点击检查新合集'}
+      </Text>
+    </TouchableOpacity>
   ) : null;
 
   return (
@@ -236,8 +275,10 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
             tintColor={t.colors.primary}
           />
         )}
-        onEndReached={() => void loadMore()}
-        onEndReachedThreshold={1.2}
+        onScroll={handleListScroll}
+        scrollEventThrottle={16}
+        onEndReached={handleEndReached}
+        onEndReachedThreshold={0.4}
         initialNumToRender={8}
         maxToRenderPerBatch={8}
         windowSize={7}
