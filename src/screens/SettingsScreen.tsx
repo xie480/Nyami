@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, StatusBar, Image, Dimensions, Linking, Alert, Platform, ToastAndroid, TextInput, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { View, StatusBar, Image, Dimensions, Linking, Alert, Platform, ToastAndroid, TextInput, TouchableOpacity, InteractionManager } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   Text, ScrollView, StyleSheet,
@@ -30,6 +30,7 @@ import RNFS from 'react-native-fs';
 import { config } from '../config';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useShallow } from 'zustand/react/shallow';
 
 const QUALITY_OPTIONS: Array<{
   key: Quality;
@@ -55,6 +56,194 @@ const THEME_OPTIONS: Array<{ key: ThemeMode; title: string }> = [
 
 const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
 
+interface GlobalIndexSettingsSectionProps {
+  userId: string | null;
+  hiddenFolderIds: number[];
+  visibleSourceKeys: string[];
+  navigation: any;
+  showDialog: (title: string, message: string, actions?: any[]) => void;
+}
+
+const GlobalIndexSettingsSection = React.memo(({
+  userId,
+  hiddenFolderIds,
+  visibleSourceKeys,
+  navigation,
+  showDialog,
+}: GlobalIndexSettingsSectionProps) => {
+  const t = useTheme();
+  const {
+    syncStatus,
+    progressData,
+    syncError,
+    startSync,
+    abortSync,
+    resetSyncState,
+  } = useSyncStore(useShallow(state => ({
+    syncStatus: state.syncStatus,
+    progressData: state.progressData,
+    syncError: state.syncError,
+    startSync: state.startSync,
+    abortSync: state.abortSync,
+    resetSyncState: state.resetSyncState,
+  })));
+  const [globalIndexCount, setGlobalIndexCount] = useState<number | null>(null);
+  const syncProgressPercent = progressData && progressData.totalVideos > 0
+    ? Math.min(100, Math.round((progressData.processedVideos / progressData.totalVideos) * 100))
+    : 0;
+  const s = useMemo(() => StyleSheet.create({
+    section: {
+      fontSize: t.fontSize.sm,
+      color: t.colors.textSub,
+      marginTop: t.spacing.xl,
+      marginBottom: t.spacing.sm,
+      marginHorizontal: t.spacing.lg,
+    },
+    group: {
+      marginHorizontal: t.spacing.lg,
+      borderRadius: 22,
+      overflow: 'hidden',
+      backgroundColor: t.colors.surface,
+    },
+    separator: {
+      height: 0.5,
+      backgroundColor: t.colors.divider,
+      marginLeft: t.spacing.lg,
+    },
+  }), [t]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const currentStatus = useSyncStore.getState().syncStatus;
+      if (currentStatus === 'done' || currentStatus === 'error') {
+        resetSyncState();
+      }
+    }, [resetSyncState]),
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setGlobalIndexCount(null);
+    const task = InteractionManager.runAfterInteractions(() => {
+      favoriteService.getGlobalIndexYielding(
+        hiddenFolderIds,
+        visibleSourceKeys,
+        controller.signal,
+      ).then(videos => {
+        if (!controller.signal.aborted) {
+          setGlobalIndexCount(videos.length);
+        }
+      }).catch(() => {
+        // 页面离开或索引筛选被新参数取代时，旧请求会被取消。
+      });
+    });
+
+    return () => {
+      controller.abort();
+      task.cancel();
+    };
+  }, [hiddenFolderIds, visibleSourceKeys, syncStatus]);
+
+  const onSyncGlobalIndex = useCallback(() => {
+    if (!userId) {
+      showDialog('提示', '请先登录');
+      return;
+    }
+    void startSync(userId, hiddenFolderIds);
+  }, [hiddenFolderIds, showDialog, startSync, userId]);
+
+  return (
+    <>
+      <Text style={s.section}>全局索引</Text>
+      <View style={s.group}>
+        <ListItem
+          title="主页播放列表偏好"
+          subtitle="选择主页显示的自有收藏夹、他人收藏夹和订阅合集"
+          onPress={() => navigation.navigate('VisibleFolders')}
+          showArrow
+        />
+        <View style={s.separator} />
+        <ListItem
+          title="同步全局索引"
+          subtitle={
+            syncStatus === 'syncing'
+              ? progressData
+                ? `${progressData.completedTasks}/${progressData.totalTasks} 任务, ${progressData.processedVideos}/${progressData.totalVideos} 视频`
+                : '正在获取收藏夹列表...'
+              : syncStatus === 'error'
+              ? '同步失败，详情见下方'
+              : syncStatus === 'done'
+              ? !!progressData && progressData.totalTasks > 0 && progressData.skippedTasks === progressData.totalTasks
+                ? `索引已是最新 (${globalIndexCount ?? '…'} 个视频)`
+                : `同步完成 (${globalIndexCount ?? '…'}/${progressData?.totalVideos ?? globalIndexCount ?? '…'} 个视频)`
+              : globalIndexCount === null
+              ? '正在读取全局索引...'
+              : `当前已索引 ${globalIndexCount} 个视频`
+          }
+          onPress={syncStatus === 'syncing' ? undefined : onSyncGlobalIndex}
+          right={
+            <View style={{flexDirection: 'row', alignItems: 'center'}}>
+              <Button title="查看" variant="text" onPress={() => navigation.navigate('SyncDetails')} />
+              {syncStatus === 'syncing' ? (
+                <Button title="取消" variant="text" onPress={abortSync} />
+              ) : syncStatus === 'error' ? (
+                <Button title="重试" variant="text" onPress={onSyncGlobalIndex} />
+              ) : syncStatus === 'done' ? (
+                <Text style={{color: t.colors.success, fontSize: t.fontSize.base, marginLeft: t.spacing.sm}}>
+                  {!!progressData && progressData.totalTasks > 0 && progressData.skippedTasks === progressData.totalTasks ? '已是最新' : '已完成'}
+                </Text>
+              ) : (
+                <Text style={{color: t.colors.primary, fontSize: t.fontSize.base, marginLeft: t.spacing.sm}}>开始同步</Text>
+              )}
+            </View>
+          }
+        />
+        {syncStatus === 'error' && syncError && (
+          <View style={{paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md}}>
+            <Text style={{color: t.colors.error, fontSize: t.fontSize.sm}} numberOfLines={3}>
+              {syncError}
+            </Text>
+          </View>
+        )}
+        {syncStatus === 'syncing' && (
+          <View style={{marginHorizontal: t.spacing.lg, marginBottom: t.spacing.md, padding: t.spacing.md, borderRadius: 18, backgroundColor: t.colors.surfaceHigh}}>
+            <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+              <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                <Icon name="database-sync-outline" size={18} color={t.colors.primary} />
+                <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600', marginLeft: t.spacing.xs}}>索引同步进度</Text>
+              </View>
+              <Text style={{color: t.colors.primary, fontSize: t.fontSize.sm, fontWeight: '700'}}>{syncProgressPercent}%</Text>
+            </View>
+            <View style={{height: 8, marginTop: t.spacing.sm, borderRadius: 4, overflow: 'hidden', backgroundColor: t.colors.divider}}>
+              <LinearGradient
+                colors={[t.colors.primary, t.glass?.colors.accent.secondary ?? t.colors.primary]}
+                style={{height: '100%', width: `${syncProgressPercent}%`, borderRadius: 4}}
+              />
+            </View>
+            <View style={{flexDirection: 'row', marginTop: t.spacing.sm}}>
+              <View style={{flex: 1}}>
+                <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs}}>已处理视频</Text>
+                <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600', marginTop: 2}}>
+                  {progressData?.processedVideos ?? 0} / {progressData?.totalVideos ?? 0}
+                </Text>
+              </View>
+              <View style={{flex: 1}}>
+                <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs}}>完成任务</Text>
+                <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600', marginTop: 2}}>
+                  {progressData?.completedTasks ?? 0} / {progressData?.totalTasks ?? 0}
+                </Text>
+              </View>
+            </View>
+            <Text style={{color: t.colors.textHint, fontSize: 10, marginTop: t.spacing.sm}}>
+              B 站限流可能延长同步时间；建议在 Wi-Fi 环境完成。
+            </Text>
+          </View>
+        )}
+      </View>
+    </>
+  );
+});
+
 export const SettingsScreen = ({ navigation }: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -70,7 +259,33 @@ export const SettingsScreen = ({ navigation }: any) => {
     setMixWithOthers,
     setRecommendationDurationFilterEnabled, setRecommendationDurationLimitMinutes,
     setRecommendationTagBlacklist, setCachePersonalizedRecommendations,
-  } = useSettingsStore();
+  } = useSettingsStore(useShallow(state => ({
+    quality: state.quality,
+    autoCacheOnWifi: state.autoCacheOnWifi,
+    wifiOnly: state.wifiOnly,
+    hiddenFolderIds: state.hiddenFolderIds,
+    expandMultiPart: state.expandMultiPart,
+    themeMode: state.themeMode,
+    customBackgroundImage: state.customBackgroundImage,
+    glassBlurAmount: state.glassBlurAmount,
+    mixWithOthers: state.mixWithOthers,
+    recommendationDurationFilterEnabled: state.recommendationDurationFilterEnabled,
+    recommendationDurationLimitMinutes: state.recommendationDurationLimitMinutes,
+    recommendationTagBlacklist: state.recommendationTagBlacklist,
+    cachePersonalizedRecommendations: state.cachePersonalizedRecommendations,
+    setQuality: state.setQuality,
+    setAutoCacheOnWifi: state.setAutoCacheOnWifi,
+    setWifiOnly: state.setWifiOnly,
+    setExpandMultiPart: state.setExpandMultiPart,
+    setThemeMode: state.setThemeMode,
+    setCustomBackgroundImage: state.setCustomBackgroundImage,
+    setGlassBlurAmount: state.setGlassBlurAmount,
+    setMixWithOthers: state.setMixWithOthers,
+    setRecommendationDurationFilterEnabled: state.setRecommendationDurationFilterEnabled,
+    setRecommendationDurationLimitMinutes: state.setRecommendationDurationLimitMinutes,
+    setRecommendationTagBlacklist: state.setRecommendationTagBlacklist,
+    setCachePersonalizedRecommendations: state.setCachePersonalizedRecommendations,
+  })));
   // UID management moved to authStore (userId, userInfo)
 
   const isGlass = themeMode === 'glass-light' || themeMode === 'glass-dark';
@@ -79,11 +294,6 @@ export const SettingsScreen = ({ navigation }: any) => {
   const [cacheCount, setCacheCount] = useState(0);
   const [durationLimitInput, setDurationLimitInput] = useState(String(recommendationDurationLimitMinutes));
   const [blacklistImportInput, setBlacklistImportInput] = useState('');
-  const { syncStatus, progressData, syncError, startSync, abortSync, resetSyncState } = useSyncStore();
-  const [globalIndexCount, setGlobalIndexCount] = useState(0);
-  const syncProgressPercent = progressData && progressData.totalVideos > 0
-    ? Math.min(100, Math.round((progressData.processedVideos / progressData.totalVideos) * 100))
-    : 0;
 
   const [dialogConfig, setDialogConfig] = useState<{
     visible: boolean;
@@ -163,30 +373,15 @@ export const SettingsScreen = ({ navigation }: any) => {
     navigation.replace('Home');
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      const currentStatus = useSyncStore.getState().syncStatus;
-      if (currentStatus === 'done' || currentStatus === 'error') {
-        resetSyncState();
-      }
-    }, [resetSyncState])
-  );
-
   const refresh = useCallback(() => {
     setCacheSize(audioCache.getTotalSize());
     setCacheCount(audioCache.getCount());
   }, []);
 
   useEffect(() => {
-    refresh();
-    setGlobalIndexCount(favoriteService.getGlobalIndex(hiddenFolderIds, visibleSourceKeys).length);
-  }, [refresh, hiddenFolderIds, visibleSourceKeys]);
-
-  useEffect(() => {
-    if (syncStatus === 'done') {
-      setGlobalIndexCount(favoriteService.getGlobalIndex(hiddenFolderIds, visibleSourceKeys).length);
-    }
-  }, [syncStatus, hiddenFolderIds, visibleSourceKeys]);
+    const task = InteractionManager.runAfterInteractions(refresh);
+    return () => task.cancel();
+  }, [refresh]);
 
   const handlePickBackground = useCallback(async () => {
     try {
@@ -254,17 +449,7 @@ export const SettingsScreen = ({ navigation }: any) => {
     ]);
   };
 
-  const onSyncGlobalIndex = () => {
-    if (!userId) {
-      showDialog('提示', '请先登录');
-      return;
-    }
-    // 传入 hiddenFolderIds，仅同步用户选中的收藏夹
-    // 默认进行增量同步，除非需要强制全量同步，传入 force 参数为 true
-    void startSync(userId, hiddenFolderIds);
-  };
-
-  const s = StyleSheet.create({
+  const s = useMemo(() => StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background },
     section: {
       fontSize: t.fontSize.sm, color: t.colors.textSub,
@@ -289,7 +474,7 @@ export const SettingsScreen = ({ navigation }: any) => {
       fontSize: t.fontSize.base, textAlign: 'right',
     },
     danger: { color: t.colors.error, fontSize: t.fontSize.base },
-  });
+  }), [t]);
 
   return (
     <View style={s.container}>
@@ -379,90 +564,13 @@ export const SettingsScreen = ({ navigation }: any) => {
           </>
         )}
 
-               <Text style={s.section}>全局索引</Text>
-        <View style={s.group}>
-          <ListItem
-            title="主页播放列表偏好"
-            subtitle="选择主页显示的自有收藏夹、他人收藏夹和订阅合集"
-            onPress={() => navigation.navigate('VisibleFolders')}
-            showArrow
-          />
-          <View style={s.sep} />
-          <ListItem
-            title="同步全局索引"
-            subtitle={
-              syncStatus === 'syncing'
-                ? progressData
-                  ? `${progressData.completedTasks}/${progressData.totalTasks} 任务, ${progressData.processedVideos}/${progressData.totalVideos} 视频`
-                  : '正在获取收藏夹列表...'
-                : syncStatus === 'error'
-                ? '同步失败，详情见下方'
-                : syncStatus === 'done'
-                ? !!progressData && progressData.totalTasks > 0 && progressData.skippedTasks === progressData.totalTasks
-                  ? `索引已是最新 (${globalIndexCount} 个视频)`
-                  : `同步完成 (${globalIndexCount}/${progressData?.totalVideos ?? globalIndexCount} 个视频)`
-                : `当前已索引 ${globalIndexCount} 个视频`
-            }
-            onPress={syncStatus === 'syncing' ? undefined : onSyncGlobalIndex}
-            right={
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Button title="查看" variant="text" onPress={() => navigation.navigate('SyncDetails')} />
-                {syncStatus === 'syncing' ? (
-                  <Button title="取消" variant="text" onPress={abortSync} />
-                ) : syncStatus === 'error' ? (
-                  <Button title="重试" variant="text" onPress={onSyncGlobalIndex} />
-                ) : syncStatus === 'done' ? (
-                  <Text style={{ color: t.colors.success, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>
-                    {!!progressData && progressData.totalTasks > 0 && progressData.skippedTasks === progressData.totalTasks ? '已是最新' : '已完成'}
-                  </Text>
-                ) : (
-                  <Text style={{ color: t.colors.primary, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>开始同步</Text>
-                )}
-              </View>
-            }
-          />
-          {syncStatus === 'error' && syncError && (
-            <View style={{ paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md }}>
-              <Text style={{ color: t.colors.error, fontSize: t.fontSize.sm }} numberOfLines={3}>
-                {syncError}
-              </Text>
-            </View>
-          )}
-          {syncStatus === 'syncing' && (
-            <View style={{marginHorizontal: t.spacing.lg, marginBottom: t.spacing.md, padding: t.spacing.md, borderRadius: 18, backgroundColor: t.colors.surfaceHigh}}>
-              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
-                <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                  <Icon name="database-sync-outline" size={18} color={t.colors.primary} />
-                  <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600', marginLeft: t.spacing.xs}}>索引同步进度</Text>
-                </View>
-                <Text style={{color: t.colors.primary, fontSize: t.fontSize.sm, fontWeight: '700'}}>{syncProgressPercent}%</Text>
-              </View>
-              <View style={{height: 8, marginTop: t.spacing.sm, borderRadius: 4, overflow: 'hidden', backgroundColor: t.colors.divider}}>
-                <LinearGradient
-                  colors={[t.colors.primary, t.glass?.colors.accent.secondary ?? t.colors.primary]}
-                  style={{height: '100%', width: `${syncProgressPercent}%`, borderRadius: 4}}
-                />
-              </View>
-              <View style={{flexDirection: 'row', marginTop: t.spacing.sm}}>
-                <View style={{flex: 1}}>
-                  <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs}}>已处理视频</Text>
-                  <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600', marginTop: 2}}>
-                    {progressData?.processedVideos ?? 0} / {progressData?.totalVideos ?? 0}
-                  </Text>
-                </View>
-                <View style={{flex: 1}}>
-                  <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs}}>完成任务</Text>
-                  <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600', marginTop: 2}}>
-                    {progressData?.completedTasks ?? 0} / {progressData?.totalTasks ?? 0}
-                  </Text>
-                </View>
-              </View>
-              <Text style={{color: t.colors.textHint, fontSize: 10, marginTop: t.spacing.sm}}>
-                B 站限流可能延长同步时间；建议在 Wi-Fi 环境完成。
-              </Text>
-            </View>
-          )}
-        </View>
+        <GlobalIndexSettingsSection
+          userId={userId}
+          hiddenFolderIds={hiddenFolderIds}
+          visibleSourceKeys={visibleSourceKeys}
+          navigation={navigation}
+          showDialog={showDialog}
+        />
 
         <Text style={s.section}>推荐</Text>
         <View style={s.group}>
