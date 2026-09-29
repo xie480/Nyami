@@ -49,6 +49,67 @@ interface HomePlaylistItem {
   source?: ImportedPlaylist;
 }
 
+interface PlaylistCoverThumbnailProps {
+  origin: HomePlaylistItem['origin'];
+  folderId?: number;
+  initialCover?: string;
+  uid: string | null;
+  onCoverResolved: (uid: string, folderId: number, cover: string) => void;
+}
+
+const PlaylistCoverThumbnail = React.memo<PlaylistCoverThumbnailProps>(
+  ({origin, folderId, initialCover, uid, onCoverResolved}) => {
+    const t = useTheme();
+
+    useEffect(() => {
+      if (origin !== 'owned' || !folderId || !uid || initialCover) {
+        return;
+      }
+      const controller = new AbortController();
+      favoriteService
+        .getFolderCoverPreview(folderId, controller.signal)
+        .then(cover => {
+          if (cover && !controller.signal.aborted) {
+            onCoverResolved(uid, folderId, cover);
+          }
+        })
+        .catch(() => {});
+      return () => controller.abort();
+    }, [folderId, initialCover, onCoverResolved, origin, uid]);
+
+    const iconName =
+      origin === 'subscribedSeason'
+        ? 'view-grid-outline'
+        : origin === 'collectedFavorite'
+          ? 'folder-heart-outline'
+          : 'folder-music-outline';
+
+    return (
+      <View
+        style={{
+          width: 74,
+          height: 74,
+          borderRadius: 17,
+          overflow: 'hidden',
+          backgroundColor: t.colors.primaryLight,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginRight: t.spacing.md,
+        }}>
+        {initialCover ? (
+          <FastImage
+            source={{uri: initialCover}}
+            style={{width: '100%', height: '100%'}}
+            resizeMode={FastImage.resizeMode.cover}
+          />
+        ) : (
+          <Icon name={iconName} size={29} color={t.colors.primary} />
+        )}
+      </View>
+    );
+  },
+);
+
 const EMPTY_IMPORTED_CATALOG: ImportedPlaylist[] = [];
 const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
 
@@ -70,6 +131,11 @@ export const FoldersScreen = ({ navigation }: any) => {
   const setImportedCatalog = useImportedPlaylistStore((s) => s.setCatalog);
   const setQueue = usePlayerStore((s) => s.setQueue);
   const [allFolders, setAllFolders] = useState<FavoriteFolder[] | null>(null);
+  const [loadedFoldersUid, setLoadedFoldersUid] = useState<string | null>(null);
+  const [folderCoverCache, setFolderCoverCache] = useState<{
+    uid: string | null;
+    covers: Record<number, string>;
+  }>({uid: null, covers: {}});
   const [, setGlobalIndexReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importedSyncError, setImportedSyncError] = useState<string | null>(null);
@@ -79,9 +145,13 @@ export const FoldersScreen = ({ navigation }: any) => {
   const isSyncing = syncStatus === 'syncing';
 
   // 根据用户偏好过滤出可见的收藏夹
-  const folders = allFolders
-    ? allFolders.filter((f) => !hiddenFolderIds.includes(f.id))
-    : null;
+  const folders = useMemo(
+    () =>
+      allFolders && loadedFoldersUid === uid
+        ? allFolders.filter(folder => !hiddenFolderIds.includes(folder.id))
+        : null,
+    [allFolders, hiddenFolderIds, loadedFoldersUid, uid],
+  );
 
   // 全局搜索关键字
   const [searchQuery, setSearchQuery] = useState('');
@@ -93,7 +163,7 @@ export const FoldersScreen = ({ navigation }: any) => {
   const [newFolderTitle, setNewFolderTitle] = useState('');
   const [newFolderIsPrivate, setNewFolderIsPrivate] = useState(true);
   const visibleImportedSources = importedCatalog.filter(source => visibleSourceKeys.includes(source.sourceKey));
-  const playlistItems: HomePlaylistItem[] | null = allFolders !== null || visibleImportedSources.length > 0
+  const playlistItems: HomePlaylistItem[] | null = folders !== null || visibleImportedSources.length > 0
     ? [
         ...(folders ?? []).map(folder => ({
           sourceKey: `ownedFavorite:${folder.id}`,
@@ -137,22 +207,30 @@ export const FoldersScreen = ({ navigation }: any) => {
     }
     return searchableGlobalIndex.filter(video => {
       const relatedFolderNames = [
-        ...(video.folderIds ?? []).map(folderId => allFolders?.find(folder => folder.id === folderId)?.title ?? ''),
+        ...(video.folderIds ?? []).map(folderId => folders?.find(folder => folder.id === folderId)?.title ?? ''),
         ...(video.sourceKeys ?? []).map(sourceKey => importedCatalog.find(source => source.sourceKey === sourceKey)?.title ?? ''),
       ];
       const searchableText = [video.title, video.upper?.name, ...relatedFolderNames].join(' ');
       return searchableText.toLowerCase().includes(normalizedSearchQuery);
     });
-  }, [allFolders, importedCatalog, isGlobalSearch, normalizedSearchQuery, searchableGlobalIndex]);
+  }, [folders, importedCatalog, isGlobalSearch, normalizedSearchQuery, searchableGlobalIndex]);
 
   const load = useCallback(
     async (force = false) => {
-      if (!uid) return;
+      if (!uid) {
+        setAllFolders(null);
+        setLoadedFoldersUid(null);
+        setRefreshing(false);
+        return;
+      }
       setError(null);
       setImportedSyncError(null);
       try {
         const data = await favoriteService.getFolders(uid, force);
-        setAllFolders(data);
+        if (useAuthStore.getState().userId === uid) {
+          setAllFolders(data);
+          setLoadedFoldersUid(uid);
+        }
       } catch (e: any) {
         setError(e.message || '加载失败');
       }
@@ -166,6 +244,26 @@ export const FoldersScreen = ({ navigation }: any) => {
     },
     [uid, setImportedCatalog]
   );
+
+  const saveFolderCover = useCallback(
+    (expectedUid: string, folderId: number, cover: string) => {
+      if (useAuthStore.getState().userId !== expectedUid) {
+        return;
+      }
+      setFolderCoverCache(current => ({
+        uid: expectedUid,
+        covers: {
+          ...(current.uid === expectedUid ? current.covers : {}),
+          [folderId]: cover,
+        },
+      }));
+    },
+    [],
+  );
+
+  useEffect(() => {
+    setFolderCoverCache({uid, covers: {}});
+  }, [uid]);
 
   useEffect(() => {
     load();
@@ -210,10 +308,11 @@ export const FoldersScreen = ({ navigation }: any) => {
         newFolderIsPrivate ? 1 : 0,
       );
       setNewFolderTitle('');
-      if (allFolders !== null) {
+      if (allFolders !== null && loadedFoldersUid === uid) {
         setAllFolders(previous => previous
           ? [...previous.filter(item => item.id !== folder.id), folder]
           : [folder]);
+        setLoadedFoldersUid(uid);
       }
       setCreateFolderVisible(false);
       const message = '收藏夹已创建';
@@ -439,7 +538,7 @@ export const FoldersScreen = ({ navigation }: any) => {
           ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}
           renderItem={({ item, index }) => {
             const folderTitle = item.folderIds
-              ?.map(folderId => allFolders?.find(folder => folder.id === folderId)?.title)
+              ?.map(folderId => folders?.find(folder => folder.id === folderId)?.title)
               .find(Boolean);
             const sourceTitle = item.sourceKeys
               ?.map(sourceKey => importedCatalog.find(source => source.sourceKey === sourceKey)?.title)
@@ -551,7 +650,12 @@ export const FoldersScreen = ({ navigation }: any) => {
             />
           }
           renderItem={({ item }) => {
-            const coverUri = item.source?.cover || visibleGlobalIndex.find(video => video.folderIds?.includes(item.id))?.cover;
+            const indexedCover = item.origin === 'owned'
+              ? visibleGlobalIndex.find(video => video.folderIds?.includes(item.id))?.cover
+              : undefined;
+            const coverUri = item.source?.cover ||
+              (folderCoverCache.uid === uid ? folderCoverCache.covers[item.id] : undefined) ||
+              indexedCover;
             const itemKind = item.origin === 'owned' ? '我创建' : item.origin === 'collectedFavorite' ? '他人收藏夹' : '订阅合集';
             return (
               <TouchableOpacity
@@ -581,13 +685,13 @@ export const FoldersScreen = ({ navigation }: any) => {
                     android: {elevation: isGlass ? 0 : 2},
                   }),
                 }}>
-              <View style={{width: 74, height: 74, borderRadius: 17, overflow: 'hidden', backgroundColor: t.colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginRight: t.spacing.md}}>
-                {coverUri ? (
-                  <FastImage source={{uri: coverUri}} style={{width: '100%', height: '100%'}} resizeMode={FastImage.resizeMode.cover} />
-                ) : (
-                  <Icon name={item.origin === 'subscribedSeason' ? 'view-grid-outline' : item.origin === 'collectedFavorite' ? 'folder-heart-outline' : 'folder-music-outline'} size={29} color={t.colors.primary} />
-                )}
-              </View>
+              <PlaylistCoverThumbnail
+                origin={item.origin}
+                folderId={item.origin === 'owned' ? item.id : undefined}
+                initialCover={coverUri}
+                uid={uid}
+                onCoverResolved={saveFolderCover}
+              />
               <View style={{flex: 1, minHeight: 60, justifyContent: 'center'}}>
                 <Text style={{fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '600'}} numberOfLines={1}>{item.title}</Text>
                 <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 5}} numberOfLines={1}>

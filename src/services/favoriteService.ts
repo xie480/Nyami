@@ -35,6 +35,7 @@ import type { VideoMeta } from '../db/models/VideoMeta';
 import { importedPlaylistService } from './importedPlaylistService';
 import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
 import {forEachInYieldingBatches} from '../utils/yielding';
+import {findFirstValidFavoriteCover} from '../utils/favoriteFolderCover';
 
 export interface SyncProgressEvent {
   completedTasks: number;
@@ -488,6 +489,21 @@ export const favoriteService = {
       },
       true,
     );
+  },
+
+  /** 仅读取收藏夹预览封面，不写入按 mediaId 缓存，避免跨账号复用预览数据。 */
+  async getFolderCoverPreview(
+    mediaId: number,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    if (!mediaId) {
+      return null;
+    }
+    const data = await biliApi.getFavoriteVideos(mediaId, 1, 20, signal);
+    if (signal?.aborted) {
+      return null;
+    }
+    return findFirstValidFavoriteCover(data.medias ?? []);
   },
 
   /** 失效某收藏夹的所有缓存（如用户主动刷新） */
