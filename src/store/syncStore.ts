@@ -58,7 +58,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         useImportedPlaylistStore.getState().visibleSourceKeysByUid[uid] ?? [];
       resumeFavoriteTagsBackfill(
         uid,
-        favoriteService.getGlobalIndex(hiddenFolderIds, visibleSourceKeys),
+        favoriteService.getGlobalIndexYielding(hiddenFolderIds, visibleSourceKeys),
       );
 
       // 异步执行同步任务，不阻塞 UI，传入 hiddenFolderIds 过滤隐藏的收藏夹

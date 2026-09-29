@@ -1,5 +1,6 @@
 import { cache } from '../core/cache';
 import { config } from '../config';
+import type {RequestPriority} from '../core/adaptiveRateLimit';
 import type {
   BiliCollectedPlaylist,
   BiliSeasonArchive,
@@ -66,6 +67,7 @@ export const importedPlaylistService = {
     uid: string,
     force = false,
     signal?: AbortSignal,
+    rateLimitPriority: RequestPriority = 'normal',
   ): Promise<ImportedPlaylist[]> {
     if (!uid.trim()) throw new Error('UID 不能为空');
     const cacheKey = `collectedPlaylists:${uid}`;
@@ -85,6 +87,7 @@ export const importedPlaylistService = {
             page,
             COLLECTED_PLAYLIST_PAGE_SIZE,
             signal,
+            rateLimitPriority,
           );
           const items = response.list ?? [];
           expectedCount = response.count ?? expectedCount;
@@ -118,6 +121,7 @@ export const importedPlaylistService = {
     page: number,
     force = false,
     signal?: AbortSignal,
+    rateLimitPriority: RequestPriority = 'normal',
   ): Promise<PageResult<FavoriteVideo>> {
     if (!source?.sourceKey || page < 1) throw new Error('播放列表来源无效');
     const cacheKey = `importedVideos:${source.sourceKey}:${page}`;
@@ -133,6 +137,7 @@ export const importedPlaylistService = {
             page,
             IMPORTED_VIDEO_PAGE_SIZE,
             signal,
+            rateLimitPriority,
           );
           const medias = response.medias ?? [];
           return {
@@ -149,6 +154,7 @@ export const importedPlaylistService = {
           page,
           IMPORTED_VIDEO_PAGE_SIZE,
           signal,
+          rateLimitPriority,
         );
         if (!Array.isArray(response.archives)) {
           throw new Error('B 站合集接口返回格式异常');

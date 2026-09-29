@@ -1,5 +1,6 @@
 import { biliApi } from './biliApi';
 import { cache } from '../core/cache';
+import type {RequestPriority} from '../core/adaptiveRateLimit';
 import { config } from '../config';
 import { trimFolder, trimFavoriteVideo } from './transformers';
 import { BiliApiError } from '../core/errors';
@@ -441,6 +442,7 @@ export const favoriteService = {
     uid: string,
     force = false,
     signal?: AbortSignal,
+    rateLimitPriority: RequestPriority = 'normal',
   ): Promise<FavoriteFolder[]> {
     if (!uid || !uid.trim()) {
       throw new Error('UID 不能为空');
@@ -451,7 +453,7 @@ export const favoriteService = {
       key,
       config.cacheTTL.folders,
       async () => {
-        const data = await biliApi.getFavoriteFolders(uid, signal);
+        const data = await biliApi.getFavoriteFolders(uid, signal, undefined, rateLimitPriority);
         return (data.list || []).map(trimFolder);
       },
       true, // 持久化
@@ -468,6 +470,7 @@ export const favoriteService = {
     ps = 20,
     force = false,
     signal?: AbortSignal,
+    rateLimitPriority: RequestPriority = 'normal',
   ): Promise<PageResult<FavoriteVideo>> {
     if (!mediaId) {
       throw new Error('收藏夹 ID 不能为空');
@@ -478,7 +481,7 @@ export const favoriteService = {
       key,
       config.cacheTTL.folderVideos,
       async () => {
-        const data = await biliApi.getFavoriteVideos(mediaId, pn, ps, signal);
+        const data = await biliApi.getFavoriteVideos(mediaId, pn, ps, signal, rateLimitPriority);
         return {
           list: (data.medias || [])
             .filter(m => m.attr === 0)
@@ -666,14 +669,19 @@ export const favoriteService = {
     await syncMutex.acquire();
     let indexMayHaveChanged = false;
     try {
-      const allFolders = await this.getFolders(uid, true, signal);
+      const allFolders = await this.getFolders(uid, true, signal, 'index');
       const folders = allFolders.filter(f => !hiddenFolderIds.includes(f.id));
       const importedStore = useImportedPlaylistStore.getState();
       const selectedSourceKeys = importedStore.visibleSourceKeysByUid[uid] ?? [];
       let selectedImportedSources: ImportedPlaylist[] = [];
       const failedPlaylists: string[] = [];
       if (selectedSourceKeys.length > 0) {
-        const latestCatalog = await importedPlaylistService.getCollectedPlaylists(uid, true, signal);
+        const latestCatalog = await importedPlaylistService.getCollectedPlaylists(
+          uid,
+          true,
+          signal,
+          'index',
+        );
         if (!signal?.aborted) {
           importedStore.setCatalog(uid, latestCatalog);
         }
@@ -720,9 +728,14 @@ export const favoriteService = {
       let completedTasks = 0;
       const totalTasks = syncTargets.length;
       let processedVideos = 0;
-      let baseProcessedVideos = 0;
+      const processedByTarget = new Array<number>(syncTargets.length).fill(0);
       const totalVideos = syncTargets.reduce((sum, target) => sum + target.mediaCount, 0);
       let skippedTasks = 0;
+
+      const updateTargetProgress = (targetIndex: number, value: number) => {
+        processedByTarget[targetIndex] = value;
+        processedVideos = processedByTarget.reduce((sum, count) => sum + count, 0);
+      };
 
       const reportProgress = () => {
         if (onProgress) {
@@ -738,162 +751,197 @@ export const favoriteService = {
 
       reportProgress();
 
-      for (const target of syncTargets) {
-        if (signal?.aborted) break;
-
-        const playlistId = target.playlistId;
-        let localMeta = await getPlaylistMeta(playlistId);
-        const remoteCountDecreased =
-          localMeta !== null && target.mediaCount < localMeta.remoteVideoCount;
-
-        // 1. 判断是否需要同步
-        let needSync = false;
-        if (force || !localMeta) {
-          needSync = true;
-        } else if (
-          localMeta.remoteVideoCount !== target.mediaCount ||
-          localMeta.syncCursor !== null ||
-          localMeta.needResync ||
-          localMeta.playlistSyncStatus === 'failed' ||
-          localMeta.playlistSyncStatus === 'running' // 上次崩溃
-        ) {
-          needSync = true;
-        }
-
-        if (!needSync) {
-          completedTasks++;
-          skippedTasks++;
-          baseProcessedVideos += target.mediaCount;
-          processedVideos = baseProcessedVideos;
-          reportProgress();
-          continue;
-        }
-
-        // 2. 初始化或更新 Meta
-        await upsertPlaylistMeta({
-          playlistId,
-          title: target.title,
-          remoteVideoCount: target.mediaCount,
-          playlistSyncStatus: 'syncing',
-          needResync: force ? true : (localMeta?.needResync || false),
-        });
-
-        localMeta = await getPlaylistMeta(playlistId);
-        if (!localMeta) continue;
-
-        // 3. 创建同步任务
-        const jobId = await createSyncJob(playlistId, null);
-
-        let page = 1;
-        // 断点续传：如果不是强制全量，且有游标，则从游标处继续
-        if (!force && !remoteCountDecreased && localMeta.syncCursor && localMeta.syncCursor.startsWith('page_')) {
-          const cursorPage = parseInt(localMeta.syncCursor.replace('page_', ''), 10);
-          if (!isNaN(cursorPage) && cursorPage > 0) {
-            page = cursorPage + 1; // 从下一页开始
+      let nextTargetIndex = 0;
+      let fatalAuthError: AuthRequiredError | null = null;
+      const syncNextTarget = async () => {
+        while (!signal?.aborted && !fatalAuthError) {
+          const targetIndex = nextTargetIndex++;
+          if (targetIndex >= syncTargets.length) {
+            return;
           }
-        }
+          const target = syncTargets[targetIndex];
+          const playlistId = target.playlistId;
+          let localMeta = await getPlaylistMeta(playlistId);
+          const remoteCountDecreased =
+            localMeta !== null && target.mediaCount < localMeta.remoteVideoCount;
 
-        let hasMore = true;
-        let isIncrementalDone = false;
-        const remoteVideoIds: string[] = [];
+          // 1. 判断是否需要同步
+          const needSync = force || !localMeta ||
+            localMeta.remoteVideoCount !== target.mediaCount ||
+            localMeta.syncCursor !== null ||
+            localMeta.needResync ||
+            localMeta.playlistSyncStatus === 'failed' ||
+            localMeta.playlistSyncStatus === 'running';
 
-        try {
-          while (hasMore && !isIncrementalDone && !signal?.aborted) {
-            const pageRes = target.kind === 'owned'
-              ? await this.getVideos(target.folder.id, page, 20, force, signal)
-              : await importedPlaylistService.getVideos(target.source, page, force, signal);
-            
-            if (pageRes.list.length === 0) {
-              hasMore = pageRes.hasMore || pageRes.rawCount === 20;
-              if (!hasMore) break;
-            }
-
-            const currentBvids = Array.from(new Set(pageRes.list.map(video => video.bvid)));
-            const existingBvids = new Set<string>();
-            if (!force && currentBvids.length > 0) {
-              const existingVideos = await videoMetaCollection.query(
-                Q.where('playlist_id', playlistId),
-                Q.where('video_id', Q.oneOf(currentBvids)),
-                Q.where('is_deleted', false),
-              ).fetch();
-              existingVideos.forEach(video => existingBvids.add(video.videoId));
-            }
-
-            const uniquePageBvids = new Set(currentBvids);
-            if (!force && !remoteCountDecreased && localMeta.localSyncedCount > 0 && page === 1) {
-              isIncrementalDone = existingBvids.size === uniquePageBvids.size && uniquePageBvids.size > 0;
-            } else if (!force && !remoteCountDecreased && localMeta.localSyncedCount > 0 && page > 1) {
-              isIncrementalDone = existingBvids.size > 0;
-            }
-
-            const videosToUpsert: FavoriteVideo[] = [];
-            const seenPageIds = new Set<string>();
-            for (const video of pageRes.list) {
-              remoteVideoIds.push(video.bvid);
-              if (seenPageIds.has(video.bvid)) continue;
-              seenPageIds.add(video.bvid);
-              if (force || !existingBvids.has(video.bvid)) {
-                videosToUpsert.push(video);
-              }
-            }
-
-            // 增量扫描只写本地未存在的视频；已删除记录不在 existingBvids 中，会被重新激活。
-            if (videosToUpsert.length > 0) {
-              await upsertVideosBatch(playlistId, videosToUpsert);
-              indexMayHaveChanged = true;
-              onVideosSynced?.(videosToUpsert);
-            }
-            
-            // 获取当前收藏夹的绝对有效视频数量
-            const absoluteSyncedCount = await getPlaylistVideoCount(playlistId);
-            
-            // 更新游标和进度（使用绝对数量）
-            await updatePlaylistSyncProgress(playlistId, `page_${page}`, absoluteSyncedCount);
-            
-            // 更新总进度
-            processedVideos = baseProcessedVideos + absoluteSyncedCount;
+          if (!needSync) {
+            completedTasks++;
+            skippedTasks++;
+            updateTargetProgress(targetIndex, target.mediaCount);
             reportProgress();
-
-            hasMore = pageRes.hasMore || pageRes.rawCount === 20;
-            page++;
+            continue;
           }
 
-          if (!signal?.aborted) {
-            // 4. 软删除（仅在全量拉取时执行）
-            if (force || (!isIncrementalDone && !hasMore)) {
-               await softDeleteMissingVideos(playlistId, remoteVideoIds);
-               indexMayHaveChanged = true;
+          // 2. 初始化或更新 Meta
+          await upsertPlaylistMeta({
+            playlistId,
+            title: target.title,
+            remoteVideoCount: target.mediaCount,
+            playlistSyncStatus: 'syncing',
+            needResync: force ? true : (localMeta?.needResync || false),
+          });
+
+          localMeta = await getPlaylistMeta(playlistId);
+          if (!localMeta) continue;
+
+          // 3. 创建同步任务
+          const jobId = await createSyncJob(playlistId, null);
+          let page = 1;
+          if (!force && !remoteCountDecreased && localMeta.syncCursor?.startsWith('page_')) {
+            const cursorPage = parseInt(localMeta.syncCursor.replace('page_', ''), 10);
+            if (!isNaN(cursorPage) && cursorPage > 0) {
+              page = cursorPage + 1;
+            }
+          }
+
+          let hasMore = true;
+          let isIncrementalDone = false;
+          const remoteVideoIds: string[] = [];
+
+          try {
+            while (
+              hasMore &&
+              !isIncrementalDone &&
+              !signal?.aborted &&
+              !fatalAuthError
+            ) {
+              const pageRes = target.kind === 'owned'
+                ? await this.getVideos(target.folder.id, page, 20, force, signal, 'index')
+                : await importedPlaylistService.getVideos(
+                    target.source,
+                    page,
+                    force,
+                    signal,
+                    'index',
+                  );
+              if (fatalAuthError) {
+                break;
+              }
+
+              if (pageRes.list.length === 0) {
+                hasMore = pageRes.hasMore || pageRes.rawCount === 20;
+                if (!hasMore) break;
+              }
+
+              const currentBvids = Array.from(new Set(pageRes.list.map(video => video.bvid)));
+              const existingBvids = new Set<string>();
+              if (!force && currentBvids.length > 0) {
+                const existingVideos = await videoMetaCollection.query(
+                  Q.where('playlist_id', playlistId),
+                  Q.where('video_id', Q.oneOf(currentBvids)),
+                  Q.where('is_deleted', false),
+                ).fetch();
+                existingVideos.forEach(video => existingBvids.add(video.videoId));
+              }
+
+              const uniquePageBvids = new Set(currentBvids);
+              if (!force && !remoteCountDecreased && localMeta.localSyncedCount > 0 && page === 1) {
+                isIncrementalDone = existingBvids.size === uniquePageBvids.size && uniquePageBvids.size > 0;
+              } else if (!force && !remoteCountDecreased && localMeta.localSyncedCount > 0 && page > 1) {
+                isIncrementalDone = existingBvids.size > 0;
+              }
+
+              const videosToUpsert: FavoriteVideo[] = [];
+              const seenPageIds = new Set<string>();
+              for (const video of pageRes.list) {
+                remoteVideoIds.push(video.bvid);
+                if (seenPageIds.has(video.bvid)) continue;
+                seenPageIds.add(video.bvid);
+                if (force || !existingBvids.has(video.bvid)) {
+                  videosToUpsert.push(video);
+                }
+              }
+
+              if (videosToUpsert.length > 0) {
+                await upsertVideosBatch(playlistId, videosToUpsert);
+                indexMayHaveChanged = true;
+                onVideosSynced?.(videosToUpsert);
+              }
+
+              const absoluteSyncedCount = await getPlaylistVideoCount(playlistId);
+              await updatePlaylistSyncProgress(playlistId, `page_${page}`, absoluteSyncedCount);
+              updateTargetProgress(targetIndex, absoluteSyncedCount);
+              reportProgress();
+
+              hasMore = pageRes.hasMore || pageRes.rawCount === 20;
+              page++;
             }
 
+            if (signal?.aborted || fatalAuthError) {
+              await finishSyncJob(jobId, 'cancelled');
+              await upsertPlaylistMeta({
+                playlistId,
+                remoteVideoCount: target.mediaCount,
+                playlistSyncStatus: 'idle',
+              });
+              return;
+            }
+
+            if (force || (!isIncrementalDone && !hasMore)) {
+              await softDeleteMissingVideos(playlistId, remoteVideoIds);
+              indexMayHaveChanged = true;
+            }
             await finishSyncJob(jobId, 'success');
             await markPlaylistSyncSuccess(playlistId);
-          } else {
-            await finishSyncJob(jobId, 'cancelled');
-            await upsertPlaylistMeta({ playlistId, remoteVideoCount: target.mediaCount, playlistSyncStatus: 'idle' });
-          }
+          } catch (err: any) {
+            if (signal?.aborted || fatalAuthError) {
+              await finishSyncJob(jobId, 'cancelled');
+              await upsertPlaylistMeta({
+                playlistId,
+                remoteVideoCount: target.mediaCount,
+                playlistSyncStatus: 'idle',
+              });
+              return;
+            }
 
-        } catch (err: any) {
-          if (signal?.aborted) {
-            await finishSyncJob(jobId, 'cancelled');
-            await upsertPlaylistMeta({ playlistId, remoteVideoCount: target.mediaCount, playlistSyncStatus: 'idle' });
-          } else {
             const errorMessage = err instanceof Error ? err.message : String(err);
-            LoggerService.warn('favoriteService', 'syncPlaylist', `播放列表 ${target.title} 同步异常:`, errorMessage);
+            LoggerService.warn(
+              'favoriteService',
+              'syncPlaylist',
+              `播放列表 ${target.title} 同步异常:`,
+              errorMessage,
+            );
             await finishSyncJob(jobId, 'failed', errorMessage);
-            await upsertPlaylistMeta({ playlistId, remoteVideoCount: target.mediaCount, playlistSyncStatus: 'failed' });
+            await upsertPlaylistMeta({
+              playlistId,
+              remoteVideoCount: target.mediaCount,
+              playlistSyncStatus: 'failed',
+            });
             failedPlaylists.push(`${target.title || target.playlistId}：${errorMessage}`);
             if (err instanceof AuthRequiredError) {
-              throw err;
+              fatalAuthError = err;
+              return;
             }
           }
-        }
 
-        if (signal?.aborted) break;
-        completedTasks++;
-        baseProcessedVideos += target.mediaCount;
-        processedVideos = baseProcessedVideos;
-        reportProgress();
-      }
+          if (signal?.aborted || fatalAuthError) return;
+          completedTasks++;
+          updateTargetProgress(targetIndex, target.mediaCount);
+          reportProgress();
+        }
+      };
+
+      const workerCount = Math.min(
+        config.favoriteSync.playlistConcurrency,
+        syncTargets.length,
+      );
+      const workerResults = await Promise.allSettled(
+        Array.from({length: workerCount}, () => syncNextTarget()),
+      );
+      if (fatalAuthError) throw fatalAuthError;
+      const unexpectedFailure = workerResults.find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
+      );
+      if (unexpectedFailure) throw unexpectedFailure.reason;
 
       if (failedPlaylists.length > 0) {
         const visibleFailures = failedPlaylists.slice(0, 3).join('；');

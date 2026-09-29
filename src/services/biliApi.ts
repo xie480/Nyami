@@ -1,5 +1,6 @@
 ﻿import {biliGet, biliPost} from '../core/http';
 import {encWbi, getWbiKeys} from '../core/wbi';
+import type {RequestPriority} from '../core/adaptiveRateLimit';
 import {cookieService} from './cookieService';
 import type {
   BiliFolder,
@@ -53,7 +54,12 @@ async function getWriteCredentials(expectedUid: string) {
 
 export const biliApi = {
   /** 获取用户全部收藏夹（后台静默请求，鉴权失败时不唤起 Webview 登录弹窗） */
-  getFavoriteFolders(upMid: string, signal?: AbortSignal, rid?: number) {
+  getFavoriteFolders(
+    upMid: string,
+    signal?: AbortSignal,
+    rid?: number,
+    rateLimitPriority: RequestPriority = 'normal',
+  ) {
     if (!upMid) {
       return Promise.reject(new Error('upMid 不能为空'));
     }
@@ -66,6 +72,7 @@ export const biliApi = {
       params,
       signal,
       silent: true,
+      rateLimitPriority,
     });
   },
 
@@ -114,7 +121,12 @@ export const biliApi = {
     }
     const tags = await biliGet<BiliVideoTag[]>(
       VIDEO_TAGS_ENDPOINT,
-      {params: {bvid: normalizedBvid}, signal, silent: true},
+      {
+        params: {bvid: normalizedBvid},
+        signal,
+        silent: true,
+        rateLimitPriority: 'background',
+      },
       1,
     );
     if (!Array.isArray(tags)) {
@@ -172,7 +184,13 @@ export const biliApi = {
   },
 
   /** 获取当前账号收藏的他人收藏夹及视频合集目录（B 站网页端接口）。 */
-  getCollectedPlaylists(upMid: string, pn = 1, ps = 50, signal?: AbortSignal) {
+  getCollectedPlaylists(
+    upMid: string,
+    pn = 1,
+    ps = 50,
+    signal?: AbortSignal,
+    rateLimitPriority: RequestPriority = 'normal',
+  ) {
     if (!upMid) {
       return Promise.reject(new Error('upMid 不能为空'));
     }
@@ -182,6 +200,7 @@ export const biliApi = {
         params: {up_mid: upMid, pn, ps, platform: 'web'},
         signal,
         silent: true,
+        rateLimitPriority,
       },
     );
   },
@@ -192,6 +211,7 @@ export const biliApi = {
     pn = 1,
     ps = 20,
     signal?: AbortSignal,
+    rateLimitPriority: RequestPriority = 'normal',
   ) {
     if (!mediaId) {
       return Promise.reject(new Error('mediaId 不能为空'));
@@ -211,6 +231,7 @@ export const biliApi = {
         {
           signal,
           silent: true,
+          rateLimitPriority,
         },
       );
     })();
@@ -223,6 +244,7 @@ export const biliApi = {
     pageNum = 1,
     pageSize = 20,
     signal?: AbortSignal,
+    rateLimitPriority: RequestPriority = 'normal',
   ) {
     if (!mid || !seasonId) {
       return Promise.reject(new Error('UP 主 UID 和合集 ID 不能为空'));
@@ -239,6 +261,7 @@ export const biliApi = {
         },
         signal,
         silent: true,
+        rateLimitPriority,
       },
     );
   },

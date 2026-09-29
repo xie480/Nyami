@@ -7,6 +7,7 @@ import {
 } from '../core/errors';
 import {getVideoTagCacheEntries, upsertVideoTagCacheBatch} from '../db/operations';
 import {biliApi} from './biliApi';
+import LoggerService from './LoggerService';
 import {trimSearchVideo, trimVideoTags} from './transformers';
 import {useAuthStore} from '../store/authStore';
 import {useSettingsStore} from '../store/settingsStore';
@@ -447,11 +448,12 @@ function enqueueFavoriteTagsBackfill(
   expectedUid: string,
   videos: FavoriteVideo[],
   taskEpoch: number,
+  alreadyUnique = false,
 ): void {
   if (backgroundBackfillPaused || taskEpoch !== backgroundBackfillEpoch) {
     return;
   }
-  const candidates = uniqueVideos(videos);
+  const candidates = alreadyUnique ? videos : uniqueVideos(videos);
   if (
     !expectedUid ||
     candidates.length === 0 ||
@@ -581,11 +583,25 @@ function enqueueFavoriteTagsBackfill(
 /** 解除暂停闸门并安排当前索引已有视频的标签回填。 */
 export function resumeFavoriteTagsBackfill(
   expectedUid: string,
-  videos: FavoriteVideo[],
+  videos: FavoriteVideo[] | Promise<FavoriteVideo[]>,
 ): void {
   backgroundBackfillPaused = false;
   backgroundBackfillEpoch += 1;
-  enqueueFavoriteTagsBackfill(expectedUid, videos, backgroundBackfillEpoch);
+  const taskEpoch = backgroundBackfillEpoch;
+  Promise.resolve(videos)
+    .then(async resolvedVideos => {
+      const candidates = await uniqueVideosYielding(resolvedVideos);
+      if (taskEpoch !== backgroundBackfillEpoch) return;
+      enqueueFavoriteTagsBackfill(expectedUid, candidates, taskEpoch, true);
+    })
+    .catch(error => {
+      LoggerService.warn(
+        'tagRecommendationService',
+        'resumeFavoriteTagsBackfill',
+        '无法准备后台标签回填队列:',
+        error,
+      );
+    });
 }
 
 /** 将新同步入库的视频追加到正在运行的标签回填队列。 */

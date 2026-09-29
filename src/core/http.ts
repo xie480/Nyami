@@ -2,6 +2,7 @@ import axios, {AxiosInstance, AxiosRequestConfig} from 'axios';
 import {config} from '../config';
 import {cookieService} from '../services';
 import {adaptiveBucket} from './adaptiveRateLimit';
+import type {RequestPriority} from './adaptiveRateLimit';
 import {
   AuthRequiredError,
   BiliApiError,
@@ -26,7 +27,13 @@ function createInstance(): AxiosInstance {
 
   // 请求拦截：限流 + 自动注入 Cookie（使用加密存储）
   ins.interceptors.request.use(async cfg => {
-    await adaptiveBucket.acquire();
+    const rateLimitPriority = (
+      cfg as typeof cfg & {rateLimitPriority?: RequestPriority}
+    ).rateLimitPriority;
+    await adaptiveBucket.acquire(
+      rateLimitPriority ?? 'normal',
+      cfg.signal as AbortSignal | undefined,
+    );
     const cookie = await cookieService.get();
     const headers = cfg.headers as any;
     const suppliedCookie =
@@ -73,7 +80,10 @@ function mapBusinessError(code: number, message: string): never {
  */
 export async function biliGet<T>(
   url: string,
-  options: AxiosRequestConfig & {silent?: boolean} = {},
+  options: AxiosRequestConfig & {
+    silent?: boolean;
+    rateLimitPriority?: RequestPriority;
+  } = {},
   retries = config.retry.maxAttempts,
 ): Promise<T> {
   let lastError: any;

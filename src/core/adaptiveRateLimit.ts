@@ -4,6 +4,23 @@ import { config } from '../config';
 interface Waiter {
   resolve: () => void;
   reject: (err: Error) => void;
+  priority: RequestPriority;
+  signal?: AbortSignal;
+  abortListener?: () => void;
+}
+
+export type RequestPriority = 'index' | 'normal' | 'background';
+
+const PRIORITY_ORDER: Record<RequestPriority, number> = {
+  index: 0,
+  normal: 1,
+  background: 2,
+};
+
+function createAbortError(): Error {
+  const error = new Error('请求已取消');
+  error.name = 'AbortError';
+  return error;
 }
 
 export class AdaptiveRateLimiter {
@@ -27,8 +44,17 @@ export class AdaptiveRateLimiter {
     this.lastRefill = Date.now();
   }
 
-  async acquire(): Promise<void> {
+  async acquire(
+    priority: RequestPriority = 'normal',
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (signal?.aborted) {
+      throw createAbortError();
+    }
     this.refill();
+    if (signal?.aborted) {
+      throw createAbortError();
+    }
     if (this.tokens >= 1) {
       this.tokens -= 1;
       return;
@@ -37,9 +63,55 @@ export class AdaptiveRateLimiter {
     if (waitMs > 10000) {
       throw new RateLimitError('限流：请稍后再试');
     }
-    // 加入等待队列，由 refill 精准唤醒并扣除令牌，避免惊群效应
+    // 优先级内保持 FIFO；索引请求可越过尚未发出的标签回填请求。
     return new Promise((resolve, reject) => {
-      this.waitQueue.push({ resolve, reject });
+      const cleanup = () => {
+        if (signal && waiter.abortListener) {
+          signal.removeEventListener('abort', waiter.abortListener);
+        }
+      };
+      const waiter: Waiter = {
+        priority,
+        signal,
+        resolve: () => {
+          cleanup();
+          resolve();
+        },
+        reject: error => {
+          cleanup();
+          reject(error);
+        },
+      };
+      if (signal) {
+        waiter.abortListener = () => {
+          const index = this.waitQueue.indexOf(waiter);
+          if (index < 0) {
+            return;
+          }
+          this.waitQueue.splice(index, 1);
+          waiter.reject(createAbortError());
+          if (this.waitQueue.length === 0 && this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+          } else {
+            this.scheduleWake();
+          }
+        };
+        signal.addEventListener('abort', waiter.abortListener, {once: true});
+      }
+
+      const insertAt = this.waitQueue.findIndex(
+        queued => PRIORITY_ORDER[queued.priority] > PRIORITY_ORDER[priority],
+      );
+      if (insertAt < 0) {
+        this.waitQueue.push(waiter);
+      } else {
+        this.waitQueue.splice(insertAt, 0, waiter);
+      }
+      if (signal?.aborted) {
+        waiter.abortListener?.();
+        return;
+      }
       this.scheduleWake();
     });
   }
@@ -77,6 +149,10 @@ export class AdaptiveRateLimiter {
   private tryWake() {
     while (this.waitQueue.length > 0 && this.tokens >= 1) {
       const waiter = this.waitQueue.shift()!;
+      if (waiter.signal?.aborted) {
+        waiter.reject(createAbortError());
+        continue;
+      }
       this.tokens -= 1; // 确保被唤醒的请求消耗令牌，维持并发上限
       waiter.resolve();
     }

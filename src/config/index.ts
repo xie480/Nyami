@@ -24,12 +24,17 @@
     cacheQueryChunkSize: 500,
     maxProfileTags: 5,
     searchConcurrency: 5,
-    backfillBatchSize: 24,
-    backfillConcurrency: 12,
+    backfillBatchSize: 32,
+    backfillConcurrency: 16,
     maxRecommendations: 30,
     musicTid: 3,
     transientRetryDelayMs: 30 * 60 * 1000,
     unavailableRetryDelayMs: 24 * 60 * 60 * 1000,
+  },
+
+  /** 全局索引同步参数；列表间并行，单个列表仍按页顺序续传。 */
+  favoriteSync: {
+    playlistConcurrency: 3,
   },
 
   /** 首页推荐和搜索的产品边界值。 */
