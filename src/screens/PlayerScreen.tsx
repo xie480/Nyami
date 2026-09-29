@@ -47,7 +47,6 @@ import {
   skipToPrevious,
 } from '../services/trackPlayer';
 import {scheduleSleepTimer} from '../services/sleepTimer';
-import {formatDuration} from '../utils/format';
 import {createBilibiliVideoUrl} from '../utils/bilibiliVideoUrl';
 import {useTheme} from '../theme';
 import {useAlbumTheme} from '../hooks/useAlbumTheme';
@@ -130,7 +129,6 @@ export const PlayerScreen = () => {
   const [isSleepTimerSheetVisible, setIsSleepTimerSheetVisible] =
     useState(false);
   const [favoritePickerVisible, setFavoritePickerVisible] = useState(false);
-  const [dragPosition, setDragPosition] = useState<number | null>(null);
   const [isReduceMotionEnabled, setIsReduceMotionEnabled] = useState(false);
   const [isAppActive, setIsAppActive] = useState(
     AppState.currentState === 'active',
@@ -248,13 +246,9 @@ export const PlayerScreen = () => {
     return () => subscription.remove();
   }, []);
 
-  const onSeekStart = () => setDragPosition(progressPosition);
-  const onSeekUpdate = (progress: number) =>
-    setDragPosition(progress * seekDuration);
-  const onSeekEnd = (progress: number) => {
-    setDragPosition(null);
+  const onSeekEnd = useCallback((progress: number) => {
     TrackPlayer.seekTo(progress * seekDuration);
-  };
+  }, [seekDuration]);
 
   const onSetPlayMode = (mode: 'sequential' | 'shuffle') => {
     if (syncStatus !== 'syncing' && mode !== playMode) {
@@ -354,26 +348,15 @@ export const PlayerScreen = () => {
 
         <View style={styles.progressSection}>
           <ProgressBar
-            progress={duration > 0 ? progressPosition / duration : 0}
+            progress={seekDuration > 0 ? progressPosition / seekDuration : 0}
+            position={progressPosition}
+            duration={seekDuration}
             colors={[albumTheme.primaryAccent, albumTheme.secondaryAccent]}
             trackColor="rgba(255,255,255,0.34)"
             thumbColor={albumTheme.primaryAccent}
-            onSeekStart={onSeekStart}
-            onSeekUpdate={onSeekUpdate}
+            timeColor={albumTheme.secondaryForeground}
             onSeekEnd={onSeekEnd}
           />
-          <View style={styles.timeRow}>
-            <Text
-              style={[styles.time, {color: albumTheme.secondaryForeground}]}>
-              {formatDuration(
-                dragPosition !== null ? dragPosition : progressPosition,
-              )}
-            </Text>
-            <Text
-              style={[styles.time, {color: albumTheme.secondaryForeground}]}>
-              {formatDuration(duration)}
-            </Text>
-          </View>
         </View>
 
         {isPersonalized ? (
@@ -505,13 +488,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   progressSection: {marginTop: 5},
-  timeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: -3,
-  },
-  time: {fontSize: 12, fontWeight: '500', fontVariant: ['tabular-nums']},
   personalizedRow: {
     minHeight: 34,
     flexDirection: 'row',
