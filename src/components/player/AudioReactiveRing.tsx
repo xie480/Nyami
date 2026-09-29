@@ -86,47 +86,9 @@ export const AudioReactiveRing: React.FC<Props> = React.memo(
     const shouldAnimate = enabled && isPlaying && !reduceMotion;
     const {spectrum} = useSpectrumPoller(shouldAnimate);
     const [fallbackPhase, setFallbackPhase] = useState(0);
-    const [displayedSpectrum, setDisplayedSpectrum] = useState(EMPTY_SPECTRUM);
-    const displayedSpectrumRef = React.useRef(EMPTY_SPECTRUM);
     const [intensity, setIntensity] = useState(shouldAnimate ? 1 : 0);
     const intensityRef = React.useRef(intensity);
     const opacity = useSharedValue(0.78);
-
-    useEffect(() => {
-      if (Platform.OS !== 'android') {
-        return;
-      }
-      if (spectrum.length === 0) {
-        displayedSpectrumRef.current = EMPTY_SPECTRUM;
-        setDisplayedSpectrum(EMPTY_SPECTRUM);
-        return;
-      }
-
-      const from =
-        displayedSpectrumRef.current.length === spectrum.length
-          ? displayedSpectrumRef.current
-          : spectrum.map(() => 0);
-      const startedAt = Date.now();
-      let frame: number | undefined;
-      const interpolateSample = () => {
-        const progress = Math.min(1, (Date.now() - startedAt) / 80);
-        const next = spectrum.map(
-          (value, index) => from[index] + (value - from[index]) * progress,
-        );
-        displayedSpectrumRef.current = next;
-        setDisplayedSpectrum(next);
-        if (progress < 1) {
-          frame = requestAnimationFrame(interpolateSample);
-        }
-      };
-
-      frame = requestAnimationFrame(interpolateSample);
-      return () => {
-        if (frame !== undefined) {
-          cancelAnimationFrame(frame);
-        }
-      };
-    }, [spectrum]);
 
     useEffect(() => {
       const start = intensityRef.current;
@@ -180,10 +142,10 @@ export const AudioReactiveRing: React.FC<Props> = React.memo(
     );
     const displaySpectrum = useMemo(() => {
       if (Platform.OS === 'android') {
-        return displayedSpectrum;
+        return spectrum;
       }
       return shouldAnimate ? fallback : EMPTY_SPECTRUM;
-    }, [displayedSpectrum, fallback, shouldAnimate]);
+    }, [fallback, shouldAnimate, spectrum]);
     const ringSize = artworkSize + AUDIO_REACTIVE_RING_OUTSET * 2;
     const ringPath = useMemo(
       () => buildRingPath(displaySpectrum, ringSize, intensity),

@@ -43,6 +43,8 @@ export interface SpectrumData {
   catEarRight: number[];
 }
 
+const DEBUG_LOG_INTERVAL_MS = 10_000;
+
 /**
  * 对两个等长数组应用 EMA 平滑
  */
@@ -78,10 +80,13 @@ export function useSpectrumPoller(enabled: boolean = true): SpectrumData {
     catEarLeft: [],
     catEarRight: [],
   });
+  const pollInFlightRef = useRef(false);
+  const lastDebugLogAtRef = useRef(0);
 
   const poll = useCallback(async () => {
     // 仅在 Android 上有效
-    if (Platform.OS !== 'android') return;
+    if (Platform.OS !== 'android' || pollInFlightRef.current) return;
+    pollInFlightRef.current = true;
 
     try {
       const result = await audioDSP.getSpectrumData();
@@ -108,7 +113,9 @@ export function useSpectrumPoller(enabled: boolean = true): SpectrumData {
           catEarRight: smoothedRight,
         });
 
-        if (DEBUG) {
+        const now = Date.now();
+        if (DEBUG && now - lastDebugLogAtRef.current >= DEBUG_LOG_INTERVAL_MS) {
+          lastDebugLogAtRef.current = now;
           LoggerService.debug(
             'useSpectrumPoller',
             'poll',
@@ -116,13 +123,23 @@ export function useSpectrumPoller(enabled: boolean = true): SpectrumData {
             `left=${smoothedLeft.length} bins, right=${smoothedRight.length} bins`,
           );
         }
-      } else if (DEBUG) {
+      } else if (
+        DEBUG &&
+        Date.now() - lastDebugLogAtRef.current >= DEBUG_LOG_INTERVAL_MS
+      ) {
+        lastDebugLogAtRef.current = Date.now();
         LoggerService.warn('useSpectrumPoller', 'poll', 'Native getSpectrumData() returned empty data');
       }
     } catch (e) {
-      if (DEBUG) {
+      if (
+        DEBUG &&
+        Date.now() - lastDebugLogAtRef.current >= DEBUG_LOG_INTERVAL_MS
+      ) {
+        lastDebugLogAtRef.current = Date.now();
         LoggerService.warn('useSpectrumPoller', 'poll', 'Native module error:', e);
       }
+    } finally {
+      pollInFlightRef.current = false;
     }
   }, []);
 
