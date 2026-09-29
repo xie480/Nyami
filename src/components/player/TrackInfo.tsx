@@ -51,7 +51,6 @@ export const TrackInfo: React.FC<Props> = ({
           ) : (
             <Icon name="heart" size={21} color={theme.primaryAccent} />
           )}
-          <Text style={[styles.savedFavoriteLabel, {color: theme.foreground}]}>已收藏</Text>
         </TouchableOpacity>
       ) : (
         <IconButton
@@ -93,16 +92,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
   savedFavorite: {
-    minWidth: 88,
-    height: 42,
-    paddingHorizontal: 10,
+    width: 48,
+    height: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 21,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.24)',
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
-  savedFavoriteLabel: {fontSize: 12, fontWeight: '600', marginLeft: 5},
 });
