@@ -13,6 +13,7 @@ import type {
   VideoTag,
   VideoTagCacheEntry,
 } from '../types/domain';
+import {forEachInYieldingBatches, throwIfAborted} from '../utils/yielding';
 
 /**
  * 批量插入或更新视频记录（针对特定收藏夹）
@@ -283,13 +284,22 @@ export async function getAllValidVideos() {
 
 /** 按 BVID 分块读取本地 tag 缓存，避免大型收藏集超过 SQLite 参数数量限制。 */
 export async function getVideoTagCacheEntries(
-  videoIds: string[],
+  videoIds: Iterable<string>,
+  signal?: AbortSignal,
 ): Promise<VideoTagCacheEntry[]> {
-  const uniqueIds = Array.from(new Set(videoIds.filter(Boolean)));
+  const uniqueIdSet = new Set<string>();
+  const uniqueIds: string[] = [];
+  await forEachInYieldingBatches(videoIds, videoId => {
+    if (videoId && !uniqueIdSet.has(videoId)) {
+      uniqueIdSet.add(videoId);
+      uniqueIds.push(videoId);
+    }
+  }, signal);
   const cachedRecords = [];
   const chunkSize = config.tagRecommendations.cacheQueryChunkSize;
 
   for (let start = 0; start < uniqueIds.length; start += chunkSize) {
+    throwIfAborted(signal);
     const chunk = uniqueIds.slice(start, start + chunkSize);
     const records = await videoTagCacheCollection
       .query(Q.where('video_id', Q.oneOf(chunk)))
@@ -297,7 +307,8 @@ export async function getVideoTagCacheEntries(
     cachedRecords.push(...records);
   }
 
-  return cachedRecords.map(record => {
+  const entries: VideoTagCacheEntry[] = [];
+  await forEachInYieldingBatches(cachedRecords, record => {
     let tags: VideoTag[] = [];
     let fetchedAt = record.fetchedAt;
     if (record.tagsJson) {
@@ -316,13 +327,14 @@ export async function getVideoTagCacheEntries(
         fetchedAt = null;
       }
     }
-    return {
+    entries.push({
       videoId: record.videoId,
       tags,
       fetchedAt,
       retryAfter: record.retryAfter,
-    };
-  });
+    });
+  }, signal);
+  return entries;
 }
 
 /** 批量插入或更新视频 tag 快照或重试时间。 */

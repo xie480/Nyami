@@ -114,7 +114,7 @@ async function loadPersonalizationContext(
   const allFavoriteVideoTitles = Array.from(new Set(
     allFavoriteVideos.map(video => normalizeRecommendationTitleKey(video.title)).filter(Boolean),
   ));
-  const {profile} = await loadTagProfile(favorites);
+  const {profile} = await loadTagProfile(favorites, signal);
   if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
   const context = {

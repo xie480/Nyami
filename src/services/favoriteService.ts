@@ -34,6 +34,7 @@ import LoggerService from './LoggerService';
 import type { VideoMeta } from '../db/models/VideoMeta';
 import { importedPlaylistService } from './importedPlaylistService';
 import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
+import {forEachInYieldingBatches} from '../utils/yielding';
 
 export interface SyncProgressEvent {
   completedTasks: number;
@@ -46,8 +47,9 @@ export interface SyncProgressEvent {
 // 内存缓存，用于同步读取全局索引（UI 层渲染时需同步获取）
 let globalIndexCache: FavoriteVideo[] = [];
 let globalIndexRevision = 0;
-let globalIndexSignature: string | null = null;
+let globalIndexMembership: Map<string, string> | null = null;
 let globalIndexLoadPromise: Promise<void> | null = null;
+let globalIndexLoadGeneration = 0;
 const globalIndexRevisionListeners = new Set<(revision: number) => void>();
 
 export class FavoriteStateReadbackError extends Error {
@@ -80,24 +82,56 @@ let visibleGlobalIndexSource: FavoriteVideo[] | null = null;
 let visibleGlobalIndexKey = '';
 let visibleGlobalIndexCache: FavoriteVideo[] = [];
 
-function getGlobalIndexSignature(videos: FavoriteVideo[]): string {
-  const membership = videos.map(video => [
-    video.bvid,
+function getVideoSourceMembership(video: FavoriteVideo): string {
+  return JSON.stringify([
     [...new Set(video.folderIds ?? [])].sort((left, right) => left - right),
     [...new Set(video.sourceKeys ?? [])].sort(),
-  ] as const);
-  membership.sort((left, right) => left[0].localeCompare(right[0]));
-  return JSON.stringify(membership);
+  ]);
 }
 
-function replaceGlobalIndexCache(videos: FavoriteVideo[]): void {
-  const nextSignature = getGlobalIndexSignature(videos);
-  const indexChanged = nextSignature !== globalIndexSignature;
+function getGlobalIndexMembership(
+  videos: FavoriteVideo[],
+): Map<string, string> {
+  const membership = new Map<string, string>();
+  for (const video of videos) {
+    membership.set(video.bvid, getVideoSourceMembership(video));
+  }
+  return membership;
+}
+
+async function getGlobalIndexMembershipYielding(
+  videos: FavoriteVideo[],
+): Promise<Map<string, string>> {
+  const membership = new Map<string, string>();
+  await forEachInYieldingBatches(videos, video => {
+    membership.set(video.bvid, getVideoSourceMembership(video));
+  });
+  return membership;
+}
+
+function hasGlobalIndexMembershipChanged(
+  nextMembership: Map<string, string>,
+): boolean {
+  if (!globalIndexMembership || globalIndexMembership.size !== nextMembership.size) {
+    return true;
+  }
+  for (const [bvid, membership] of nextMembership) {
+    if (globalIndexMembership.get(bvid) !== membership) return true;
+  }
+  return false;
+}
+
+function replaceGlobalIndexCache(
+  videos: FavoriteVideo[],
+  nextMembership = getGlobalIndexMembership(videos),
+): void {
+  globalIndexLoadGeneration += 1;
+  const indexChanged = hasGlobalIndexMembershipChanged(nextMembership);
   globalIndexCache = videos;
+  globalIndexMembership = nextMembership;
   visibleGlobalIndexSource = null;
   if (indexChanged) {
     globalIndexRevision += 1;
-    globalIndexSignature = nextSignature;
     globalIndexRevisionListeners.forEach(listener => {
       try {
         listener(globalIndexRevision);
@@ -159,6 +193,54 @@ function getVisibleGlobalIndex(
   return visibleGlobalIndexCache;
 }
 
+async function getVisibleGlobalIndexYielding(
+  hiddenFolderIds: number[] = [],
+  visibleSourceKeys: string[] = [],
+  signal?: AbortSignal,
+): Promise<FavoriteVideo[]> {
+  const hiddenIds = Array.from(new Set(hiddenFolderIds)).sort((a, b) => a - b);
+  const sourceKeys = Array.from(new Set(visibleSourceKeys)).sort();
+  const cacheKey = `folders:${hiddenIds.join(',')}|sources:${sourceKeys.join(',')}`;
+  const hiddenIdSet = new Set(hiddenIds);
+  const visibleSourceKeySet = new Set(sourceKeys);
+
+  while (true) {
+    const source = globalIndexCache;
+    if (visibleGlobalIndexSource === source && visibleGlobalIndexKey === cacheKey) {
+      return visibleGlobalIndexCache;
+    }
+
+    const visibleVideos: FavoriteVideo[] = [];
+    await forEachInYieldingBatches(
+      source,
+      video => {
+        const hasOwnedSource = !!video.folderIds?.length;
+        const hasImportedSource = !!video.sourceKeys?.length;
+        if (
+          !hasOwnedSource &&
+          !hasImportedSource
+        ) {
+          visibleVideos.push(video);
+          return;
+        }
+        if (
+          video.folderIds?.some(folderId => !hiddenIdSet.has(folderId)) ||
+          video.sourceKeys?.some(sourceKey => visibleSourceKeySet.has(sourceKey))
+        ) {
+          visibleVideos.push(video);
+        }
+      },
+      signal,
+    );
+
+    if (source !== globalIndexCache) continue;
+    visibleGlobalIndexCache = visibleVideos;
+    visibleGlobalIndexSource = source;
+    visibleGlobalIndexKey = cacheKey;
+    return visibleGlobalIndexCache;
+  }
+}
+
 function sampleWithoutReplacement<T>(items: readonly T[], limit: number): T[] {
   const requestedCount = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
   const sampleCount = Math.min(items.length, requestedCount);
@@ -191,21 +273,29 @@ export function loadGlobalIndexCache(): Promise<void> {
 
   let loadPromise!: Promise<void>;
   loadPromise = (async () => {
+    const loadGeneration = globalIndexLoadGeneration;
     try {
       const validVideos = await getAllValidVideos();
+      if (loadGeneration !== globalIndexLoadGeneration) return;
       // 去重，因为同一个视频可能在多个收藏夹中
       const uniqueVideosMap = new Map<string, FavoriteVideo>();
-      for (const v of validVideos) {
+      const uniqueVideos: FavoriteVideo[] = [];
+      await forEachInYieldingBatches(validVideos, v => {
         if (!uniqueVideosMap.has(v.videoId)) {
-          uniqueVideosMap.set(v.videoId, mapVideoMetaToFavoriteVideo(v));
+          const favoriteVideo = mapVideoMetaToFavoriteVideo(v);
+          uniqueVideosMap.set(v.videoId, favoriteVideo);
+          uniqueVideos.push(favoriteVideo);
         } else {
           const existing = uniqueVideosMap.get(v.videoId)!;
           const playlistVideo = mapVideoMetaToFavoriteVideo(v);
           existing.folderIds = Array.from(new Set([...(existing.folderIds ?? []), ...(playlistVideo.folderIds ?? [])]));
           existing.sourceKeys = Array.from(new Set([...(existing.sourceKeys ?? []), ...(playlistVideo.sourceKeys ?? [])]));
         }
-      }
-      replaceGlobalIndexCache(Array.from(uniqueVideosMap.values()));
+      });
+      if (loadGeneration !== globalIndexLoadGeneration) return;
+      const membership = await getGlobalIndexMembershipYielding(uniqueVideos);
+      if (loadGeneration !== globalIndexLoadGeneration) return;
+      replaceGlobalIndexCache(uniqueVideos, membership);
       globalIndexCacheLoaded = true;
     } finally {
       if (globalIndexLoadPromise === loadPromise) {
@@ -817,6 +907,19 @@ export const favoriteService = {
     visibleSourceKeys: string[] = [],
   ): FavoriteVideo[] {
     return getVisibleGlobalIndex(hiddenFolderIds, visibleSourceKeys);
+  },
+
+  /** 分批生成画像页使用的可见索引，允许导航和触摸事件在批次间运行。 */
+  getGlobalIndexYielding(
+    hiddenFolderIds: number[] = [],
+    visibleSourceKeys: string[] = [],
+    signal?: AbortSignal,
+  ): Promise<FavoriteVideo[]> {
+    return getVisibleGlobalIndexYielding(
+      hiddenFolderIds,
+      visibleSourceKeys,
+      signal,
+    );
   },
 
   /**

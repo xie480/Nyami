@@ -11,6 +11,7 @@ import {trimSearchVideo, trimVideoTags} from './transformers';
 import {useAuthStore} from '../store/authStore';
 import {useSettingsStore} from '../store/settingsStore';
 import {useTagBackfillStore} from '../store/tagBackfillStore';
+import {forEachInYieldingBatches} from '../utils/yielding';
 import type {
   FavoriteVideo,
   TagProfile,
@@ -72,6 +73,27 @@ function uniqueVideos(videos: FavoriteVideo[]): FavoriteVideo[] {
   return Array.from(unique.values());
 }
 
+async function uniqueVideosYielding(
+  videos: FavoriteVideo[],
+  signal?: AbortSignal,
+): Promise<FavoriteVideo[]> {
+  const seen = new Set<string>();
+  const unique: FavoriteVideo[] = [];
+  await forEachInYieldingBatches(videos, video => {
+    if (video.bvid && video.attr === 0 && !seen.has(video.bvid)) {
+      seen.add(video.bvid);
+      unique.push(video);
+    }
+  }, signal);
+  return unique;
+}
+
+function* favoriteVideoIds(
+  videos: FavoriteVideo[],
+): IterableIterator<string> {
+  for (const video of videos) yield video.bvid;
+}
+
 function normalizedTagKey(tagName: string): string {
   return tagName.trim().toLocaleLowerCase();
 }
@@ -82,6 +104,81 @@ export function normalizeRecommendationTitleKey(title: string): string {
 
 function decodeTags(entry: VideoTagCacheEntry | undefined): VideoTag[] {
   return entry?.tags ?? [];
+}
+
+interface TagProfileAccumulator {
+  cacheByVideoId: Map<string, VideoTagCacheEntry>;
+  counts: Map<string, {tagId: number; tagName: string; videoCount: number}>;
+  resolvedVideoCount: number;
+  taggedVideoCount: number;
+}
+
+function createTagProfileAccumulator(
+  cacheByVideoId: Map<string, VideoTagCacheEntry>,
+): TagProfileAccumulator {
+  return {
+    cacheByVideoId,
+    counts: new Map(),
+    resolvedVideoCount: 0,
+    taggedVideoCount: 0,
+  };
+}
+
+function addVideoToTagProfile(
+  video: FavoriteVideo,
+  accumulator: TagProfileAccumulator,
+): void {
+  const entry = accumulator.cacheByVideoId.get(video.bvid);
+  if (!entry || entry.fetchedAt === null) return;
+  accumulator.resolvedVideoCount += 1;
+
+  const tagsForVideo = new Set<string>();
+  for (const tag of decodeTags(entry)) {
+    const key = normalizedTagKey(tag.tagName);
+    if (!key || tag.tagId === 0 || tagsForVideo.has(key)) continue;
+    tagsForVideo.add(key);
+    const current = accumulator.counts.get(key);
+    if (current) {
+      current.videoCount += 1;
+    } else {
+      accumulator.counts.set(key, {
+        tagId: tag.tagId,
+        tagName: tag.tagName,
+        videoCount: 1,
+      });
+    }
+  }
+  if (tagsForVideo.size > 0) accumulator.taggedVideoCount += 1;
+}
+
+function finishTagProfile(
+  totalVideoCount: number,
+  accumulator: TagProfileAccumulator,
+): TagProfile {
+  const preferences: TagPreference[] = Array.from(accumulator.counts.values())
+    .map(tag => ({
+      ...tag,
+      score:
+        accumulator.taggedVideoCount > 0
+          ? tag.videoCount / accumulator.taggedVideoCount
+          : 0,
+    }))
+    .sort(
+      (left, right) =>
+        right.videoCount - left.videoCount ||
+        left.tagName.localeCompare(right.tagName, 'zh-CN'),
+    );
+
+  return {
+    totalVideoCount,
+    resolvedVideoCount: accumulator.resolvedVideoCount,
+    taggedVideoCount: accumulator.taggedVideoCount,
+    pendingVideoCount: Math.max(
+      0,
+      totalVideoCount - accumulator.resolvedVideoCount,
+    ),
+    preferences,
+  };
 }
 
 /**
@@ -96,73 +193,44 @@ export function buildTagProfile(
   const cacheByVideoId = new Map(
     cacheEntries.map(entry => [entry.videoId, entry]),
   );
-  const counts = new Map<
-    string,
-    {tagId: number; tagName: string; videoCount: number}
-  >();
-  let resolvedVideoCount = 0;
-  let taggedVideoCount = 0;
-
+  const accumulator = createTagProfileAccumulator(cacheByVideoId);
   for (const video of unique) {
-    const entry = cacheByVideoId.get(video.bvid);
-    if (!entry || entry.fetchedAt === null) {
-      continue;
-    }
-    resolvedVideoCount += 1;
-
-    const tagsForVideo = new Set<string>();
-    for (const tag of decodeTags(entry)) {
-      const key = normalizedTagKey(tag.tagName);
-      if (!key || tag.tagId === 0 || tagsForVideo.has(key)) {
-        continue;
-      }
-      tagsForVideo.add(key);
-      const current = counts.get(key);
-      if (current) {
-        current.videoCount += 1;
-      } else {
-        counts.set(key, {
-          tagId: tag.tagId,
-          tagName: tag.tagName,
-          videoCount: 1,
-        });
-      }
-    }
-    if (tagsForVideo.size > 0) {
-      taggedVideoCount += 1;
-    }
+    addVideoToTagProfile(video, accumulator);
   }
+  return finishTagProfile(unique.length, accumulator);
+}
 
-  const preferences: TagPreference[] = Array.from(counts.values())
-    .map(tag => ({
-      ...tag,
-      score: taggedVideoCount > 0 ? tag.videoCount / taggedVideoCount : 0,
-    }))
-    .sort(
-      (left, right) =>
-        right.videoCount - left.videoCount ||
-        left.tagName.localeCompare(right.tagName, 'zh-CN'),
-    );
+async function buildTagProfileYielding(
+  videos: FavoriteVideo[],
+  cacheEntries: Iterable<VideoTagCacheEntry>,
+  signal?: AbortSignal,
+): Promise<TagProfile> {
+  const cacheByVideoId = new Map<string, VideoTagCacheEntry>();
+  await forEachInYieldingBatches(cacheEntries, entry => {
+    cacheByVideoId.set(entry.videoId, entry);
+  }, signal);
 
-  return {
-    totalVideoCount: unique.length,
-    resolvedVideoCount,
-    taggedVideoCount,
-    pendingVideoCount: Math.max(0, unique.length - resolvedVideoCount),
-    preferences,
-  };
+  const accumulator = createTagProfileAccumulator(cacheByVideoId);
+  await forEachInYieldingBatches(
+    videos,
+    video => addVideoToTagProfile(video, accumulator),
+    signal,
+  );
+  return finishTagProfile(videos.length, accumulator);
 }
 
 /** 加载当前收藏集合对应的本地画像快照，不触发网络请求。 */
 export async function loadTagProfile(
   videos: FavoriteVideo[],
+  signal?: AbortSignal,
 ): Promise<{profile: TagProfile; cacheEntries: VideoTagCacheEntry[]}> {
-  const unique = uniqueVideos(videos);
+  const unique = await uniqueVideosYielding(videos, signal);
   const cacheEntries = await getVideoTagCacheEntries(
-    unique.map(video => video.bvid),
+    favoriteVideoIds(unique),
+    signal,
   );
   return {
-    profile: buildTagProfile(unique, cacheEntries),
+    profile: await buildTagProfileYielding(unique, cacheEntries, signal),
     cacheEntries,
   };
 }
@@ -191,9 +259,10 @@ export async function backfillFavoriteTags(
   signal: AbortSignal,
   onProgress: (progress: TagBackfillProgress) => void,
 ): Promise<{profile: TagProfile; progress: TagBackfillProgress}> {
-  const unique = uniqueVideos(videos);
+  const unique = await uniqueVideosYielding(videos, signal);
   const initialEntries = await getVideoTagCacheEntries(
-    unique.map(video => video.bvid),
+    favoriteVideoIds(unique),
+    signal,
   );
   const cacheByVideoId = new Map(
     initialEntries.map(entry => [entry.videoId, entry]),
@@ -247,7 +316,8 @@ export async function backfillFavoriteTags(
   onProgress({...progress});
 
   type BackfillOutcome =
-    | {kind: 'success' | 'empty'; videoId: string; tags: VideoTag[]; fetchedAt: number}
+    | {kind: 'success'; videoId: string; tags: VideoTag[]; fetchedAt: number}
+    | {kind: 'empty'; videoId: string; tags: VideoTag[]; fetchedAt: number}
     | {kind: 'failure'; videoId: string; cached?: VideoTagCacheEntry; retryAfter: number; pause: boolean}
     | {kind: 'accountChanged'}
     | null;
@@ -277,12 +347,10 @@ export async function backfillFavoriteTags(
             return {kind: 'accountChanged'};
           }
           const tags = trimVideoTags(response);
-          return {
-            kind: tags.length > 0 ? 'success' : 'empty',
-            videoId: video.bvid,
-            tags,
-            fetchedAt: Date.now(),
-          };
+          const fetchedAt = Date.now();
+          return tags.length > 0
+            ? {kind: 'success' as const, videoId: video.bvid, tags, fetchedAt}
+            : {kind: 'empty' as const, videoId: video.bvid, tags, fetchedAt};
         } catch (error) {
           if (signal.aborted) return null;
           if (useAuthStore.getState().userId !== expectedUid) {
@@ -362,9 +430,12 @@ export async function backfillFavoriteTags(
     }
   }
 
-  const cacheEntries = Array.from(cacheByVideoId.values());
   return {
-    profile: buildTagProfile(unique, cacheEntries),
+    profile: await buildTagProfileYielding(
+      unique,
+      cacheByVideoId.values(),
+      signal,
+    ),
     progress: {...progress},
   };
 }

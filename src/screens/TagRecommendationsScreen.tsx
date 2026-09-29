@@ -154,15 +154,9 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     );
     const cachedProfile = getCachedTagProfile(uid, indexRevision, snapshotKey);
     if (!cachedProfile) return null;
-    return {
-      snapshotKey,
-      profile: cachedProfile,
-      favorites: favoriteService.getGlobalIndex(hiddenFolderIds, visibleSourceKeys),
-    };
+    return {profile: cachedProfile};
   }, [hiddenFolderIds, uid, visibleSourceKeys]);
-  const [favorites, setFavorites] = useState<FavoriteVideo[]>(
-    () => cachedScreenSnapshot?.favorites ?? [],
-  );
+  const [favorites, setFavorites] = useState<FavoriteVideo[]>([]);
   const [profile, setProfile] = useState<TagProfile | null>(
     () => cachedScreenSnapshot?.profile ?? null,
   );
@@ -171,7 +165,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   );
   const [progress, setProgress] = useState<TagBackfillProgress>(EMPTY_PROGRESS);
   const [stage, setStage] = useState<ScreenStage>('idle');
-  const [initialLoading, setInitialLoading] = useState(!cachedScreenSnapshot);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [failedSearchCount, setFailedSearchCount] = useState(0);
   const [recommendationHasMore, setRecommendationHasMore] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
@@ -179,7 +173,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   const [error, setError] = useState<string | null>(null);
   const requestController = useRef<AbortController | null>(null);
   const loadedUid = useRef<string | null>(cachedScreenSnapshot ? uid : null);
-  const loadedSnapshotKey = useRef<string | null>(cachedScreenSnapshot?.snapshotKey ?? null);
+  const loadedSnapshotKey = useRef<string | null>(null);
   const activeSnapshotKey = useRef<string | null>(null);
   const activeSnapshotController = useRef<AbortController | null>(null);
   const backgroundBackfillWasRunning = useRef(false);
@@ -228,26 +222,6 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       requestKey = currentSnapshotKey;
       if (!refreshProfile && loadedSnapshotKey.current === currentSnapshotKey) {
         return;
-      }
-      if (!refreshProfile) {
-        const cachedProfile = getCachedTagProfile(
-          requestUid,
-          currentRevision,
-          currentSnapshotKey,
-        );
-        if (cachedProfile) {
-          const localFavorites = favoriteService.getGlobalIndex(
-            normalizedHiddenFolderIds,
-            normalizedVisibleSourceKeys,
-          );
-          loadedUid.current = requestUid;
-          loadedSnapshotKey.current = currentSnapshotKey;
-          setFavorites(localFavorites);
-          setProfile(cachedProfile);
-          setError(null);
-          setInitialLoading(false);
-          return;
-        }
       }
     }
     if (activeSnapshotKey.current === requestKey && !refreshProfile) return;
@@ -299,10 +273,12 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
           snapshotKey,
         );
         if (cachedProfile) {
-          const cachedFavorites = favoriteService.getGlobalIndex(
+          const cachedFavorites = await favoriteService.getGlobalIndexYielding(
             normalizedHiddenFolderIds,
             normalizedVisibleSourceKeys,
+            controller.signal,
           );
+          if (controller.signal.aborted) return;
           loadedUid.current = requestUid;
           loadedSnapshotKey.current = snapshotKey;
           setFavorites(cachedFavorites);
@@ -310,12 +286,17 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
           return;
         }
       }
-      const localFavorites = favoriteService.getGlobalIndex(
+      const localFavorites = await favoriteService.getGlobalIndexYielding(
         normalizedHiddenFolderIds,
         normalizedVisibleSourceKeys,
+        controller.signal,
       );
+      if (controller.signal.aborted) return;
       setFavorites(localFavorites);
-      const {profile: cachedProfile} = await loadTagProfile(localFavorites);
+      const {profile: cachedProfile} = await loadTagProfile(
+        localFavorites,
+        controller.signal,
+      );
       if (
         controller.signal.aborted ||
         useAuthStore.getState().userId !== requestUid ||

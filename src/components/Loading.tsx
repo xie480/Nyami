@@ -5,7 +5,9 @@ import {useTheme} from '../theme';
 
 const CANVAS_SIZE = 160;
 const WAVE_BAR_COUNT = 7;
-const WAVE_PEAKS = [0.72, 0.92, 0.66, 1, 0.78, 0.94, 0.7];
+const WAVE_STAGGER_MS = 95;
+const WAVE_PEAKS = [0.5, 0.7, 0.9, 1, 0.88, 0.68, 0.48];
+const WAVE_BASE_LEVEL = 0.14;
 const STATUS_DOT_COUNT = 3;
 
 export const Loading: React.FC<{text?: string}> = ({text = '加载中...'}) => {
@@ -16,7 +18,10 @@ export const Loading: React.FC<{text?: string}> = ({text = '加载中...'}) => {
   const corePulse = useRef(new Animated.Value(0)).current;
   const haloPulse = useRef(new Animated.Value(0)).current;
   const waveLevels = useRef(
-    Array.from({length: WAVE_BAR_COUNT}, () => new Animated.Value(0.12)),
+    Array.from(
+      {length: WAVE_BAR_COUNT},
+      () => new Animated.Value(WAVE_BASE_LEVEL),
+    ),
   ).current;
   const statusDots = useRef(
     Array.from({length: STATUS_DOT_COUNT}, () => new Animated.Value(0.18)),
@@ -24,27 +29,76 @@ export const Loading: React.FC<{text?: string}> = ({text = '加载中...'}) => {
 
   useEffect(() => {
     const spin = (value: Animated.Value, duration: number) =>
-      Animated.loop(Animated.timing(value, {
-        toValue: 1,
-        duration,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }));
-    const pulse = (value: Animated.Value, duration: number, low: number, high: number) =>
-      Animated.loop(Animated.sequence([
-        Animated.timing(value, {toValue: high, duration, easing: Easing.out(Easing.cubic), useNativeDriver: true}),
-        Animated.timing(value, {toValue: low, duration, easing: Easing.inOut(Easing.cubic), useNativeDriver: true}),
-      ]));
-    const waves = waveLevels.map((level, index) => Animated.loop(Animated.sequence([
-      Animated.timing(level, {toValue: WAVE_PEAKS[index], duration: 180, delay: index * 45, easing: Easing.out(Easing.cubic), useNativeDriver: true}),
-      Animated.timing(level, {toValue: 0.12, duration: 230, easing: Easing.inOut(Easing.cubic), useNativeDriver: true}),
-      Animated.timing(level, {toValue: 0.12, duration: (WAVE_BAR_COUNT - index) * 45, easing: Easing.linear, useNativeDriver: true}),
-    ])));
-    const dots = statusDots.map((dot, index) => Animated.loop(Animated.sequence([
-      Animated.timing(dot, {toValue: 1, duration: 240, delay: index * 140, easing: Easing.out(Easing.quad), useNativeDriver: true}),
-      Animated.timing(dot, {toValue: 0.18, duration: 280, easing: Easing.inOut(Easing.quad), useNativeDriver: true}),
-      Animated.delay((STATUS_DOT_COUNT - index) * 140),
-    ])));
+      Animated.loop(
+        Animated.timing(value, {
+          toValue: 1,
+          duration,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+      );
+    const pulse = (
+      value: Animated.Value,
+      duration: number,
+      low: number,
+      high: number,
+    ) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(value, {
+            toValue: high,
+            duration,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(value, {
+            toValue: low,
+            duration,
+            easing: Easing.inOut(Easing.cubic),
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+    const waves = waveLevels.map((level, index) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(index * WAVE_STAGGER_MS),
+          Animated.timing(level, {
+            toValue: WAVE_PEAKS[index],
+            duration: 190,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(level, {
+            toValue: WAVE_BASE_LEVEL,
+            duration: 280,
+            easing: Easing.inOut(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.delay((WAVE_BAR_COUNT - index - 1) * WAVE_STAGGER_MS),
+        ]),
+      ),
+    );
+    const dots = statusDots.map((dot, index) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(dot, {
+            toValue: 1,
+            duration: 240,
+            delay: index * 140,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot, {
+            toValue: 0.18,
+            duration: 280,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.delay((STATUS_DOT_COUNT - index) * 140),
+        ]),
+      ),
+    );
     const animations = [
       spin(outerRotation, 3200),
       spin(innerRotation, 5100),
@@ -56,18 +110,50 @@ export const Loading: React.FC<{text?: string}> = ({text = '加载中...'}) => {
     ];
     animations.forEach(animation => animation.start());
     return () => animations.forEach(animation => animation.stop());
-  }, [corePulse, haloPulse, innerRotation, orbitRotation, outerRotation, statusDots, waveLevels]);
+  }, [
+    corePulse,
+    haloPulse,
+    innerRotation,
+    orbitRotation,
+    outerRotation,
+    statusDots,
+    waveLevels,
+  ]);
 
-  const outerSpin = outerRotation.interpolate({inputRange: [0, 1], outputRange: ['0deg', '360deg']});
-  const innerSpin = innerRotation.interpolate({inputRange: [0, 1], outputRange: ['360deg', '0deg']});
-  const orbitSpin = orbitRotation.interpolate({inputRange: [0, 1], outputRange: ['0deg', '360deg']});
-  const coreScale = corePulse.interpolate({inputRange: [0, 1], outputRange: [0.88, 1.12]});
-  const haloScale = haloPulse.interpolate({inputRange: [0, 1], outputRange: [0.62, 1.2]});
-  const haloOpacity = haloPulse.interpolate({inputRange: [0, 1], outputRange: [0.52, 0.04]});
+  const outerSpin = outerRotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+  const innerSpin = innerRotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['360deg', '0deg'],
+  });
+  const orbitSpin = orbitRotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+  const coreScale = corePulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.88, 1.12],
+  });
+  const haloScale = haloPulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.62, 1.2],
+  });
+  const haloOpacity = haloPulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.52, 0.04],
+  });
 
   return (
     <View style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
-      <View style={{width: CANVAS_SIZE, height: CANVAS_SIZE, alignItems: 'center', justifyContent: 'center'}}>
+      <View
+        style={{
+          width: CANVAS_SIZE,
+          height: CANVAS_SIZE,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
         <Animated.View
           style={{
             position: 'absolute',
@@ -107,19 +193,55 @@ export const Loading: React.FC<{text?: string}> = ({text = '加载中...'}) => {
             transform: [{rotate: innerSpin}],
           }}
         />
-        <Animated.View style={{position: 'absolute', width: 132, height: 132, transform: [{rotate: orbitSpin}]}}>
-          <View style={{position: 'absolute', top: 0, left: 62, width: 9, height: 9, borderRadius: 5, backgroundColor: t.colors.success}} />
-          <View style={{position: 'absolute', right: 3, bottom: 31, width: 5, height: 5, borderRadius: 3, backgroundColor: t.colors.primary}} />
+        <Animated.View
+          style={{
+            position: 'absolute',
+            width: 132,
+            height: 132,
+            transform: [{rotate: orbitSpin}],
+          }}>
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 62,
+              width: 9,
+              height: 9,
+              borderRadius: 5,
+              backgroundColor: t.colors.success,
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              right: 3,
+              bottom: 31,
+              width: 5,
+              height: 5,
+              borderRadius: 3,
+              backgroundColor: t.colors.primary,
+            }}
+          />
         </Animated.View>
         <Animated.View style={{transform: [{scale: coreScale}]}}>
           <LinearGradient
             colors={[t.colors.primary, t.colors.primaryDark]}
             start={{x: 0, y: 0}}
             end={{x: 1, y: 1}}
-            style={{width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center'}}>
-            <View style={{height: 32, flexDirection: 'row', alignItems: 'center'}}>
+            style={{
+              width: 76,
+              height: 76,
+              borderRadius: 38,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+            <View
+              style={{height: 32, flexDirection: 'row', alignItems: 'center'}}>
               {waveLevels.map((level, index) => {
-                const barScale = level.interpolate({inputRange: [0.12, 1], outputRange: [0.08, 1]});
+                const barScale = level.interpolate({
+                  inputRange: [WAVE_BASE_LEVEL, 1],
+                  outputRange: [0.08, 1],
+                });
                 return (
                   <Animated.View
                     key={index}
@@ -139,13 +261,35 @@ export const Loading: React.FC<{text?: string}> = ({text = '加载中...'}) => {
           </LinearGradient>
         </Animated.View>
       </View>
-      <View style={{flexDirection: 'row', alignItems: 'center', marginTop: t.spacing.md}}>
-        <Text style={{color: t.colors.textSub, fontSize: t.fontSize.sm, fontWeight: '600', letterSpacing: 0.3}}>{text}</Text>
-        <View style={{flexDirection: 'row', alignItems: 'center', marginLeft: 5}}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          marginTop: t.spacing.md,
+        }}>
+        <Text
+          style={{
+            color: t.colors.textSub,
+            fontSize: t.fontSize.sm,
+            fontWeight: '600',
+            letterSpacing: 0.3,
+          }}>
+          {text}
+        </Text>
+        <View
+          style={{flexDirection: 'row', alignItems: 'center', marginLeft: 5}}>
           {statusDots.map((dot, index) => (
             <Animated.View
               key={index}
-              style={{width: 4, height: 4, borderRadius: 2, marginHorizontal: 1.5, backgroundColor: t.colors.primary, opacity: dot, transform: [{scale: dot}]}}
+              style={{
+                width: 4,
+                height: 4,
+                borderRadius: 2,
+                marginHorizontal: 1.5,
+                backgroundColor: t.colors.primary,
+                opacity: dot,
+                transform: [{scale: dot}],
+              }}
             />
           ))}
         </View>
