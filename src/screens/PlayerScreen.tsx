@@ -169,6 +169,9 @@ export const PlayerScreen = () => {
       ? folderFavoriteOverride.included
       : true
     : false;
+  const isTrackFavorited = isLocalFavoriteFolderPlayback
+    ? isSavedInCurrentFolder
+    : !!currentVideo?.folderIds?.length;
   const favoriteTarget = useMemo<OnlineVideoSearchResult | null>(() => {
     if (!currentVideo) {
       return null;
@@ -438,7 +441,7 @@ export const PlayerScreen = () => {
                 ? () => setFavoritePickerVisible(true)
                 : undefined
           }
-          isFavorited={isLocalFavoriteFolderPlayback && isSavedInCurrentFolder}
+          isFavorited={isTrackFavorited}
           favoriteLoading={isLocalFavoriteFolderPlayback && folderFavoriteLoading}
         />
 
