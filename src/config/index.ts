@@ -26,6 +26,7 @@
     searchConcurrency: 5,
     backfillBatchSize: 64,
     backfillConcurrency: 16,
+    backfillCacheWriteBatchSize: 16,
     maxRecommendations: 30,
     musicTid: 3,
     transientRetryDelayMs: 30 * 60 * 1000,

@@ -16,7 +16,10 @@ import {trimSearchVideo, trimVideoTags} from './transformers';
 import {useAuthStore} from '../store/authStore';
 import {useSettingsStore} from '../store/settingsStore';
 import {useTagBackfillStore} from '../store/tagBackfillStore';
-import {forEachInYieldingBatches} from '../utils/yielding';
+import {
+  forEachInYieldingBatches,
+  UI_FRIENDLY_BATCH_SIZE,
+} from '../utils/yielding';
 import type {
   FavoriteVideo,
   TagProfile,
@@ -288,15 +291,15 @@ export async function backfillFavoriteTags(
   onProgress({...progress});
 
   const uncachedVideos: FavoriteVideo[] = [];
-  for (const video of unique) {
-    if (signal.aborted) {
-      break;
-    }
+  let scannedVideoCount = 0;
+  await forEachInYieldingBatches(unique, video => {
+    if (progress.paused) return;
     if (useAuthStore.getState().userId !== expectedUid) {
       progress.paused = true;
-      break;
+      return;
     }
 
+    scannedVideoCount += 1;
     const cached = cacheByVideoId.get(video.bvid);
     const now = Date.now();
     const cacheIsFresh =
@@ -319,10 +322,13 @@ export async function backfillFavoriteTags(
       } else {
         progress.failedVideoCount += 1;
       }
-      continue;
+    } else {
+      uncachedVideos.push(video);
     }
-    uncachedVideos.push(video);
-  }
+    if (scannedVideoCount % UI_FRIENDLY_BATCH_SIZE === 0) {
+      onProgress({...progress});
+    }
+  }, signal);
   onProgress({...progress});
 
   type BackfillOutcome =
@@ -337,6 +343,23 @@ export async function backfillFavoriteTags(
   for (let offset = 0; offset < uncachedVideos.length && !progress.paused; offset += batchSize) {
     const batchGroup = uncachedVideos.slice(offset, offset + batchSize);
     const outcomes: BackfillOutcome[] = new Array(batchGroup.length).fill(null);
+    const pendingCacheWrites: Array<{
+      videoId: string;
+      tags?: VideoTag[];
+      fetchedAt?: number | null;
+      retryAfter?: number | null;
+    }> = [];
+    let cacheWriteChain = Promise.resolve();
+    let cacheWriteError: unknown = null;
+    const flushCacheWrites = () => {
+      if (pendingCacheWrites.length === 0) return;
+      const writes = pendingCacheWrites.splice(0, pendingCacheWrites.length);
+      cacheWriteChain = cacheWriteChain.then(async () => {
+        if (!cacheWriteError) await upsertVideoTagCacheBatch(writes);
+      }).catch(error => {
+        cacheWriteError = error;
+      });
+    };
     let nextIndex = 0;
     let stopScheduling = false;
 
@@ -382,6 +405,50 @@ export async function backfillFavoriteTags(
         }
 
         outcomes[index] = outcome;
+        if (outcome) {
+          if (outcome.kind === 'success' || outcome.kind === 'empty') {
+            const cachedEntry = {
+              videoId: outcome.videoId,
+              tags: outcome.tags,
+              fetchedAt: outcome.fetchedAt,
+              retryAfter: null,
+            };
+            cacheByVideoId.set(outcome.videoId, cachedEntry);
+            pendingCacheWrites.push(cachedEntry);
+            progress.completedVideoCount += 1;
+            if (outcome.kind === 'success') {
+              progress.successfulVideoCount += 1;
+            } else {
+              progress.emptyVideoCount += 1;
+            }
+          } else if (outcome.kind === 'failure') {
+            const cachedEntry = {
+              videoId: outcome.videoId,
+              tags: outcome.cached?.tags ?? [],
+              fetchedAt: outcome.cached?.fetchedAt ?? null,
+              retryAfter: outcome.retryAfter,
+            };
+            cacheByVideoId.set(outcome.videoId, cachedEntry);
+            pendingCacheWrites.push({
+              videoId: cachedEntry.videoId,
+              fetchedAt: cachedEntry.fetchedAt,
+              retryAfter: cachedEntry.retryAfter,
+            });
+            progress.completedVideoCount += 1;
+            progress.failedVideoCount += 1;
+            if (outcome.pause) progress.paused = true;
+          } else {
+            progress.paused = true;
+          }
+          onProgress({...progress});
+          if (
+            pendingCacheWrites.length >=
+              config.tagRecommendations.backfillCacheWriteBatchSize ||
+            (outcome.kind === 'failure' && outcome.pause)
+          ) {
+            flushCacheWrites();
+          }
+        }
         if (
           outcome?.kind === 'accountChanged' ||
           (outcome?.kind === 'failure' && outcome.pause)
@@ -404,55 +471,9 @@ export async function backfillFavoriteTags(
     ) {
       progress.paused = true;
     }
-
-    const cacheWrites: Array<{
-      videoId: string;
-      tags?: VideoTag[];
-      fetchedAt?: number | null;
-      retryAfter?: number | null;
-    }> = [];
-    for (const outcome of outcomes) {
-      if (!outcome) continue;
-      if (outcome.kind === 'accountChanged') {
-        progress.paused = true;
-        continue;
-      }
-      if (outcome.kind === 'success' || outcome.kind === 'empty') {
-        const cachedEntry = {
-          videoId: outcome.videoId,
-          tags: outcome.tags,
-          fetchedAt: outcome.fetchedAt,
-          retryAfter: null,
-        };
-        cacheWrites.push(cachedEntry);
-        cacheByVideoId.set(outcome.videoId, cachedEntry);
-        progress.completedVideoCount += 1;
-        if (outcome.kind === 'success') {
-          progress.successfulVideoCount += 1;
-        } else {
-          progress.emptyVideoCount += 1;
-        }
-        continue;
-      }
-
-      const cachedEntry = {
-        videoId: outcome.videoId,
-        tags: outcome.cached?.tags ?? [],
-        fetchedAt: outcome.cached?.fetchedAt ?? null,
-        retryAfter: outcome.retryAfter,
-      };
-      cacheWrites.push({
-        videoId: cachedEntry.videoId,
-        fetchedAt: cachedEntry.fetchedAt,
-        retryAfter: cachedEntry.retryAfter,
-      });
-      cacheByVideoId.set(outcome.videoId, cachedEntry);
-      progress.completedVideoCount += 1;
-      progress.failedVideoCount += 1;
-      if (outcome.pause) progress.paused = true;
-    }
-
-    await upsertVideoTagCacheBatch(cacheWrites);
+    flushCacheWrites();
+    await cacheWriteChain;
+    if (cacheWriteError) throw cacheWriteError;
     onProgress({...progress});
     if (progress.paused || signal.aborted) break;
   }
