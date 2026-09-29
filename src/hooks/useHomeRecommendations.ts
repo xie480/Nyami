@@ -46,11 +46,7 @@ export function useHomeRecommendations() {
     activeRecommendationRefresh = {uid, controller};
 
     try {
-      const generated = await generateHomeFeed(
-        uid,
-        controller.signal,
-        store.getFeed(uid).collections,
-      );
+      const generated = await generateHomeFeed(uid, controller.signal);
       useRecommendationStore.getState().finishRefresh(uid, started, generated);
       return !controller.signal.aborted;
     } catch (error) {
