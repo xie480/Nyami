@@ -9,6 +9,7 @@ import {filterAndRecordRecommendations, filterAndRecordRecommendedVideos} from '
 import {
   loadTagProfile,
   normalizeRecommendationTitleKey,
+  searchFallbackMusicRecommendations,
   searchTagRecommendations,
 } from './tagRecommendationService';
 import {useAuthStore} from '../store/authStore';
@@ -169,6 +170,122 @@ function rankCollections(
     );
 }
 
+function mergeHomeSongCandidate(
+  candidates: Map<string, TagRecommendation>,
+  candidate: TagRecommendation,
+): void {
+  const existing = candidates.get(candidate.bvid);
+  if (!existing) {
+    candidates.set(candidate.bvid, candidate);
+    return;
+  }
+  candidates.set(candidate.bvid, {
+    ...existing,
+    matchedTags: Array.from(
+      new Set([...existing.matchedTags, ...candidate.matchedTags]),
+    ),
+    score: Math.max(existing.score, candidate.score),
+  });
+}
+
+function countDistinctHomeSongCandidates(
+  candidates: Map<string, TagRecommendation>,
+): number {
+  const videoIds = new Set<string>();
+  const titleKeys = new Set<string>();
+  for (const candidate of candidates.values()) {
+    const titleKey = normalizeRecommendationTitleKey(candidate.title);
+    if (videoIds.has(candidate.bvid) || (titleKey && titleKeys.has(titleKey))) {
+      continue;
+    }
+    videoIds.add(candidate.bvid);
+    if (titleKey) titleKeys.add(titleKey);
+  }
+  return videoIds.size;
+}
+
+interface HomeSongCandidateResult extends TagRecommendationSearchResult {
+  page: number;
+}
+
+async function searchHomeSongCandidates(
+  context: PersonalizationContext,
+  signal: AbortSignal,
+): Promise<HomeSongCandidateResult> {
+  const minimumCount = config.recommendations.homeMinimumRecommendationCount;
+  const maximumPages = config.recommendations.homeMinimumSongSearchPages;
+  const candidates = new Map<string, TagRecommendation>();
+  const excludedVideoIds = new Set(context.favoriteVideoIds);
+  let failedSearchCount = 0;
+  let profileHasMore = false;
+  let profilePage = 1;
+
+  for (let page = 1; page <= maximumPages; page += 1) {
+    profilePage = page;
+    const result = await searchTagRecommendations(
+      context.profile,
+      context.favorites,
+      signal,
+      {
+        page,
+        excludeVideoIds: Array.from(excludedVideoIds),
+        excludeVideoTitles: context.favoriteVideoTitles,
+      },
+    );
+    if (signal.aborted) {
+      throw new Error('推荐刷新已取消');
+    }
+    failedSearchCount += result.failedSearchCount;
+    profileHasMore = result.hasMore;
+    result.recommendations.forEach(candidate => {
+      mergeHomeSongCandidate(candidates, candidate);
+      excludedVideoIds.add(candidate.bvid);
+    });
+    if (
+      countDistinctHomeSongCandidates(candidates) >= minimumCount ||
+      !result.hasMore
+    ) {
+      break;
+    }
+  }
+
+  let fallbackHasMore = false;
+  if (countDistinctHomeSongCandidates(candidates) < minimumCount) {
+    const result = await searchFallbackMusicRecommendations(
+      context.favorites,
+      signal,
+      {
+        page: 1,
+        excludeVideoIds: Array.from(excludedVideoIds),
+        excludeVideoTitles: context.favoriteVideoTitles,
+      },
+    );
+    if (signal.aborted) {
+      throw new Error('推荐刷新已取消');
+    }
+    failedSearchCount += result.failedSearchCount;
+    fallbackHasMore = result.hasMore;
+    result.recommendations.forEach(candidate => {
+      mergeHomeSongCandidate(candidates, candidate);
+    });
+  }
+
+  const recommendations = Array.from(candidates.values()).sort(
+    (left, right) =>
+      right.score - left.score ||
+      right.pubtime - left.pubtime ||
+      left.title.localeCompare(right.title, 'zh-CN'),
+  );
+  return {
+    recommendations,
+    failedSearchCount,
+    hasMore:
+      profileHasMore ||
+      (!context.profile.preferences.length && fallbackHasMore),
+    page: profilePage,
+  };
+}
+
 /** 生成首页首屏：同步当前账号已有外部来源，按本地收藏画像排序并生成首批歌曲。 */
 export async function generateHomeFeed(
   uid: string,
@@ -186,15 +303,7 @@ export async function generateHomeFeed(
   assertCurrentRecommendationAccount(uid);
 
   useImportedPlaylistStore.getState().setCatalog(uid, sources);
-  const songResult = await searchTagRecommendations(
-    context.profile,
-    context.favorites,
-    signal,
-    {
-      excludeVideoIds: context.favoriteVideoIds,
-      excludeVideoTitles: context.favoriteVideoTitles,
-    },
-  );
+  const songResult = await searchHomeSongCandidates(context, signal);
   if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
 
@@ -205,6 +314,11 @@ export async function generateHomeFeed(
     rankedCollections,
     undefined,
     signal,
+    {
+      minimumVideos: config.recommendations.homeMinimumRecommendationCount,
+      minimumCollections: config.recommendations.homeMinimumRecommendationCount,
+      allowRecentRepeats: true,
+    },
   );
   if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
@@ -213,7 +327,7 @@ export async function generateHomeFeed(
     collections: recommendations.collections,
     collectionsHasMore: recommendations.collectionsHasMore,
     songs: recommendations.videos,
-    songPage: 1,
+    songPage: songResult.page,
     songHasMore: songResult.hasMore,
     failedSearchCount: songResult.failedSearchCount,
     updatedAt: Date.now(),
@@ -299,16 +413,23 @@ export async function loadMorePersonalizedSongs(
   const context = await loadPersonalizationContext(uid, signal, importedSourcesPromise);
   if (signal.aborted) throw new Error('个性化队列补充已取消');
   assertCurrentRecommendationAccount(uid);
-  const result = await searchTagRecommendations(
-    context.profile,
-    context.favorites,
-    signal,
-    {
-      page,
-      excludeVideoIds: [...context.favoriteVideoIds, ...excludeVideoIds],
-      excludeVideoTitles: context.favoriteVideoTitles,
-    },
-  );
+  const searchOptions = {
+    page,
+    excludeVideoIds: [...context.favoriteVideoIds, ...excludeVideoIds],
+    excludeVideoTitles: context.favoriteVideoTitles,
+  };
+  const result = context.profile.preferences.length > 0
+    ? await searchTagRecommendations(
+        context.profile,
+        context.favorites,
+        signal,
+        searchOptions,
+      )
+    : await searchFallbackMusicRecommendations(
+        context.favorites,
+        signal,
+        searchOptions,
+      );
   if (signal.aborted) throw new Error('个性化队列补充已取消');
   assertCurrentRecommendationAccount(uid);
   return {

@@ -45,9 +45,11 @@
     maxDurationLimitMinutes: 1440,
     maxBlacklistKeywords: 100,
     maxBlacklistKeywordLength: 64,
-    homePlaylistPreviewCount: 4,
+    homeMinimumRecommendationCount: 5,
+    homeMinimumSongSearchPages: 3,
+    homePlaylistPreviewCount: 5,
     homePlaylistLimit: 20,
-    homeSongPreviewCount: 4,
+    homeSongPreviewCount: 5,
   },
 
   /** 播放器淡入淡出过渡参数。 */

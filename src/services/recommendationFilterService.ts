@@ -14,6 +14,12 @@ interface FilteredRecommendations {
   collectionsHasMore: boolean;
 }
 
+interface RecommendationMinimumFillOptions {
+  minimumVideos?: number;
+  minimumCollections?: number;
+  allowRecentRepeats?: boolean;
+}
+
 /** 按账号过滤 7 日内已推荐条目，并原子写入本轮新推荐的 ID 与视频名。 */
 export async function filterAndRecordRecommendations(
   uid: string,
@@ -21,6 +27,7 @@ export async function filterAndRecordRecommendations(
   collections: CollectionRecommendation[],
   maxCollections = config.recommendations.homePlaylistLimit,
   signal?: AbortSignal,
+  minimumFill: RecommendationMinimumFillOptions = {},
 ): Promise<FilteredRecommendations> {
   if (!uid) return {videos: [], collections: [], collectionsHasMore: false};
   const now = Date.now();
@@ -39,30 +46,48 @@ export async function filterAndRecordRecommendations(
     }
 
     const active = records.filter(record => record.expiresAt > now);
-    const seenVideoIds = new Set(
-      active.filter(record => record.itemType === 'video').map(record => record.itemId),
+    const activeVideoRecords = active.filter(record => record.itemType === 'video');
+    const activeCollectionRecords = active.filter(record => record.itemType === 'collection');
+    const activeVideoIds = new Map(
+      activeVideoRecords.map(record => [record.itemId, record] as const),
     );
-    const seenVideoTitles = new Set(
-      active
-        .filter(record => record.itemType === 'video' && record.titleKey)
-        .map(record => record.titleKey as string),
+    const activeVideoTitles = new Map(
+      activeVideoRecords
+        .filter(record => record.titleKey)
+        .map(record => [record.titleKey as string, record] as const),
     );
-    const seenCollectionIds = new Set(
-      active.filter(record => record.itemType === 'collection').map(record => record.itemId),
+    const activeCollectionIds = new Map(
+      activeCollectionRecords.map(record => [record.itemId, record] as const),
     );
     const filteredVideos: TagRecommendation[] = [];
     const filteredCollections: CollectionRecommendation[] = [];
     const writes: RecommendationFilter[] = [];
+    const selectedVideoIds = new Set<string>();
+    const selectedVideoTitles = new Set<string>();
+    const selectedCollectionIds = new Set<string>();
     let collectionsHasMore = false;
+    const minimumVideos = Math.max(0, Math.floor(minimumFill.minimumVideos ?? 0));
+    const minimumCollections = Math.min(
+      Math.max(0, Math.floor(minimumFill.minimumCollections ?? 0)),
+      Math.max(0, maxCollections),
+    );
 
     for (const video of videos) {
       const itemId = video.bvid.trim();
       const titleKey = normalizeRecommendationTitleKey(video.title);
-      if (!itemId || seenVideoIds.has(itemId) || (titleKey && seenVideoTitles.has(titleKey))) {
+      if (
+        !itemId ||
+        activeVideoIds.has(itemId) ||
+        (titleKey && activeVideoTitles.has(titleKey)) ||
+        selectedVideoIds.has(itemId) ||
+        (titleKey && selectedVideoTitles.has(titleKey))
+      ) {
         continue;
       }
-      seenVideoIds.add(itemId);
-      if (titleKey) seenVideoTitles.add(titleKey);
+      selectedVideoIds.add(itemId);
+      if (titleKey) {
+        selectedVideoTitles.add(titleKey);
+      }
       filteredVideos.push(video);
       writes.push(recommendationFilterCollection.prepareCreate(record => {
         record.uid = uid;
@@ -73,14 +98,57 @@ export async function filterAndRecordRecommendations(
       }));
     }
 
+    if (
+      minimumFill.allowRecentRepeats &&
+      filteredVideos.length < minimumVideos
+    ) {
+      const extendedRecordIds = new Set<string>();
+      for (const video of videos) {
+        if (filteredVideos.length >= minimumVideos) {
+          break;
+        }
+        const itemId = video.bvid.trim();
+        const titleKey = normalizeRecommendationTitleKey(video.title);
+        if (
+          !itemId ||
+          selectedVideoIds.has(itemId) ||
+          (titleKey && selectedVideoTitles.has(titleKey))
+        ) {
+          continue;
+        }
+        const existingRecord = activeVideoIds.get(itemId) ??
+          (titleKey ? activeVideoTitles.get(titleKey) : undefined);
+        if (!existingRecord) {
+          continue;
+        }
+        selectedVideoIds.add(itemId);
+        if (titleKey) {
+          selectedVideoTitles.add(titleKey);
+        }
+        filteredVideos.push(video);
+        if (!extendedRecordIds.has(existingRecord.id)) {
+          extendedRecordIds.add(existingRecord.id);
+          writes.push(existingRecord.prepareUpdate(record => {
+            record.expiresAt = expiresAt;
+          }));
+        }
+      }
+    }
+
     for (const collection of collections) {
       const itemId = collection.sourceKey.trim();
-      if (!itemId || seenCollectionIds.has(itemId)) continue;
+      if (
+        !itemId ||
+        activeCollectionIds.has(itemId) ||
+        selectedCollectionIds.has(itemId)
+      ) {
+        continue;
+      }
       if (filteredCollections.length >= maxCollections) {
         collectionsHasMore = true;
         break;
       }
-      seenCollectionIds.add(itemId);
+      selectedCollectionIds.add(itemId);
       filteredCollections.push(collection);
       writes.push(recommendationFilterCollection.prepareCreate(record => {
         record.uid = uid;
@@ -89,6 +157,30 @@ export async function filterAndRecordRecommendations(
         record.titleKey = null;
         record.expiresAt = expiresAt;
       }));
+    }
+
+    if (
+      minimumFill.allowRecentRepeats &&
+      filteredCollections.length < minimumCollections
+    ) {
+      for (const collection of collections) {
+        if (filteredCollections.length >= minimumCollections) {
+          break;
+        }
+        const itemId = collection.sourceKey.trim();
+        if (!itemId || selectedCollectionIds.has(itemId)) {
+          continue;
+        }
+        const existingRecord = activeCollectionIds.get(itemId);
+        if (!existingRecord) {
+          continue;
+        }
+        selectedCollectionIds.add(itemId);
+        filteredCollections.push(collection);
+        writes.push(existingRecord.prepareUpdate(record => {
+          record.expiresAt = expiresAt;
+        }));
+      }
     }
 
     if (signal?.aborted) {

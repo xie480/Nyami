@@ -785,6 +785,20 @@ export async function searchTagRecommendations(
           ),
         );
         if (matchedTags.length === 0) {
+          const searchedPreference = preferences[preferenceIndex];
+          const normalizedSearchTag = searchedPreference
+            ? normalizedTagKey(searchedPreference.tagName)
+            : '';
+          const queryWasBlacklisted = normalizedBlacklist.some(keyword =>
+            normalizedSearchTag.includes(keyword),
+          );
+          if (searchedPreference && !queryWasBlacklisted) {
+            // B 站的搜索结果 tag 字段并不总是完整；成功命中画像 tag 的查询
+            // 本身即可作为“至少匹配一个画像 tag”的证据。
+            matchedTags.push(searchedPreference.tagName);
+          }
+        }
+        if (matchedTags.length === 0) {
           continue;
         }
         const score = matchedTags.reduce(
@@ -825,4 +839,24 @@ export async function searchTagRecommendations(
     .slice(0, Math.max(0, maxRecommendations));
 
   return {recommendations, failedSearchCount, hasMore};
+}
+
+/** 画像标签候选不足时，用音乐分区关键词补充首页最低数量。 */
+export async function searchFallbackMusicRecommendations(
+  favoriteVideos: FavoriteVideo[],
+  signal: AbortSignal,
+  options: TagRecommendationSearchOptions = {},
+): Promise<TagRecommendationSearchResult> {
+  return searchTagRecommendations(
+    {
+      totalVideoCount: 0,
+      resolvedVideoCount: 0,
+      taggedVideoCount: 0,
+      pendingVideoCount: 0,
+      preferences: [{tagId: 0, tagName: '音乐', videoCount: 0, score: 0}],
+    },
+    favoriteVideos,
+    signal,
+    options,
+  );
 }
