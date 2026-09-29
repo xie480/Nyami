@@ -51,7 +51,7 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
     setLoading(true);
     setError(null);
     try {
-      const response = await favoriteService.getFolders(requestUid, true);
+      const response = await favoriteService.getFolders(requestUid);
       if (useAuthStore.getState().userId !== requestUid) return;
       const ownedFolders = response.filter(folder => String(folder.mid) === requestUid);
       setFolders(ownedFolders);
