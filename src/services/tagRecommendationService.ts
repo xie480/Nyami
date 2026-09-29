@@ -458,9 +458,7 @@ export async function backfillFavoriteTags(
   };
 }
 
-/**
- * 后台标签队列可在索引同步期间接收新入库视频；所有 B 站请求仍共用全局限速器。
- */
+/** 后台标签回填只消费已稳定的 UID 索引快照；B 站请求仍共用全局限速器。 */
 function enqueueFavoriteTagsBackfill(
   expectedUid: string,
   videos: FavoriteVideo[],
@@ -564,8 +562,10 @@ function enqueueFavoriteTagsBackfill(
         });
 
         if (interrupted) {
-          backgroundBackfillPaused = true;
-          backgroundBackfillEpoch += 1;
+          if (taskEpoch === backgroundBackfillEpoch) {
+            backgroundBackfillPaused = true;
+            backgroundBackfillEpoch += 1;
+          }
           useTagBackfillStore.getState().finish(expectedUid, 'paused');
           return;
         }
@@ -585,8 +585,10 @@ function enqueueFavoriteTagsBackfill(
     } catch (error) {
       useTagBackfillStore.getState().finish(
         expectedUid,
-        'error',
-        error instanceof Error ? error.message : '后台读取兴趣标签失败',
+        controller.signal.aborted ? 'paused' : 'error',
+        controller.signal.aborted
+          ? null
+          : error instanceof Error ? error.message : '后台读取兴趣标签失败',
       );
     } finally {
       task.accepting = false;
@@ -595,6 +597,19 @@ function enqueueFavoriteTagsBackfill(
       }
     }
   })();
+}
+
+/** 暂停后台标签回填并等待当前批次结束，避免与索引阶段争用 API 和数据库写入。 */
+export async function pauseFavoriteTagsBackfill(): Promise<void> {
+  backgroundBackfillPaused = true;
+  backgroundBackfillEpoch += 1;
+  const task = backgroundBackfillTask;
+  if (!task) {
+    return;
+  }
+  task.accepting = false;
+  task.controller.abort();
+  await task.promise;
 }
 
 /** 解除暂停闸门并安排当前索引已有视频的标签回填。 */
@@ -608,7 +623,9 @@ export function resumeFavoriteTagsBackfill(
   Promise.resolve(videos)
     .then(async resolvedVideos => {
       const candidates = await uniqueVideosYielding(resolvedVideos);
-      if (taskEpoch !== backgroundBackfillEpoch) return;
+      if (taskEpoch !== backgroundBackfillEpoch) {
+        return;
+      }
       enqueueFavoriteTagsBackfill(expectedUid, candidates, taskEpoch, true);
     })
     .catch(error => {
@@ -619,15 +636,6 @@ export function resumeFavoriteTagsBackfill(
         error,
       );
     });
-}
-
-/** 将新同步入库的视频追加到正在运行的标签回填队列。 */
-export function addFavoriteVideosToTagBackfill(
-  expectedUid: string,
-  videos: FavoriteVideo[],
-): void {
-  if (backgroundBackfillPaused) return;
-  enqueueFavoriteTagsBackfill(expectedUid, videos, backgroundBackfillEpoch);
 }
 
 /**

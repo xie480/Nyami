@@ -662,7 +662,6 @@ export const favoriteService = {
     force = false,
     onProgress?: (event: SyncProgressEvent) => void,
     signal?: AbortSignal,
-    onVideosSynced?: (videos: FavoriteVideo[]) => void,
   ): Promise<void> {
     if (!uid) return;
 
@@ -863,7 +862,6 @@ export const favoriteService = {
               syncedVideoCount = pageWrite.syncedCount;
               if (pageWrite.videosToUpsert.length > 0) {
                 indexMayHaveChanged = true;
-                onVideosSynced?.(pageWrite.videosToUpsert);
               }
 
               updateTargetProgress(targetIndex, syncedVideoCount);
