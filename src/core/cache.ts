@@ -79,8 +79,11 @@ class TTLCache {
   delete(key: string) {
     this.mem.delete(key);
     storage.delete(`cache:${key}`);
-    keyVersions.set(key, (keyVersions.get(key) ?? 0) + 1);
-    pendingFetchers.delete(`__pending:${key}`);
+    const pendingKey = `__pending:${key}`;
+    if (pendingFetchers.has(pendingKey)) {
+      keyVersions.set(key, (keyVersions.get(key) ?? 0) + 1);
+      pendingFetchers.delete(pendingKey);
+    }
   }
 
   /** 删除所有以 prefix 开头的 key */
@@ -124,10 +127,14 @@ class TTLCache {
 
     const version = keyVersions.get(key) ?? 0;
     const promise = fetcher()
-      .then((value) => {
-        if ((keyVersions.get(key) ?? 0) === version) {
-          this.set(key, value, ttl, persist);
+      .then(async (value) => {
+        if ((keyVersions.get(key) ?? 0) !== version) {
+          if (pendingFetchers.get(pendingKey) === promise) {
+            pendingFetchers.delete(pendingKey);
+          }
+          return this.getOrSet(key, ttl, fetcher, persist);
         }
+        this.set(key, value, ttl, persist);
         if (pendingFetchers.get(pendingKey) === promise) {
           pendingFetchers.delete(pendingKey);
         }
