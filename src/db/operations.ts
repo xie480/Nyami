@@ -398,6 +398,47 @@ export async function softDeleteVideoFromPlaylist(
   });
 }
 
+/** 将本地临时收藏夹的视频关系合并到 B 站返回的正式收藏夹 ID。 */
+export async function movePlaylistVideos(
+  fromPlaylistId: string,
+  toPlaylistId: string,
+): Promise<void> {
+  if (!fromPlaylistId || !toPlaylistId || fromPlaylistId === toPlaylistId) return;
+  await database.write(async writer => {
+    const sourceRecords = await videoMetaCollection.query(
+      Q.where('playlist_id', fromPlaylistId),
+    ).fetch();
+    const destinationRecords = await videoMetaCollection.query(
+      Q.where('playlist_id', toPlaylistId),
+    ).fetch();
+    const destinationByVideoId = new Map(
+      destinationRecords.map(record => [record.videoId, record]),
+    );
+    const operations: any[] = [];
+    for (const source of sourceRecords) {
+      const destination = destinationByVideoId.get(source.videoId);
+      if (!destination) {
+        operations.push(source.prepareUpdate(record => {
+          record.playlistId = toPlaylistId;
+        }));
+        continue;
+      }
+      operations.push(destination.prepareUpdate(record => {
+        record.title = source.title;
+        record.author = source.author;
+        record.cover = source.cover;
+        record.duration = source.duration;
+        record.publishTime = source.publishTime;
+        record.favTime = source.favTime;
+        record.isDeleted = source.isDeleted;
+        record.extraJson = source.extraJson;
+      }));
+      operations.push(source.prepareMarkAsDeleted());
+    }
+    if (operations.length > 0) await writer.batch(...operations);
+  });
+}
+
 /**
  * 获取所有有效视频（未删除）
  */

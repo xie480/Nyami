@@ -47,10 +47,7 @@ import {
   skipToPrevious,
 } from '../services/trackPlayer';
 import {scheduleSleepTimer} from '../services/sleepTimer';
-import {
-  FavoriteStateReadbackError,
-  favoriteService,
-} from '../services/favoriteService';
+import {favoriteService} from '../services/favoriteService';
 import {createBilibiliVideoUrl} from '../utils/bilibiliVideoUrl';
 import {useTheme} from '../theme';
 import {useAlbumTheme} from '../hooks/useAlbumTheme';
@@ -235,38 +232,18 @@ export const PlayerScreen = () => {
         folderId: targetFolderId,
         included: false,
       });
-      const message = '已从当前 B 站收藏夹取消收藏';
+      const message = '已从本机取消收藏，正在后台同步到 B 站';
       if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
       else Alert.alert('已取消收藏', message);
     } catch (error) {
-      if (error instanceof FavoriteStateReadbackError && error.remoteConfirmed) {
-        useFolderDataStore.getState().removeVideoFromCurrentFolder(
-          targetFolderId,
-          targetBvid,
-        );
-        updateFavoriteFolderMembership(targetBvid, targetFolderId, false);
-        setFolderFavoriteOverride({
-          bvid: targetBvid,
-          folderId: targetFolderId,
-          included: false,
-        });
-      } else {
-        setFolderFavoriteOverride({
-          bvid: targetBvid,
-          folderId: targetFolderId,
-          included: true,
-        });
-      }
-      const message = error instanceof Error ? error.message : '取消收藏失败';
-      if (error instanceof FavoriteStateReadbackError && error.remoteConfirmed) {
-        const confirmedMessage = `${message}。B 站已完成修改，请刷新播放列表校准本地数据。`;
-        if (Platform.OS === 'android') ToastAndroid.show(confirmedMessage, ToastAndroid.LONG);
-        else Alert.alert('B 站已取消收藏', confirmedMessage);
-      } else if (Platform.OS === 'android') {
-        ToastAndroid.show(message, ToastAndroid.LONG);
-      } else {
-        Alert.alert('取消收藏失败', message);
-      }
+      setFolderFavoriteOverride({
+        bvid: targetBvid,
+        folderId: targetFolderId,
+        included: true,
+      });
+      const message = error instanceof Error ? error.message : '本地取消收藏失败';
+      if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.LONG);
+      else Alert.alert('取消收藏失败', message);
     } finally {
       favoriteMutationRef.current = false;
       setFolderFavoriteLoading(false);

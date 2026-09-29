@@ -14,7 +14,11 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Button} from './Button';
 import {IconButton} from './IconButton';
-import {favoriteService} from '../services/favoriteService';
+import {
+  favoriteService,
+  resolveFavoriteFolderId,
+  subscribeFavoriteFolderUpdates,
+} from '../services/favoriteService';
 import {useAuthStore} from '../store/authStore';
 import {useTheme} from '../theme';
 import type {FavoriteFolder, OnlineVideoSearchResult} from '../types/domain';
@@ -75,6 +79,23 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
     }
   }, [loadFolders, visible]);
 
+  useEffect(() => {
+    if (!visible || !uid) return;
+    return subscribeFavoriteFolderUpdates(updatedUid => {
+      if (updatedUid !== uid || useAuthStore.getState().userId !== uid) return;
+      void favoriteService.getFolders(uid).then(response => {
+        const ownedFolders = response.filter(folder => String(folder.mid) === uid);
+        const ownedFolderIds = new Set(ownedFolders.map(folder => folder.id));
+        setFolders(ownedFolders);
+        setSelectedIds(current => Array.from(new Set(
+          current
+            .map(folderId => resolveFavoriteFolderId(uid, folderId))
+            .filter(folderId => ownedFolderIds.has(folderId)),
+        )));
+      }).catch(() => {});
+    });
+  }, [uid, visible]);
+
   const createFolder = useCallback(async () => {
     if (!uid || !newFolderTitle.trim()) {
       setError('请输入收藏夹名称');
@@ -110,19 +131,9 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
     setError(null);
     try {
       const result = await favoriteService.addSearchResultToFolders(uid, video, selectedIds);
-      const confirmedCount = result.confirmedFolderIds.length;
-      const unconfirmedCount = result.unconfirmedFolderIds.length;
-      if (confirmedCount === 0 || unconfirmedCount > 0) {
-        setError(
-          confirmedCount === 0
-            ? result.writeErrorMessage || 'B 站尚未确认收藏状态，请刷新后确认。'
-            : `B 站已确认 ${confirmedCount} 个收藏夹，另有 ${unconfirmedCount} 个尚未确认。`,
-        );
-        return;
-      }
-      onSaved?.(result.confirmedFolderIds);
+      onSaved?.(result.queuedFolderIds);
       onClose();
-      const message = '已收藏到 B 站收藏夹';
+      const message = '已保存到本机，正在后台同步到 B 站';
       if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
       else Alert.alert('完成', message);
     } catch (saveError) {
@@ -221,7 +232,9 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
                       {folder.title}
                     </Text>
                     <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: 2}}>
-                      {folder.mediaCount} 首
+                      {folder.syncState
+                        ? folder.syncState === 'retrying' ? 'B 站同步重试中' : '正在同步到 B 站'
+                        : `${folder.mediaCount} 首`}
                     </Text>
                   </View>
                 </TouchableOpacity>

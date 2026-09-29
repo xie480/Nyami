@@ -22,7 +22,11 @@ import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
 import { Button } from '../components/Button';
-import { favoriteService, loadGlobalIndexCache } from '../services/favoriteService';
+import {
+  favoriteService,
+  loadGlobalIndexCache,
+  subscribeFavoriteFolderUpdates,
+} from '../services/favoriteService';
 import { importedPlaylistService } from '../services/importedPlaylistService';
 import { loadQueue, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
 import { useAuthStore } from '../store/authStore';
@@ -45,6 +49,7 @@ interface HomePlaylistItem {
   id: number;
   title: string;
   mediaCount: number;
+  syncState?: FavoriteFolder['syncState'];
   ownerName?: string;
   source?: ImportedPlaylist;
 }
@@ -171,6 +176,7 @@ export const FoldersScreen = ({ navigation }: any) => {
           id: folder.id,
           title: folder.title,
           mediaCount: folder.mediaCount,
+          syncState: folder.syncState,
         })),
         ...visibleImportedSources.map(source => ({
           sourceKey: source.sourceKey,
@@ -269,6 +275,17 @@ export const FoldersScreen = ({ navigation }: any) => {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!uid) return;
+    return subscribeFavoriteFolderUpdates(updatedUid => {
+      if (updatedUid !== uid || useAuthStore.getState().userId !== uid) return;
+      void favoriteService.getFolders(uid).then(data => {
+        setAllFolders(data);
+        setLoadedFoldersUid(uid);
+      }).catch(() => {});
+    });
+  }, [uid]);
+
   // 【修复】组件挂载时确保全局索引缓存已加载，并触发重新渲染以更新 isGlobalIndexEmpty
   useEffect(() => {
     loadGlobalIndexCache().then(() => setGlobalIndexReady(true));
@@ -315,7 +332,7 @@ export const FoldersScreen = ({ navigation }: any) => {
         setLoadedFoldersUid(uid);
       }
       setCreateFolderVisible(false);
-      const message = '收藏夹已创建';
+      const message = '已在本机创建收藏夹，正在后台同步到 B 站';
       if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
       else Alert.alert('完成', message);
     } catch (createError) {
@@ -661,6 +678,14 @@ export const FoldersScreen = ({ navigation }: any) => {
               <TouchableOpacity
                 activeOpacity={0.72}
                 onPress={() => {
+                  if (item.syncState) {
+                    const message = item.syncState === 'retrying'
+                      ? '收藏夹同步暂未完成，后台会继续重试'
+                      : '收藏夹正在同步到 B 站，完成后即可打开';
+                    if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
+                    else Alert.alert('收藏夹同步中', message);
+                    return;
+                  }
                   if (item.origin === 'owned') {
                     navigation.navigate('Videos', {
                       mediaId: item.id,
@@ -687,7 +712,7 @@ export const FoldersScreen = ({ navigation }: any) => {
                 }}>
               <PlaylistCoverThumbnail
                 origin={item.origin}
-                folderId={item.origin === 'owned' ? item.id : undefined}
+                folderId={item.origin === 'owned' && !item.syncState ? item.id : undefined}
                 initialCover={coverUri}
                 uid={uid}
                 onCoverResolved={saveFolderCover}
@@ -695,7 +720,9 @@ export const FoldersScreen = ({ navigation }: any) => {
               <View style={{flex: 1, minHeight: 60, justifyContent: 'center'}}>
                 <Text style={{fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '600'}} numberOfLines={1}>{item.title}</Text>
                 <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 5}} numberOfLines={1}>
-                  {item.ownerName ? `${item.ownerName} · ` : ''}{item.mediaCount} 个视频
+                  {item.syncState
+                    ? item.syncState === 'retrying' ? 'B 站同步重试中' : '正在同步到 B 站'
+                    : `${item.ownerName ? `${item.ownerName} · ` : ''}${item.mediaCount} 个视频`}
                 </Text>
                 <Text style={{fontSize: t.fontSize.xs, color: t.colors.primary, marginTop: 4}} numberOfLines={1}>{itemKind}</Text>
               </View>

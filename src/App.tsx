@@ -23,12 +23,16 @@ import { NoCacheFoldersScreen } from './screens/NoCacheFoldersScreen';
 import { SplashScreen } from './screens/SplashScreen';
 import { SyncDetailsScreen } from './screens/SyncDetailsScreen';
 import { TagRecommendationsScreen } from './screens/TagRecommendationsScreen';
-import { favoriteService, loadGlobalIndexCache } from './services/favoriteService';
+import {
+  favoriteService,
+  loadGlobalIndexCache,
+  resumePendingBiliMutations,
+} from './services/favoriteService';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { useUIStore } from './store/uiStore';
 import { LoginModal } from './components/LoginModal';
 import { storage } from './core/storage';
-import { useSyncStore } from './store/syncStore';
+import { resumePendingIndexSyncRetry } from './store/syncStore';
 import { GlassBackground } from './components/GlassBackground';
 import { BottomNavigationBar } from './components/BottomNavigationBar';
 import { startProgressPolling, stopProgressPolling } from './store/progressStore';
@@ -131,8 +135,6 @@ export default function App() {
     // 页面不可见时冻结，减少后台页面持续渲染。
     freezeOnBlur: true,
   }), []);
-  const startSync = useSyncStore(state => state.startSync);
-
   // Initialize player, network status listener, back handler, and Logger
   useEffect(() => {
     if (Platform.OS === 'android' && Platform.Version >= 33) {
@@ -212,6 +214,10 @@ export default function App() {
         // 用户登出时清理数据
         await favoriteService.clearGlobalIndex();
         storage.delete('lastUid');
+      }
+      if (uid && useAuthStore.getState().userId === uid) {
+        void resumePendingBiliMutations(uid);
+        void resumePendingIndexSyncRetry(uid);
       }
     };
     init();

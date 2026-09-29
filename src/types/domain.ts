@@ -8,6 +8,8 @@ export interface FavoriteFolder {
   mid: number;
   title: string;
   mediaCount: number;
+  /** 本地临时收藏夹尚未获得 B 站正式 ID 时用于界面状态提示。 */
+  syncState?: 'pending' | 'retrying';
 }
 
 /** 可从 B 站账号关系自动导入的外部播放列表类型。 */

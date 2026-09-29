@@ -7,6 +7,7 @@ import {
 } from '../services/tagRecommendationService';
 import {useAuthStore} from './authStore';
 import {useImportedPlaylistStore} from './importedPlaylistStore';
+import {storage} from '../core/storage';
 
 // Active sync controller; identity checks prevent an older run from clearing a newer run.
 let syncAbortController: AbortController | null = null;
@@ -116,3 +117,124 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   },
   resetSyncState: () => set({ syncStatus: 'idle', progressData: null, syncError: null }),
 }));
+
+interface PendingIndexSyncRetry {
+  uid: string;
+  revision: number;
+  hiddenFolderIds: number[];
+  attempts: number;
+  nextAttemptAt: number;
+}
+
+const INDEX_SYNC_RETRY_PREFIX = 'pendingGlobalIndexSyncRetry:';
+const indexSyncRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const indexSyncRetryWorkers = new Map<string, Promise<void>>();
+
+function waitForActiveIndexSync(): Promise<void> {
+  if (useSyncStore.getState().syncStatus !== 'syncing') return Promise.resolve();
+  return new Promise(resolve => {
+    let unsubscribe = () => {};
+    const check = () => {
+      if (useSyncStore.getState().syncStatus !== 'syncing') {
+        unsubscribe();
+        resolve();
+      }
+    };
+    unsubscribe = useSyncStore.subscribe(check);
+    check();
+  });
+}
+
+async function waitForIndexSyncQueueToSettle(uid: string): Promise<boolean> {
+  while (useSyncStore.getState().syncStatus === 'syncing') {
+    await waitForActiveIndexSync();
+    if (useAuthStore.getState().userId !== uid) return false;
+  }
+  return useAuthStore.getState().userId === uid;
+}
+
+function readPendingIndexSyncRetry(uid: string): PendingIndexSyncRetry | null {
+  return storage.getJSON<PendingIndexSyncRetry>(`${INDEX_SYNC_RETRY_PREFIX}${uid}`);
+}
+
+function scheduleIndexSyncRetry(uid: string, retryAt: number): void {
+  const oldTimer = indexSyncRetryTimers.get(uid);
+  if (oldTimer) clearTimeout(oldTimer);
+  const timer = setTimeout(() => {
+    indexSyncRetryTimers.delete(uid);
+    void resumePendingIndexSyncRetry(uid);
+  }, Math.max(500, retryAt - Date.now()));
+  indexSyncRetryTimers.set(uid, timer);
+}
+
+/** 立即启动本地优先的索引同步；错误会以账号隔离状态持久化并退避重试。 */
+export function queueIndexSyncWithRetry(uid: string, hiddenFolderIds: number[]): void {
+  if (!uid) return;
+  const key = `${INDEX_SYNC_RETRY_PREFIX}${uid}`;
+  const previous = readPendingIndexSyncRetry(uid);
+  storage.setJSON(key, {
+    uid,
+    revision: (previous?.revision ?? 0) + 1,
+    hiddenFolderIds: [...hiddenFolderIds],
+    attempts: previous?.attempts ?? 0,
+    nextAttemptAt: Date.now(),
+  } satisfies PendingIndexSyncRetry);
+  void resumePendingIndexSyncRetry(uid);
+}
+
+/** 登录恢复时继续处理上次中断或失败的本地索引同步意图。 */
+export function resumePendingIndexSyncRetry(uid: string): Promise<void> {
+  if (!uid || useAuthStore.getState().userId !== uid) return Promise.resolve();
+  const active = indexSyncRetryWorkers.get(uid);
+  if (active) return active;
+  const timer = indexSyncRetryTimers.get(uid);
+  if (timer) {
+    clearTimeout(timer);
+    indexSyncRetryTimers.delete(uid);
+  }
+
+  let worker: Promise<void>;
+  worker = (async () => {
+    const pending = readPendingIndexSyncRetry(uid);
+    if (!pending) return;
+    if (pending.nextAttemptAt > Date.now()) {
+      scheduleIndexSyncRetry(uid, pending.nextAttemptAt);
+      return;
+    }
+    if (useAuthStore.getState().userId !== uid) return;
+    if (!await waitForIndexSyncQueueToSettle(uid)) return;
+    await useSyncStore.getState().startSync(uid, pending.hiddenFolderIds, false);
+    if (useSyncStore.getState().syncStatus === 'syncing') {
+      if (!await waitForIndexSyncQueueToSettle(uid)) return;
+    }
+    const status = useSyncStore.getState().syncStatus;
+    if (status === 'done') {
+      const latest = readPendingIndexSyncRetry(uid);
+      if (latest?.revision === pending.revision) {
+        storage.delete(`${INDEX_SYNC_RETRY_PREFIX}${uid}`);
+      } else {
+        scheduleIndexSyncRetry(uid, Date.now());
+      }
+      return;
+    }
+
+    const latest = readPendingIndexSyncRetry(uid);
+    if (!latest) return;
+    if (latest.revision !== pending.revision) {
+      scheduleIndexSyncRetry(uid, Date.now());
+      return;
+    }
+    const attempts = latest.attempts + 1;
+    const retryAt = Date.now() + Math.min(5_000 * Math.pow(2, attempts - 1), 60 * 60 * 1000);
+    storage.setJSON(`${INDEX_SYNC_RETRY_PREFIX}${uid}`, {
+      ...latest,
+      attempts,
+      nextAttemptAt: retryAt,
+    } satisfies PendingIndexSyncRetry);
+    scheduleIndexSyncRetry(uid, retryAt);
+  })().finally(() => {
+    if (indexSyncRetryWorkers.get(uid) === worker) indexSyncRetryWorkers.delete(uid);
+  });
+  indexSyncRetryWorkers.set(uid, worker);
+  return worker;
+}

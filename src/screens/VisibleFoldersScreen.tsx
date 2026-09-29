@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, SectionList, RefreshControl, StyleSheet, TouchableOpacity, Text, StatusBar, Alert,
+  View, SectionList, RefreshControl, StyleSheet, TouchableOpacity, Text, StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Header } from '../components/Header';
@@ -10,11 +10,12 @@ import { ErrorView } from '../components/ErrorView';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { favoriteService } from '../services';
+import {resolveFavoriteFolderId} from '../services/favoriteService';
 import { importedPlaylistService } from '../services/importedPlaylistService';
 import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
 import { useTheme } from '../theme';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FavoriteFolder, ImportedPlaylist } from '../types/domain';
+import {queueIndexSyncWithRetry} from '../store/syncStore';
 
 type PreferenceItem =
   | { key: string; kind: 'owned'; folder: FavoriteFolder }
@@ -30,7 +31,6 @@ const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
 
 export const VisibleFoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
-  const insets = useSafeAreaInsets();
   const uid = useAuthStore((s) => s.userId);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const setHiddenFolderIds = useSettingsStore((s) => s.setHiddenFolderIds);
@@ -131,8 +131,17 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
       : isSourceVisible(item.source.sourceKey);
 
   const onSave = () => {
-    setHiddenFolderIds(Array.from(localHidden));
-    if (uid) setVisibleSourceKeys(uid, Array.from(localVisibleSources));
+    const nextHiddenFolderIds = Array.from(localHidden).map(folderId =>
+      uid ? resolveFavoriteFolderId(uid, folderId) : folderId,
+    );
+    const newlyVisibleSource = Array.from(localVisibleSources).some(
+      sourceKey => !visibleSourceKeys.includes(sourceKey),
+    );
+    setHiddenFolderIds(nextHiddenFolderIds);
+    if (uid) {
+      setVisibleSourceKeys(uid, Array.from(localVisibleSources));
+      if (newlyVisibleSource) queueIndexSyncWithRetry(uid, nextHiddenFolderIds);
+    }
     navigation.goBack();
   };
 

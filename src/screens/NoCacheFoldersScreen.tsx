@@ -11,13 +11,12 @@ import { ErrorView } from '../components/ErrorView';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { favoriteService } from '../services';
+import {resolveFavoriteFolderId} from '../services/favoriteService';
 import { useTheme } from '../theme';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FavoriteFolder } from '../types/domain';
 
 export const NoCacheFoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
-  const insets = useSafeAreaInsets();
   const uid = useAuthStore((s) => s.userId);
   const noCacheFolderIds = useSettingsStore((s) => s.noCacheFolderIds);
   const setNoCacheFolderIds = useSettingsStore((s) => s.setNoCacheFolderIds);
@@ -63,7 +62,9 @@ export const NoCacheFoldersScreen = ({ navigation }: any) => {
   const isFolderNoCache = (id: number) => localNoCache.has(id);
 
   const onSave = () => {
-    setNoCacheFolderIds(Array.from(localNoCache));
+    setNoCacheFolderIds(Array.from(localNoCache).map(folderId =>
+      uid ? resolveFavoriteFolderId(uid, folderId) : folderId,
+    ).filter(folderId => folderId > 0));
     navigation.goBack();
   };
 

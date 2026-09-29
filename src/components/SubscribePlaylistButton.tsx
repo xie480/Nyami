@@ -5,7 +5,7 @@ import type {ImportedPlaylist} from '../types/domain';
 import {useAuthStore} from '../store/authStore';
 import {useImportedPlaylistStore} from '../store/importedPlaylistStore';
 import {useSettingsStore} from '../store/settingsStore';
-import {useSyncStore} from '../store/syncStore';
+import {queueIndexSyncWithRetry} from '../store/syncStore';
 import {useTheme} from '../theme';
 
 const EMPTY_SOURCE_KEYS: string[] = [];
@@ -70,17 +70,9 @@ export const SubscribePlaylistButton = ({
       setVisibleSourceKeys(uid, [...currentVisibleSourceKeys, source.sourceKey]);
     }
 
-    const wasSyncing = useSyncStore.getState().syncStatus === 'syncing';
     try {
-      await useSyncStore.getState().startSync(uid, hiddenFolderIds);
-      const syncState = useSyncStore.getState();
-      if (wasSyncing) {
-        notify('已加入收藏夹，当前同步结束后会自动更新全局索引与标签。');
-      } else if (syncState.syncStatus === 'error') {
-        notify(`已加入收藏夹，但同步失败：${syncState.syncError ?? '未知错误'}。可在设置中重试。`);
-      } else {
-        notify('已加入收藏夹，视频、全局索引与标签已开始同步。');
-      }
+      queueIndexSyncWithRetry(uid, hiddenFolderIds);
+      notify('已加入本机收藏夹，视频索引正在后台同步；失败后会自动重试。');
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }

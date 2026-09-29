@@ -1,9 +1,9 @@
 import { biliApi } from './biliApi';
 import { cache } from '../core/cache';
+import {storage} from '../core/storage';
 import type {RequestPriority} from '../core/adaptiveRateLimit';
 import { config } from '../config';
 import { trimFolder, trimFavoriteVideo } from './transformers';
-import { BiliApiError } from '../core/errors';
 import type {
   FavoriteFolder,
   FavoriteVideo,
@@ -27,6 +27,7 @@ import {
   getPlaylistVideoCount,
   getVideosByPlaylistId,
   softDeleteVideoFromPlaylist,
+  movePlaylistVideos,
 } from '../db/operations';
 import { Mutex } from '../utils/mutex';
 import { AuthRequiredError } from '../core/errors';
@@ -34,6 +35,9 @@ import LoggerService from './LoggerService';
 import type { VideoMeta } from '../db/models/VideoMeta';
 import { importedPlaylistService } from './importedPlaylistService';
 import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
+import {useAuthStore} from '../store/authStore';
+import {useSettingsStore} from '../store/settingsStore';
+import {usePlayerStore} from '../store/playerStore';
 import {forEachInYieldingBatches} from '../utils/yielding';
 import {findFirstValidFavoriteCover} from '../utils/favoriteFolderCover';
 
@@ -54,34 +58,602 @@ let globalIndexLoadPromise: Promise<void> | null = null;
 let globalIndexLoadGeneration = 0;
 const globalIndexRevisionListeners = new Set<(revision: number) => void>();
 
-export class FavoriteStateReadbackError extends Error {
-  constructor(
-    message: string,
-    public readonly causeValue?: unknown,
-    public readonly remoteConfirmed = false,
-  ) {
+export interface FavoriteWriteResult {
+  queuedFolderIds: number[];
+}
+
+interface FavoriteMutationBase {
+  id: string;
+  uid: string;
+  revision: number;
+  createdAt: number;
+  attempts: number;
+  nextAttemptAt: number;
+  localApplied: boolean;
+  lastError?: string;
+}
+
+interface CreateFavoriteFolderMutation extends FavoriteMutationBase {
+  kind: 'createFolder';
+  tempFolderId: number;
+  title: string;
+  privacy: 0 | 1;
+  baselineKnown: boolean;
+  baselineFolderIds: number[];
+  uncertainUntil?: number;
+  remoteFolder?: FavoriteFolder;
+  localMigrationComplete?: boolean;
+}
+
+interface SetFavoriteMutation extends FavoriteMutationBase {
+  kind: 'favorite';
+  folderId: number;
+  aid: number;
+  video: FavoriteVideo;
+  desired: boolean;
+}
+
+type FavoriteMutation = CreateFavoriteFolderMutation | SetFavoriteMutation;
+
+const FAVORITE_MUTATION_QUEUE_KEY = 'pendingBiliFavoriteMutations:v1';
+const FAVORITE_FOLDER_ALIAS_PREFIX = 'favoriteFolderAliases:';
+const favoriteFolderUpdateListeners = new Set<(uid: string) => void>();
+const favoriteMutationWorkers = new Map<string, Promise<void>>();
+const favoriteMutationRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const favoriteMutationLocalWriteMutex = new Mutex();
+
+class RetryMutationAtError extends Error {
+  constructor(public readonly retryAt: number, message: string) {
     super(message);
-    this.name = 'FavoriteStateReadbackError';
+    this.name = 'RetryMutationAtError';
   }
 }
 
-export interface FavoriteWriteResult {
-  confirmedFolderIds: number[];
-  unconfirmedFolderIds: number[];
-  writeErrorMessage: string | null;
+function readFavoriteMutationQueue(): FavoriteMutation[] {
+  const queue = storage.getJSON<FavoriteMutation[]>(FAVORITE_MUTATION_QUEUE_KEY);
+  return Array.isArray(queue) ? queue : [];
+}
+
+function writeFavoriteMutationQueue(queue: FavoriteMutation[]): void {
+  storage.setJSON(FAVORITE_MUTATION_QUEUE_KEY, queue);
+}
+
+function notifyFavoriteFolderUpdates(uid: string): void {
+  for (const listener of favoriteFolderUpdateListeners) listener(uid);
+}
+
+export function subscribeFavoriteFolderUpdates(
+  listener: (uid: string) => void,
+): () => void {
+  favoriteFolderUpdateListeners.add(listener);
+  return () => favoriteFolderUpdateListeners.delete(listener);
+}
+
+function getFavoriteFolderAliases(uid: string): Record<string, number> {
+  return storage.getJSON<Record<string, number>>(`${FAVORITE_FOLDER_ALIAS_PREFIX}${uid}`) ?? {};
+}
+
+export function resolveFavoriteFolderId(uid: string, folderId: number): number {
+  return folderId > 0 ? folderId : getFavoriteFolderAliases(uid)[String(folderId)] ?? folderId;
+}
+
+function mergePendingFavoriteFolders(uid: string, folders: FavoriteFolder[]): FavoriteFolder[] {
+  const pendingCreates = readFavoriteMutationQueue().filter(
+    (mutation): mutation is CreateFavoriteFolderMutation =>
+      mutation.uid === uid && mutation.kind === 'createFolder',
+  );
+  const pendingIds = new Set(
+    pendingCreates
+      .filter(mutation => !mutation.localMigrationComplete)
+      .map(mutation => mutation.tempFolderId),
+  );
+  const merged = folders.filter(folder => folder.id >= 0 || pendingIds.has(folder.id));
+  const byId = new Map(merged.map(folder => [folder.id, folder]));
+  for (const mutation of pendingCreates) {
+    if (mutation.remoteFolder) {
+      if (mutation.localMigrationComplete) {
+        byId.set(mutation.remoteFolder.id, mutation.remoteFolder);
+      } else {
+        byId.delete(mutation.remoteFolder.id);
+        byId.set(mutation.tempFolderId, {
+          id: mutation.tempFolderId,
+          fid: mutation.tempFolderId,
+          mid: Number(uid),
+          title: mutation.title,
+          mediaCount: 0,
+          syncState: mutation.lastError ? 'retrying' : 'pending',
+        });
+      }
+      continue;
+    }
+    byId.set(mutation.tempFolderId, {
+      id: mutation.tempFolderId,
+      fid: mutation.tempFolderId,
+      mid: Number(uid),
+      title: mutation.title,
+      mediaCount: 0,
+      syncState: mutation.lastError ? 'retrying' : 'pending',
+    });
+  }
+  return Array.from(byId.values());
+}
+
+function persistFavoriteFolderSnapshot(uid: string, folders: FavoriteFolder[]): void {
+  const key = `folders:${uid}`;
+  cache.delete(key);
+  cache.set(key, mergePendingFavoriteFolders(uid, folders), null, true);
+  notifyFavoriteFolderUpdates(uid);
 }
 
 async function assertCurrentAccount(uid: string) {
   await biliApi.assertWriteAccount(uid);
 }
 
+function assertLocalMutationAccount(uid: string): void {
+  if (!uid || useAuthStore.getState().userId !== uid) {
+    throw new Error('B 站账号已切换，请刷新后重试');
+  }
+}
+
 function cacheFolderSnapshot(uid: string, folders: Parameters<typeof trimFolder>[0][]) {
-  cache.set(
-    `folders:${uid}`,
-    folders.map(trimFolder),
-    null,
-    true,
+  persistFavoriteFolderSnapshot(uid, folders.map(trimFolder));
+}
+
+function createTemporaryFolderId(uid: string): number {
+  const key = `favoriteFolderTempSequence:${uid}`;
+  const stored = storage.getNumber(key);
+  const nextId = Number.isSafeInteger(stored) && (stored ?? 0) < 0
+    ? stored ?? -1
+    : -1;
+  storage.setNumber(key, nextId - 1);
+  return nextId;
+}
+
+function updateFavoriteMutation(
+  task: FavoriteMutation,
+  update: (current: FavoriteMutation) => FavoriteMutation,
+): FavoriteMutation | null {
+  const queue = readFavoriteMutationQueue();
+  const index = queue.findIndex(item => item.id === task.id && item.revision === task.revision);
+  if (index < 0) return null;
+  const updated = update(queue[index]);
+  queue[index] = updated;
+  writeFavoriteMutationQueue(queue);
+  return updated;
+}
+
+function removeFavoriteMutation(task: FavoriteMutation): boolean {
+  const queue = readFavoriteMutationQueue();
+  const next = queue.filter(item => !(item.id === task.id && item.revision === task.revision));
+  if (next.length === queue.length) return false;
+  writeFavoriteMutationQueue(next);
+  return true;
+}
+
+function retryDelayForFavoriteMutation(attempts: number): number {
+  return Math.min(2_000 * Math.pow(2, Math.max(0, attempts - 1)), 60 * 60 * 1000);
+}
+
+function scheduleFavoriteMutationRetry(uid: string, retryAt: number): void {
+  const existingTimer = favoriteMutationRetryTimers.get(uid);
+  if (existingTimer) clearTimeout(existingTimer);
+  const timer = setTimeout(() => {
+    favoriteMutationRetryTimers.delete(uid);
+    void resumePendingBiliMutations(uid);
+  }, Math.max(500, retryAt - Date.now()));
+  favoriteMutationRetryTimers.set(uid, timer);
+}
+
+async function queueLocalFavoriteMutation(
+  uid: string,
+  video: FavoriteVideo,
+  folderIds: number[],
+  desired: boolean,
+): Promise<FavoriteMutation[]> {
+  const now = Date.now();
+  const queue = readFavoriteMutationQueue();
+  const queued: FavoriteMutation[] = [];
+  for (const folderId of folderIds) {
+    const id = `favorite:${uid}:${folderId}:${video.bvid}`;
+    const existing = queue.find(
+      mutation => mutation.id === id && mutation.kind === 'favorite',
+    ) as SetFavoriteMutation | undefined;
+    const task: SetFavoriteMutation = {
+      id,
+      uid,
+      revision: (existing?.revision ?? 0) + 1,
+      createdAt: existing?.createdAt ?? now,
+      attempts: 0,
+      nextAttemptAt: now,
+      localApplied: false,
+      kind: 'favorite',
+      folderId,
+      aid: video.aid ?? 0,
+      video: {...video, folderIds: [folderId]},
+      desired,
+    };
+    const index = queue.findIndex(mutation => mutation.id === id);
+    if (index >= 0) queue[index] = task;
+    else queue.push(task);
+    queued.push(task);
+  }
+  writeFavoriteMutationQueue(queue);
+  return queued;
+}
+
+async function applyLocalFavoriteMutation(
+  task: SetFavoriteMutation,
+  refreshGlobalIndex = true,
+): Promise<void> {
+  await favoriteMutationLocalWriteMutex.acquire();
+  try {
+    if (useAuthStore.getState().userId !== task.uid) {
+      throw new RetryMutationAtError(Date.now() + 60_000, '账号已切换，等待原账号重新登录后继续同步。');
+    }
+    const current = readFavoriteMutationQueue().find(
+      mutation => mutation.id === task.id,
+    ) as SetFavoriteMutation | undefined;
+    if (!current || current.localApplied) return;
+    if (current.desired) {
+      await upsertVideosBatch(String(current.folderId), [{
+        ...current.video,
+        folderIds: [current.folderId],
+      }]);
+    } else {
+      await softDeleteVideoFromPlaylist(String(current.folderId), current.video.bvid);
+    }
+    favoriteService.invalidateFolder(current.folderId);
+    usePlayerStore.getState().updateFavoriteFolderMembership(
+      current.video.bvid,
+      current.folderId,
+      current.desired,
+    );
+    updateFavoriteMutation(current, item => ({...item, localApplied: true}));
+    if (refreshGlobalIndex && useAuthStore.getState().userId === task.uid) {
+      try {
+        await reloadGlobalIndexCacheAfterMutation();
+      } catch (error) {
+        globalIndexCacheLoaded = false;
+        LoggerService.warn(
+          'FavoriteMutation',
+          'refreshLocalIndex',
+          '本地收藏已写入，但全局索引快照刷新失败',
+          error,
+        );
+      }
+    }
+  } finally {
+    favoriteMutationLocalWriteMutex.release();
+  }
+}
+
+async function applyLocalFavoriteMutationsNow(
+  uid: string,
+  tasks: FavoriteMutation[],
+): Promise<void> {
+  try {
+    const localTasks = tasks
+      .filter((task): task is SetFavoriteMutation => task.kind === 'favorite')
+      .map(task => applyLocalFavoriteMutation(task, false));
+    const results = await Promise.allSettled(localTasks);
+    if (useAuthStore.getState().userId === uid) {
+      try {
+        await reloadGlobalIndexCacheAfterMutation();
+      } catch (error) {
+        globalIndexCacheLoaded = false;
+        LoggerService.warn(
+          'FavoriteMutation',
+          'refreshLocalIndex',
+          '本地收藏已写入，但全局索引快照刷新失败',
+          error,
+        );
+      }
+    }
+    const failedWrite = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failedWrite) throw failedWrite.reason;
+  } catch (error) {
+    scheduleFavoriteMutationRetry(uid, Date.now() + 2_000);
+    throw error;
+  }
+}
+
+function cacheOptimisticFavoriteFolder(uid: string, folder: FavoriteFolder): void {
+  const folders = cache.get<FavoriteFolder[]>(`folders:${uid}`, true) ?? [];
+  persistFavoriteFolderSnapshot(uid, [...folders.filter(item => item.id !== folder.id), folder]);
+}
+
+function getCachedFavoriteFolders(uid: string): FavoriteFolder[] {
+  return mergePendingFavoriteFolders(
+    uid,
+    cache.get<FavoriteFolder[]>(`folders:${uid}`, true) ?? [],
   );
+}
+
+async function processCreateFavoriteFolder(task: CreateFavoriteFolderMutation): Promise<void> {
+  let remoteFolder = task.remoteFolder;
+  let remoteFolders: Parameters<typeof trimFolder>[0][] = [];
+  if (!remoteFolder) {
+    await assertCurrentAccount(task.uid);
+    const response = await biliApi.getFavoriteFolders(task.uid);
+    await assertCurrentAccount(task.uid);
+    remoteFolders = response.list ?? [];
+    const knownIds = new Set(task.baselineFolderIds);
+    if (!task.uncertainUntil || !task.baselineKnown) {
+      const updatedTask = updateFavoriteMutation(task, current => ({
+        ...current,
+        baselineKnown: true,
+        baselineFolderIds: remoteFolders.map(folder => folder.id),
+      }));
+      if (updatedTask) task = updatedTask as CreateFavoriteFolderMutation;
+    } else {
+      const candidates = remoteFolders.filter(folder =>
+        !knownIds.has(folder.id) &&
+        String(folder.mid) === task.uid &&
+        folder.title === task.title,
+      );
+      if (candidates.length > 1) {
+        throw new RetryMutationAtError(
+          Date.now() + 5 * 60 * 1000,
+          '发现多个同名新收藏夹，等待目录稳定后再确认，避免重复创建。',
+        );
+      }
+      if (candidates.length === 1) remoteFolder = trimFolder(candidates[0]);
+    }
+
+    if (!remoteFolder && task.uncertainUntil && task.uncertainUntil > Date.now()) {
+      throw new RetryMutationAtError(
+        task.uncertainUntil,
+        '创建请求结果暂不明确，正在先回读 B 站目录确认。',
+      );
+    }
+    if (!remoteFolder) {
+      await assertCurrentAccount(task.uid);
+      const uncertainUntil = Date.now() + 60 * 1000;
+      const preparedTask = updateFavoriteMutation(task, current => ({
+        ...current,
+        baselineKnown: true,
+        baselineFolderIds: remoteFolders.map(folder => folder.id),
+        uncertainUntil,
+      }));
+      if (preparedTask) task = preparedTask as CreateFavoriteFolderMutation;
+      try {
+        const created = await biliApi.createFavoriteFolder(
+          task.uid,
+          task.title,
+          task.privacy,
+        );
+        if (!Number.isSafeInteger(created.id) || created.id <= 0) {
+          throw new Error('B 站创建收藏夹响应缺少有效 ID');
+        }
+        remoteFolder = trimFolder(created);
+        const savedTask = updateFavoriteMutation(task, current => ({
+          ...current,
+          remoteFolder,
+          uncertainUntil: undefined,
+        }));
+        if (savedTask) task = savedTask as CreateFavoriteFolderMutation;
+      } catch (error) {
+        updateFavoriteMutation(task, current => ({...current, uncertainUntil}));
+        throw new RetryMutationAtError(
+          uncertainUntil,
+          `创建收藏夹请求未得到确认：${error instanceof Error ? error.message : '未知错误'}`,
+        );
+      }
+    }
+  }
+
+  if (!remoteFolder) throw new Error('B 站未确认收藏夹 ID，稍后重试');
+  if (useAuthStore.getState().userId !== task.uid) {
+    throw new RetryMutationAtError(Date.now() + 60_000, '账号已切换，等待原账号重新登录后继续同步。');
+  }
+  const aliases = getFavoriteFolderAliases(task.uid);
+  aliases[String(task.tempFolderId)] = remoteFolder.id;
+  storage.setJSON(`${FAVORITE_FOLDER_ALIAS_PREFIX}${task.uid}`, aliases);
+  await movePlaylistVideos(String(task.tempFolderId), String(remoteFolder.id));
+  usePlayerStore.getState().replaceFavoriteFolderId(task.tempFolderId, remoteFolder.id);
+  if (useAuthStore.getState().userId !== task.uid) {
+    throw new RetryMutationAtError(Date.now() + 60_000, '账号已切换，等待原账号重新登录后继续同步。');
+  }
+  await reloadGlobalIndexCacheAfterMutation();
+  if (useAuthStore.getState().userId !== task.uid) {
+    throw new RetryMutationAtError(Date.now() + 60_000, '账号已切换，等待原账号重新登录后继续同步。');
+  }
+  const settings = useSettingsStore.getState();
+  if (settings.hiddenFolderIds.includes(task.tempFolderId)) {
+    settings.setHiddenFolderIds(Array.from(new Set([
+      ...settings.hiddenFolderIds.filter(id => id !== task.tempFolderId),
+      remoteFolder.id,
+    ])));
+  }
+  if (settings.noCacheFolderIds.includes(task.tempFolderId)) {
+    settings.setNoCacheFolderIds(Array.from(new Set([
+      ...settings.noCacheFolderIds.filter(id => id !== task.tempFolderId),
+      remoteFolder.id,
+    ])));
+  }
+
+  let latestFolders = remoteFolders;
+  if (latestFolders.length === 0) {
+    try {
+      await assertCurrentAccount(task.uid);
+      latestFolders = (await biliApi.getFavoriteFolders(task.uid)).list ?? [];
+    } catch {
+      // 创建 POST 已返回正式 ID；目录 GET 失败时用本地快照补入响应项。
+    }
+  }
+  const normalized = latestFolders.map(trimFolder).filter(folder => folder.id !== task.tempFolderId);
+  if (!normalized.some(folder => folder.id === remoteFolder?.id)) normalized.push(remoteFolder);
+
+  const migratedTask = updateFavoriteMutation(task, current => ({
+    ...current,
+    localMigrationComplete: true,
+  }));
+  if (migratedTask) task = migratedTask as CreateFavoriteFolderMutation;
+  persistFavoriteFolderSnapshot(task.uid, normalized);
+  removeFavoriteMutation(task);
+}
+
+async function processSetFavorite(task: SetFavoriteMutation): Promise<void> {
+  let aid = task.aid;
+  if (!Number.isSafeInteger(aid) || aid <= 0) {
+    await assertCurrentAccount(task.uid);
+    const info = await biliApi.getVideoInfo(task.video.bvid);
+    await assertCurrentAccount(task.uid);
+    aid = info.aid ?? 0;
+    if (!Number.isSafeInteger(aid) || aid <= 0) throw new Error('无法解析视频 AID，稍后重试');
+    updateFavoriteMutation(task, current => ({...current, aid}));
+    task = {...task, aid};
+  }
+  const folderId = resolveFavoriteFolderId(task.uid, task.folderId);
+  if (!Number.isSafeInteger(folderId) || folderId <= 0) {
+    throw new RetryMutationAtError(Date.now() + 5_000, '等待新收藏夹获得 B 站正式 ID。');
+  }
+
+  await assertCurrentAccount(task.uid);
+  let response = await biliApi.getFavoriteFolders(task.uid, undefined, aid);
+  await assertCurrentAccount(task.uid);
+  let targetFolder = (response.list ?? []).find(
+    folder => folder.id === folderId && String(folder.mid) === task.uid,
+  );
+  if (!targetFolder) throw new Error('B 站未找到目标收藏夹，稍后重试');
+  if (targetFolder.fav_state !== (task.desired ? 1 : 0)) {
+    await assertCurrentAccount(task.uid);
+    if (task.desired) {
+      await biliApi.addVideoToFavoriteFolders(task.uid, aid, [folderId]);
+    } else {
+      await biliApi.removeVideoFromFavoriteFolder(task.uid, aid, folderId);
+    }
+    await assertCurrentAccount(task.uid);
+    response = await biliApi.getFavoriteFolders(task.uid, undefined, aid);
+    await assertCurrentAccount(task.uid);
+    targetFolder = (response.list ?? []).find(
+      folder => folder.id === folderId && String(folder.mid) === task.uid,
+    );
+  }
+  if (targetFolder?.fav_state !== (task.desired ? 1 : 0)) {
+    throw new Error('B 站尚未确认目标收藏状态，稍后重试');
+  }
+  cacheFolderSnapshot(task.uid, response.list ?? []);
+}
+
+export async function resumePendingBiliMutations(uid: string): Promise<void> {
+  if (!uid || useAuthStore.getState().userId !== uid) return;
+  const active = favoriteMutationWorkers.get(uid);
+  if (active) return active;
+  const pendingTimer = favoriteMutationRetryTimers.get(uid);
+  if (pendingTimer) {
+    clearTimeout(pendingTimer);
+    favoriteMutationRetryTimers.delete(uid);
+  }
+
+  let worker: Promise<void>;
+  worker = (async () => {
+    while (useAuthStore.getState().userId === uid) {
+      const pending = readFavoriteMutationQueue()
+        .filter(mutation => mutation.uid === uid)
+        .sort((left, right) => left.createdAt - right.createdAt);
+      if (pending.length === 0) return;
+      const unresolvedTemporaryFolderIds = new Set(
+        pending
+          .filter((mutation): mutation is CreateFavoriteFolderMutation =>
+            mutation.kind === 'createFolder' &&
+            resolveFavoriteFolderId(uid, mutation.tempFolderId) <= 0,
+          )
+          .map(mutation => mutation.tempFolderId),
+      );
+      const now = Date.now();
+      const task = pending.find(mutation =>
+        mutation.nextAttemptAt <= now &&
+        !(mutation.kind === 'favorite' &&
+          mutation.folderId < 0 &&
+          unresolvedTemporaryFolderIds.has(mutation.folderId)),
+      );
+      if (!task) {
+        const retryAt = Math.min(...pending
+          .filter(mutation => mutation.kind === 'createFolder' || mutation.folderId > 0)
+          .map(mutation => mutation.nextAttemptAt));
+        scheduleFavoriteMutationRetry(uid, Number.isFinite(retryAt) ? retryAt : now + 5_000);
+        return;
+      }
+      try {
+        if (task.kind === 'favorite' && !task.localApplied) {
+          await applyLocalFavoriteMutation(task);
+        }
+        const current = readFavoriteMutationQueue().find(
+          mutation => mutation.id === task.id,
+        );
+        if (!current) continue;
+        if (current.kind === 'createFolder') {
+          await processCreateFavoriteFolder(current);
+        } else {
+          await processSetFavorite(current);
+        }
+        removeFavoriteMutation(current);
+      } catch (error) {
+        const current = readFavoriteMutationQueue().find(
+          mutation => mutation.id === task.id,
+        );
+        if (!current || current.revision !== task.revision) continue;
+        const attempts = current.attempts + 1;
+        const retryAt = error instanceof RetryMutationAtError
+          ? error.retryAt
+          : Date.now() + retryDelayForFavoriteMutation(attempts);
+        updateFavoriteMutation(current, mutation => ({
+          ...mutation,
+          attempts,
+          nextAttemptAt: retryAt,
+          lastError: error instanceof Error ? error.message : '未知错误',
+        }));
+        if (current.kind === 'createFolder') notifyFavoriteFolderUpdates(uid);
+        LoggerService.warn('FavoriteMutation', 'retry', 'B 站收藏变更暂未完成，将在后台重试');
+        scheduleFavoriteMutationRetry(uid, retryAt);
+        continue;
+      }
+    }
+  })().finally(() => {
+    if (favoriteMutationWorkers.get(uid) === worker) favoriteMutationWorkers.delete(uid);
+  });
+  favoriteMutationWorkers.set(uid, worker);
+  return worker;
+}
+
+function queueCreateFavoriteFolder(
+  uid: string,
+  title: string,
+  privacy: 0 | 1,
+): FavoriteFolder {
+  const now = Date.now();
+  const folders = cache.get<FavoriteFolder[]>(`folders:${uid}`, true);
+  const tempFolderId = createTemporaryFolderId(uid);
+  const task: CreateFavoriteFolderMutation = {
+    id: `createFolder:${uid}:${tempFolderId}`,
+    uid,
+    revision: 1,
+    createdAt: now,
+    attempts: 0,
+    nextAttemptAt: now,
+    localApplied: true,
+    kind: 'createFolder',
+    tempFolderId,
+    title,
+    privacy,
+    baselineKnown: folders !== undefined,
+    baselineFolderIds: (folders ?? []).filter(folder => folder.id > 0).map(folder => folder.id),
+  };
+  writeFavoriteMutationQueue([...readFavoriteMutationQueue(), task]);
+  const placeholder: FavoriteFolder = {
+    id: tempFolderId,
+    fid: tempFolderId,
+    mid: Number(uid),
+    title,
+    mediaCount: 0,
+    syncState: 'pending',
+  };
+  cacheOptimisticFavoriteFolder(uid, placeholder);
+  scheduleFavoriteMutationRetry(uid, now);
+  return placeholder;
 }
 let globalIndexCacheLoaded = false;
 let visibleGlobalIndexSource: FavoriteVideo[] | null = null;
@@ -331,6 +903,26 @@ export function loadGlobalIndexCache(): Promise<void> {
   return loadPromise;
 }
 
+/** 本地写入后强制丢弃可能早于写入启动的索引读取，再从数据库重建快照。 */
+async function reloadGlobalIndexCacheAfterMutation(): Promise<void> {
+  const inFlightLoad = globalIndexLoadPromise;
+  if (inFlightLoad) {
+    globalIndexLoadGeneration += 1;
+    try {
+      await inFlightLoad;
+    } catch (error) {
+      LoggerService.warn(
+        'favoriteService',
+        'reloadGlobalIndexCacheAfterMutation',
+        '旧全局索引读取失败，继续重建本地变更后的索引',
+        error,
+      );
+    }
+  }
+  globalIndexCacheLoaded = false;
+  await loadGlobalIndexCache();
+}
+
 export async function ensureGlobalIndexCacheLoaded(): Promise<void> {
   if (globalIndexCacheLoaded) return;
   await loadGlobalIndexCache();
@@ -478,7 +1070,7 @@ export const favoriteService = {
     }
     const key = `folders:${uid}`;
     if (force) cache.delete(key);
-    return cache.getOrSet(
+    const folders = await cache.getOrSet(
       key,
       null,
       async () => {
@@ -487,6 +1079,11 @@ export const favoriteService = {
       },
       true, // 持久化
     );
+    const merged = mergePendingFavoriteFolders(uid, folders);
+    if (merged.length !== folders.length || merged.some(folder => folder.syncState)) {
+      cache.set(key, merged, null, true);
+    }
+    return merged;
   },
 
   /**
@@ -548,129 +1145,66 @@ export const favoriteService = {
     cache.delete(`folders:${uid}`);
   },
 
-  /** 新建收藏夹后从 B 站目录回读，以远端目录为准更新本地缓存。 */
+  /** 先显示本地临时目录，再由持久队列异步创建 B 站收藏夹。 */
   async createFavoriteFolder(
     uid: string,
     title: string,
     privacy: 0 | 1,
   ): Promise<FavoriteFolder> {
-    await assertCurrentAccount(uid);
-    const created = await biliApi.createFavoriteFolder(uid, title, privacy);
-    this.invalidateFolderList(uid);
-
-    let folderList;
-    try {
-      await assertCurrentAccount(uid);
-      folderList = await biliApi.getFavoriteFolders(uid);
-      await assertCurrentAccount(uid);
-    } catch (error) {
-      throw new FavoriteStateReadbackError(
-        '收藏夹创建请求已发送，但回读失败；请刷新 B 站收藏夹确认，避免重复创建。',
-        error,
-      );
-    }
-    const remoteFolders = folderList.list || [];
-    cacheFolderSnapshot(uid, remoteFolders);
-    const confirmedFolder = remoteFolders.find(
-      folder => folder.id === created.id && String(folder.mid) === uid,
-    );
-    if (!confirmedFolder) {
-      throw new FavoriteStateReadbackError(
-        '收藏夹创建请求已发送，但 B 站目录尚未确认；请刷新后再试。',
-      );
-    }
-    return trimFolder(confirmedFolder);
+    assertLocalMutationAccount(uid);
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) throw new Error('收藏夹名称不能为空');
+    return queueCreateFavoriteFolder(uid, normalizedTitle, privacy);
   },
 
-  /** 从当前账号的自有收藏夹取消单个视频，并以 B 站 fav_state 回读确认后更新本地索引。 */
+  /** 先更新本地索引，再将目标状态排队同步到 B 站。 */
   async removeVideoFromFavoriteFolder(
     uid: string,
     bvid: string,
     aid: number,
     folderId: number,
   ): Promise<void> {
-    await assertCurrentAccount(uid);
+    assertLocalMutationAccount(uid);
     if (!bvid.trim()) throw new Error('视频 BVID 无效，无法取消收藏');
-    const folders = await this.getFolders(uid);
-    const targetFolder = folders.find(folder => folder.id === folderId);
+    const folders = getCachedFavoriteFolders(uid);
+    const localFolderId = resolveFavoriteFolderId(uid, folderId);
+    const targetFolder = folders.find(folder => folder.id === folderId || folder.id === localFolderId);
     if (!targetFolder || String(targetFolder.mid) !== uid) {
       throw new Error('目标收藏夹已失效或不属于当前账号');
     }
-
-    const resolvedAid = Number.isSafeInteger(aid) && aid > 0
-      ? aid
-      : (await biliApi.getVideoInfo(bvid)).aid ?? 0;
-    if (!Number.isSafeInteger(resolvedAid) || resolvedAid <= 0) {
-      throw new Error('无法确认视频 AID，未发送取消收藏请求');
-    }
-
-    let writeError: unknown = null;
-    try {
-      await biliApi.removeVideoFromFavoriteFolder(uid, resolvedAid, folderId);
-    } catch (error) {
-      writeError = error;
-    }
-
-    let folderList;
-    try {
-      await assertCurrentAccount(uid);
-      folderList = await biliApi.getFavoriteFolders(uid, undefined, resolvedAid);
-      await assertCurrentAccount(uid);
-    } catch (error) {
-      this.invalidateFolderList(uid);
-      throw new FavoriteStateReadbackError(
-        '取消收藏请求已发送，但 B 站状态回读失败；请刷新收藏夹确认。',
-        error,
-      );
-    }
-
-    const remoteFolders = folderList.list || [];
-    const confirmedFolder = remoteFolders.find(
-      folder => folder.id === folderId && String(folder.mid) === uid,
-    );
-    if (!confirmedFolder || confirmedFolder.fav_state !== 0) {
-      throw new FavoriteStateReadbackError(
-        writeError instanceof Error
-          ? `B 站尚未确认取消收藏：${writeError.message}`
-          : 'B 站尚未确认取消收藏，请刷新后重试。',
-        writeError,
-      );
-    }
-
-    cacheFolderSnapshot(uid, remoteFolders);
-    this.invalidateFolder(folderId);
-    try {
-      await softDeleteVideoFromPlaylist(String(folderId), bvid);
-      await loadGlobalIndexCache();
-    } catch (error) {
-      throw new FavoriteStateReadbackError(
-        `B 站已确认取消收藏，但本地索引更新失败：${error instanceof Error ? error.message : '未知错误'}`,
-        error,
-        true,
-      );
-    }
+    const cachedVideo = globalIndexCache.find(video => video.bvid === bvid);
+    const video: FavoriteVideo = {
+      bvid,
+      aid: Number.isSafeInteger(aid) && aid > 0 ? aid : cachedVideo?.aid,
+      title: cachedVideo?.title ?? '',
+      cover: cachedVideo?.cover ?? '',
+      duration: cachedVideo?.duration ?? 0,
+      page: cachedVideo?.page ?? 1,
+      pubtime: cachedVideo?.pubtime ?? 0,
+      favTime: cachedVideo?.favTime ?? Math.floor(Date.now() / 1000),
+      upper: cachedVideo?.upper ?? {mid: 0, name: ''},
+      attr: 0,
+      folderIds: [localFolderId],
+    };
+    const [task] = await queueLocalFavoriteMutation(uid, video, [localFolderId], false);
+    await applyLocalFavoriteMutationsNow(uid, [task]);
+    scheduleFavoriteMutationRetry(uid, Date.now());
   },
 
-  /** 写入 B 站收藏后按 AID 回读实际状态，并仅索引远端确认的目标目录。 */
+  /** 先本地收藏，再将 B 站目标状态排队同步并在失败后重试。 */
   async addSearchResultToFolders(
     uid: string,
     video: OnlineVideoSearchResult,
     folderIds: number[],
   ): Promise<FavoriteWriteResult> {
-    await assertCurrentAccount(uid);
-    const aid = Number.isSafeInteger(video.aid) && video.aid > 0
-      ? video.aid
-      : (await biliApi.getVideoInfo(video.bvid)).aid ?? 0;
-    if (!Number.isSafeInteger(aid) || aid <= 0) {
-      throw new Error('无法确认视频 AID，未发送收藏请求');
-    }
-    const writableVideo = {...video, aid};
-    const uniqueFolderIds = [...new Set(folderIds)];
+    assertLocalMutationAccount(uid);
+    if (!video.bvid.trim()) throw new Error('视频 BVID 无效，无法收藏');
+    const uniqueFolderIds = [...new Set(folderIds.map(folderId => resolveFavoriteFolderId(uid, folderId)))];
     if (uniqueFolderIds.length === 0) {
       throw new Error('请至少选择一个收藏夹');
     }
 
-    const knownFolders = await this.getFolders(uid);
+    const knownFolders = getCachedFavoriteFolders(uid);
     const ownedFolderIds = new Set(
       knownFolders
         .filter(folder => String(folder.mid) === uid)
@@ -679,75 +1213,22 @@ export const favoriteService = {
     if (uniqueFolderIds.some(folderId => !ownedFolderIds.has(folderId))) {
       throw new Error('收藏目标已失效或不属于当前账号，请重新选择');
     }
-
-    let writeError: unknown = null;
-    try {
-      await biliApi.addVideoToFavoriteFolders(uid, aid, uniqueFolderIds);
-    } catch (error) {
-      // 11201 表示至少有一个目标已收藏；仍以状态回读判断每个目标。
-      writeError = error;
-    }
-
-    let folderList;
-    try {
-      await assertCurrentAccount(uid);
-      folderList = await biliApi.getFavoriteFolders(uid, undefined, aid);
-      await assertCurrentAccount(uid);
-    } catch (error) {
-      this.invalidateFolderList(uid);
-      throw new FavoriteStateReadbackError(
-        '收藏请求已发送，但 B 站状态回读失败；未自动重发，请刷新收藏夹确认。',
-        error,
-      );
-    }
-
-    const remoteFolders = folderList.list || [];
-    cacheFolderSnapshot(uid, remoteFolders);
-    const confirmedFolderIds = uniqueFolderIds.filter(folderId =>
-      remoteFolders.some(
-        folder =>
-          folder.id === folderId &&
-          String(folder.mid) === uid &&
-          folder.fav_state === 1,
-      ),
-    );
-    const unconfirmedFolderIds = uniqueFolderIds.filter(
-      folderId => !confirmedFolderIds.includes(folderId),
-    );
-
-    if (confirmedFolderIds.length > 0) {
-      const indexedVideo: FavoriteVideo = {
-        ...writableVideo,
-        page: 1,
-        favTime: Math.floor(Date.now() / 1000),
-        upper: {mid: video.authorId, name: video.author},
-        attr: 0,
-      };
-      try {
-        for (const folderId of confirmedFolderIds) {
-          this.invalidateFolder(folderId);
-          await upsertVideosBatch(folderId.toString(), [indexedVideo]);
-        }
-        await loadGlobalIndexCache();
-      } catch (error) {
-        throw new Error(
-          `B 站已确认收藏，但本地索引更新失败：${error instanceof Error ? error.message : '未知错误'}`,
-        );
-      }
-    }
-
-    return {
-      confirmedFolderIds,
-      unconfirmedFolderIds,
-      writeErrorMessage:
-        writeError instanceof BiliApiError
-          ? writeError.message
-          : writeError instanceof Error
-            ? writeError.message
-            : writeError
-              ? '收藏写入未返回成功'
-              : null,
+    const indexedVideo: FavoriteVideo = {
+      aid: Number.isSafeInteger(video.aid) && video.aid > 0 ? video.aid : undefined,
+      bvid: video.bvid,
+      title: video.title,
+      cover: video.cover,
+      duration: video.duration,
+      page: 1,
+      pubtime: video.pubtime,
+      favTime: Math.floor(Date.now() / 1000),
+      upper: {mid: video.authorId, name: video.author},
+      attr: 0,
     };
+    const queued = await queueLocalFavoriteMutation(uid, indexedVideo, uniqueFolderIds, true);
+    await applyLocalFavoriteMutationsNow(uid, queued);
+    scheduleFavoriteMutationRetry(uid, Date.now());
+    return {queuedFolderIds: uniqueFolderIds};
   },
 
   /**
@@ -767,7 +1248,9 @@ export const favoriteService = {
     let indexMayHaveChanged = false;
     try {
       const allFolders = await this.getFolders(uid, true, signal, 'index');
-      const folders = allFolders.filter(f => !hiddenFolderIds.includes(f.id));
+      const folders = allFolders.filter(
+        folder => !folder.syncState && !hiddenFolderIds.includes(folder.id),
+      );
       const importedStore = useImportedPlaylistStore.getState();
       const selectedSourceKeys = importedStore.visibleSourceKeysByUid[uid] ?? [];
       let selectedImportedSources: ImportedPlaylist[] = [];
