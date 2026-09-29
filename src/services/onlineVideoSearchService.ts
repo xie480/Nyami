@@ -17,6 +17,40 @@ export interface OnlineVideoSearchPage {
   hasMore: boolean;
 }
 
+export interface OnlineSearchRefreshSnapshot {
+  refreshKey: string;
+  criteria: OnlineVideoSearchCriteria;
+  results: OnlineVideoSearchResult[];
+  page: number;
+  hasMore: boolean;
+}
+
+const onlineSearchRefreshListeners = new Set<
+  (snapshot: OnlineSearchRefreshSnapshot) => void
+>();
+
+export function getOnlineSearchRefreshKey(
+  criteria: OnlineVideoSearchCriteria,
+): string {
+  return `onlineSearch:${JSON.stringify([
+    criteria.keyword.trim(),
+    criteria.tagFilter.trim(),
+    criteria.sort,
+    criteria.durationLimitSeconds,
+  ])}`;
+}
+
+export function publishOnlineSearchRefresh(snapshot: OnlineSearchRefreshSnapshot): void {
+  onlineSearchRefreshListeners.forEach(listener => listener(snapshot));
+}
+
+export function subscribeOnlineSearchRefresh(
+  listener: (snapshot: OnlineSearchRefreshSnapshot) => void,
+): () => void {
+  onlineSearchRefreshListeners.add(listener);
+  return () => onlineSearchRefreshListeners.delete(listener);
+}
+
 export function sortOnlineVideoSearchResults(
   results: OnlineVideoSearchResult[],
   sort: OnlineVideoSearchSort,

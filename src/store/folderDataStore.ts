@@ -33,14 +33,11 @@ interface FolderDataState {
   setSortOption: (option: SortOption) => void;
   getDisplayedList: () => FavoriteVideo[];
   /**
-   * 增量刷新当前收藏夹。
-   * 调用 favorService.syncSingleFolder 获取新增视频，然后将其
-   * 无损追加到 list 头部（新视频收藏时间最新，自然排最前），
-   * 避免全量替换 list 导致的视图闪烁和列表滚动位置丢失。
-   * 刷新完成后返回新增视频数量，调用方可据此决定是否给出用户反馈。
+   * 增量刷新当前收藏夹，并将远端重叠页中的最新元数据与新增视频合并到 list。
+   * 不替换整份列表，保留滚动位置；刷新完成后返回新增视频数量。
    */
-  refreshFolder: (mediaId: number) => Promise<number>;
-  refreshImportedSource: () => Promise<number>;
+  refreshFolder: (mediaId: number, signal?: AbortSignal) => Promise<number>;
+  refreshImportedSource: (signal?: AbortSignal) => Promise<number>;
 }
 
 export const useFolderDataStore = create<FolderDataState>((set, get) => ({
@@ -95,7 +92,7 @@ export const useFolderDataStore = create<FolderDataState>((set, get) => ({
 
   loadMore: async () => {
     const state = get();
-    if (state.loading || !state.hasMore || (!state.folderId && !state.importedSource)) return;
+    if (state.loading || state.isRefreshing || !state.hasMore || (!state.folderId && !state.importedSource)) return;
 
     set({ loading: true, error: null });
 
@@ -117,9 +114,16 @@ export const useFolderDataStore = create<FolderDataState>((set, get) => ({
       }
 
       // 优先从全局索引获取
+      const folderId = state.folderId;
+      if (folderId === null) {
+        set(prev => prev.sourceKey !== state.sourceKey
+          ? prev
+          : {loading: false, error: '收藏夹来源已失效'});
+        return;
+      }
       const globalIndex = favoriteService.getGlobalIndex();
       if (globalIndex.length > 0) {
-        const folderVideos = globalIndex.filter(v => v.folderIds?.includes(state.folderId!));
+        const folderVideos = globalIndex.filter(v => v.folderIds?.includes(folderId));
         if (folderVideos.length > 0 && get().sourceKey === state.sourceKey) {
           if (state.page === 1) {
             set({
@@ -133,7 +137,7 @@ export const useFolderDataStore = create<FolderDataState>((set, get) => ({
       }
 
       // 如果全局索引没有或者需要分页请求远端
-      const r = await favoriteService.getVideos(state.folderId, state.page);
+      const r = await favoriteService.getVideos(folderId, state.page);
       set(prev => prev.sourceKey !== state.sourceKey
         ? prev
         : {
@@ -149,29 +153,27 @@ export const useFolderDataStore = create<FolderDataState>((set, get) => ({
     }
   },
 
-  /**
-   * 增量刷新：拉取新增视频 → 追加到 list 头部 → 更新全局索引
-   *
-   * === 无损追加策略 ===
-   * 新增视频来源于 B 站 API（order=mtime 倒序），即最新收藏的排最前。
-   * 因此直接将 newVideos 拼接到 list 头部即可维持时间倒序语义，
-   * 无需全量重新从全局索引过滤，避免列表滚动位置回顶和白屏闪烁。
-   */
-  refreshFolder: async (mediaId: number): Promise<number> => {
+  /** 增量刷新远端首段，把最新元数据与新增条目合并进当前列表。 */
+  refreshFolder: async (mediaId: number, signal?: AbortSignal): Promise<number> => {
     const state = get();
     // 防止刷新期间再次触发
-    if (state.isRefreshing) return 0;
+    if (state.isRefreshing || state.loading) return 0;
     // 防止刷新的收藏夹与当前视图不对应
     if (state.folderId !== mediaId) return 0;
 
     set({ isRefreshing: true, error: null });
     try {
-      const newVideos = await favoriteService.syncSingleFolder(mediaId);
-      if (newVideos.length > 0) {
-        // 将新增视频追加到 list 头部（新视频 = 最新收藏，排在前面）
-        set(prev => prev.sourceKey === state.sourceKey && prev.folderId === mediaId
-          ? {list: [...newVideos, ...prev.list]}
-          : prev);
+      const {newVideos, refreshedVideos} = await favoriteService.syncSingleFolder(mediaId, signal);
+      if (signal?.aborted) return 0;
+      if (refreshedVideos.length > 0) {
+        const refreshedByBvid = new Map(refreshedVideos.map(video => [video.bvid, video]));
+        set(prev => {
+          if (prev.sourceKey !== state.sourceKey || prev.folderId !== mediaId) return prev;
+          const updatedList = prev.list.map(video => refreshedByBvid.get(video.bvid) ?? video);
+          const knownBvids = new Set(updatedList.map(video => video.bvid));
+          const newItems = newVideos.filter(video => !knownBvids.has(video.bvid));
+          return {list: [...newItems, ...updatedList]};
+        });
       }
       return newVideos.length;
     } catch (e: any) {
@@ -182,23 +184,36 @@ export const useFolderDataStore = create<FolderDataState>((set, get) => ({
     }
   },
 
-  refreshImportedSource: async (): Promise<number> => {
+  refreshImportedSource: async (signal?: AbortSignal): Promise<number> => {
     const state = get();
     const source = state.importedSource;
-    if (!source || state.isRefreshing) return 0;
+    if (!source || state.isRefreshing || state.loading) return 0;
 
     set({ isRefreshing: true, error: null });
     try {
       importedPlaylistService.invalidateVideos(source.sourceKey);
-      const result = await importedPlaylistService.getVideos(source, 1, true);
+      const loadedPageCount = Math.max(1, state.page - 1);
+      const refreshedVideos: FavoriteVideo[] = [];
+      let hasMore = true;
+      let fetchedPage = 0;
+      for (let page = 1; page <= loadedPageCount && hasMore; page += 1) {
+        const result = await importedPlaylistService.getVideos(source, page, true, signal);
+        if (signal?.aborted) return 0;
+        refreshedVideos.push(...result.list);
+        hasMore = result.hasMore;
+        fetchedPage = page;
+      }
+      const deduplicatedVideos = Array.from(
+        new Map(refreshedVideos.map(video => [video.bvid, video])).values(),
+      );
       const previousBvids = new Set(state.list.map(video => video.bvid));
-      const newCount = result.list.filter(video => !previousBvids.has(video.bvid)).length;
+      const newCount = deduplicatedVideos.filter(video => !previousBvids.has(video.bvid)).length;
       set(current => {
         if (current.sourceKey !== source.sourceKey) return current;
         return {
-          list: result.list,
-          page: 2,
-          hasMore: result.hasMore,
+          list: deduplicatedVideos,
+          page: fetchedPage + 1,
+          hasMore,
           loading: false,
           isRefreshing: false,
         };

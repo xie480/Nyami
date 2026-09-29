@@ -14,11 +14,47 @@ const mmkvStorage = {
 
 let playModeSwitchRevision = 0;
 
+function uniqueVideos(videos: FavoriteVideo[]): FavoriteVideo[] {
+  return Array.from(
+    new Map(videos.filter(video => video.bvid).map(video => [video.bvid, video])).values(),
+  );
+}
+
+function mergeNewSourceVideos(
+  existingVideos: FavoriteVideo[],
+  sourceVideos: FavoriteVideo[],
+  addedVideos: FavoriteVideo[],
+): FavoriteVideo[] {
+  const sourceByBvid = new Map(uniqueVideos(sourceVideos).map(video => [video.bvid, video]));
+  const sourceOrder = new Map(Array.from(sourceByBvid.keys(), (bvid, index) => [bvid, index]));
+  const merged = existingVideos.map(video => sourceByBvid.get(video.bvid) ?? video);
+  const seen = new Set(merged.map(video => video.bvid));
+
+  for (const video of uniqueVideos(addedVideos)) {
+    if (seen.has(video.bvid)) continue;
+    const targetOrder = sourceOrder.get(video.bvid);
+    const insertAt = targetOrder === undefined
+      ? -1
+      : merged.findIndex(existing => {
+          const existingOrder = sourceOrder.get(existing.bvid);
+          return existingOrder !== undefined && existingOrder > targetOrder;
+        });
+    if (insertAt < 0) merged.push(video);
+    else merged.splice(insertAt, 0, video);
+    seen.add(video.bvid);
+  }
+
+  return merged;
+}
+
 export interface PlayContext {
   folderId?: number;
   sourceKey?: string;
+  /** 搜索来源的稳定键，用于刷新结果页与播放队列的同一快照。 */
+  refreshKey?: string;
   sortOption?: string;
   searchQuery?: string;
+  favoriteSearch?: {uid: string; keyword: string};
   /** 在线搜索结果队列的分页条件和当前页状态。 */
   onlineSearch?: OnlineSearchQueueContext;
   /** 标识个性化队列，以便独立控制自动缓存与按画像续页。 */
@@ -60,6 +96,12 @@ interface PlayerState {
   removeFromQueue: (bvid: string) => Promise<void>;
   reorderQueue: (videos: FavoriteVideo[], startBvid?: string) => Promise<void>;
   appendQueue: (videos: FavoriteVideo[], startBvid?: string) => Promise<void>;
+  syncQueueFromSourceRefresh: (
+    refreshKey: string,
+    sourceVideos: FavoriteVideo[],
+    addedVideos: FavoriteVideo[],
+  ) => boolean;
+  replaceQueueFromSearchRefresh: (refreshKey: string, videos: FavoriteVideo[]) => boolean;
   /** 在队列中更新特定视频的 parts 信息 */
   updateVideoParts: (bvid: string, parts: any[]) => void;
 }
@@ -175,6 +217,75 @@ export const usePlayerStore = create<PlayerState>()(
       // Append a list of videos to the end of the queue
       appendQueue: async (videos, startBvid) => {
         await tpAppendQueue(videos, startBvid);
+      },
+      syncQueueFromSourceRefresh: (refreshKey, sourceVideos, addedVideos) => {
+        const state = get();
+        if (
+          !refreshKey ||
+          (state.playContext?.sourceKey !== refreshKey &&
+            state.playContext?.refreshKey !== refreshKey)
+        ) {
+          return false;
+        }
+
+        const sequentialBaseline = state.originalQueue.length > 0
+          ? state.originalQueue
+          : state.queue;
+        const nextOriginalQueue = mergeNewSourceVideos(
+          sequentialBaseline,
+          sourceVideos,
+          addedVideos,
+        );
+        const existingIds = new Set(state.queue.map(video => video.bvid));
+        const nextQueue = state.playMode === 'shuffle'
+          ? [
+              ...mergeNewSourceVideos(state.queue, sourceVideos, []),
+              ...uniqueVideos(addedVideos).filter(video => !existingIds.has(video.bvid)),
+            ]
+          : mergeNewSourceVideos(state.queue, sourceVideos, addedVideos);
+        const membershipChanged = nextQueue.length !== state.queue.length;
+        set({queue: nextQueue, originalQueue: nextOriginalQueue});
+
+        if (membershipChanged) {
+          void tpReorderQueue(nextQueue, state.currentBvid ?? undefined).catch(console.error);
+        }
+        return true;
+      },
+      replaceQueueFromSearchRefresh: (refreshKey, videos) => {
+        const state = get();
+        if (!refreshKey || state.playContext?.refreshKey !== refreshKey) {
+          return false;
+        }
+
+        const sourceVideos = uniqueVideos(videos);
+        const refreshedByBvid = new Map(sourceVideos.map(video => [video.bvid, video]));
+        const currentVideo = state.currentBvid
+          ? state.queue.find(video => video.bvid === state.currentBvid)
+          : undefined;
+        if (currentVideo && !refreshedByBvid.has(currentVideo.bvid)) {
+          sourceVideos.unshift(currentVideo);
+        }
+
+        let nextQueue = sourceVideos;
+        if (state.playMode === 'shuffle') {
+          const orderedQueue = state.queue
+            .filter(video => refreshedByBvid.has(video.bvid) || video.bvid === state.currentBvid)
+            .map(video => refreshedByBvid.get(video.bvid) ?? video);
+          const orderedIds = new Set(orderedQueue.map(video => video.bvid));
+          nextQueue = [
+            ...orderedQueue,
+            ...sourceVideos.filter(video => !orderedIds.has(video.bvid)),
+          ];
+        }
+
+        const membershipChanged =
+          nextQueue.length !== state.queue.length ||
+          nextQueue.some((video, index) => video.bvid !== state.queue[index]?.bvid);
+        set({queue: nextQueue, originalQueue: sourceVideos});
+        if (membershipChanged) {
+          void tpReorderQueue(nextQueue, state.currentBvid ?? undefined).catch(console.error);
+        }
+        return true;
       },
     }),
     {

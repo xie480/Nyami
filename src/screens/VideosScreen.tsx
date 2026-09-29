@@ -11,11 +11,11 @@ import {
   ToastAndroid,
   Modal,
   TextInput,
+  RefreshControl,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import TrackPlayer from 'react-native-track-player';
 import { IconButton } from '../components/IconButton';
 import { SubscribePlaylistButton } from '../components/SubscribePlaylistButton';
 import { StatusBar } from 'react-native';
@@ -137,7 +137,6 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const includeVideoParts = Boolean(route.params.includeVideoParts || source);
   const listTitle = source?.title ?? title ?? '播放列表';
   const setQueue = usePlayerStore((s) => s.setQueue);
-  const playMode = usePlayerStore((s) => s.playMode);
   
   const {
     list,
@@ -185,13 +184,24 @@ export const VideosScreen = ({ route, navigation }: any) => {
    */
   const handleRefresh = useCallback(async () => {
     // Step 1: 防抖检测，避免重复触发
-    if (refreshLockRef.current || isRefreshing) return;
+    if (refreshLockRef.current || isRefreshing || loading) return;
     refreshLockRef.current = true;
 
     try {
+      const previousBvids = new Set(
+        useFolderDataStore.getState().getDisplayedList().map(video => video.bvid),
+      );
       const newCount = source
         ? await refreshImportedSource()
         : await refreshFolder(mediaId);
+      const refreshedList = useFolderDataStore.getState().getDisplayedList();
+      const addedVideos = refreshedList.filter(video => !previousBvids.has(video.bvid));
+      const refreshKey = source?.sourceKey ?? `ownedFavorite:${mediaId}`;
+      usePlayerStore.getState().syncQueueFromSourceRefresh(
+        refreshKey,
+        refreshedList,
+        addedVideos,
+      );
       // Step 2: 组件卸载后跳过 UI 反馈
       if (!mountedRef.current) return;
 
@@ -224,7 +234,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
         refreshLockRef.current = false;
       }, 500);
     }
-  }, [mediaId, source, refreshFolder, refreshImportedSource, isRefreshing]);
+  }, [mediaId, source, refreshFolder, refreshImportedSource, isRefreshing, loading]);
   // ========== 增量刷新按钮逻辑结束 ==========
 
   useEffect(() => {
@@ -306,7 +316,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       // 发生错误时清除乐观加载状态
       usePlayerStore.getState().setResolving(false);
     }
-  }, [displayedList, mediaId, source, sortOption, searchQuery]);
+  }, [displayedList, includeVideoParts, mediaId, navigation, setQueue, source, sortOption, searchQuery]);
 
   const playAll = useCallback(async () => {
     try {
@@ -350,7 +360,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       usePlayerStore.getState().setQueueLoading(false);
       usePlayerStore.getState().setResolving(false);
     }
-  }, [displayedList, mediaId, source, sortOption, searchQuery]);
+  }, [includeVideoParts, mediaId, navigation, setQueue, source, sortOption, searchQuery]);
 
   const shuffle = useCallback(async () => {
     try {
@@ -400,7 +410,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       }
       usePlayerStore.getState().setResolving(false);
     }
-  }, [displayedList, mediaId, source, sortOption, searchQuery]);
+  }, [displayedList, includeVideoParts, mediaId, navigation, setQueue, source, sortOption, searchQuery]);
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background },
@@ -529,7 +539,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
             size={24}
             color={t.colors.text}
             style={{ marginLeft: t.spacing.sm }}
-            disabled={isSearchDisabled || isRefreshing}
+            disabled={isSearchDisabled || isRefreshing || loading}
             onPress={handleRefresh}
           />
         )}
@@ -589,6 +599,15 @@ export const VideosScreen = ({ route, navigation }: any) => {
           )}
           onEndReached={loadMore}
           onEndReachedThreshold={0.4}
+          refreshControl={(
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={() => void handleRefresh()}
+              enabled={!isSearchDisabled && !loading}
+              tintColor={t.colors.primary}
+              colors={[t.colors.primary]}
+            />
+          )}
           ListFooterComponent={
             hasMore && loading ? (
               <View style={s.footer}>

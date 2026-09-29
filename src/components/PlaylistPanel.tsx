@@ -1,20 +1,28 @@
 // src/components/PlaylistPanel.tsx (refactored)
 import React, { useCallback, memo, useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo, ActivityIndicator, Alert, Platform, ToastAndroid } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo, ActivityIndicator, Alert, Platform, ToastAndroid, RefreshControl } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../theme';
 import { GlassView } from './GlassView';
 import { usePlayerStore } from '../store/playerStore';
 import { IconButton } from './IconButton';
-import type { FavoriteVideo } from '../types/domain';
+import type { FavoriteVideo, OnlineVideoSearchResult } from '../types/domain';
 import { formatDuration } from '../utils/format';
 import { playSpecificPart, loadQueue, playQueuedTrack } from '../services/trackPlayer';
-import {fetchOnlineVideoSearchPage} from '../services/onlineVideoSearchService';
+import {
+  fetchOnlineVideoSearchPage,
+  getOnlineSearchRefreshKey,
+  publishOnlineSearchRefresh,
+} from '../services/onlineVideoSearchService';
 import {searchVideoToFavoriteVideo} from '../services/transformers';
+import {favoriteService, loadGlobalIndexCache} from '../services/favoriteService';
+import {importedPlaylistService} from '../services/importedPlaylistService';
 import { useFolderDataStore } from '../store/folderDataStore';
 import { useSyncStore } from '../store/syncStore';
 import { useAuthStore } from '../store/authStore';
+import {storage} from '../core/storage';
 import { loadMorePersonalizedSongs } from '../services/homeRecommendationService';
+import {getFavoriteSearchRefreshKey} from '../utils/playbackRefreshKey';
 
 const QUEUE_LOAD_AHEAD_TRACKS = 5;
 const EMPTY_PLAYLIST_QUEUE: FavoriteVideo[] = [];
@@ -115,9 +123,12 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const syncStatus = useSyncStore((s) => s.syncStatus);
   const [expandedBvid, setExpandedBvid] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
   const listRef = useRef<any>(null);
   const loadingMoreRef = useRef(false);
+  const refreshingRef = useRef(false);
+  const refreshControllerRef = useRef<AbortController | null>(null);
   const listEndReachedArmedRef = useRef(false);
   const lastAutoLoadPageRef = useRef<string | null>(null);
   // 用于精确判断自动滚动触发时机，拦截分页加载时的无意识滚动
@@ -233,7 +244,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   }, [queue, currentBvid, visible, playMode]);
 
   const handleScrollToIndexFailed = useCallback((info: any) => {
-    const timer = setTimeout(() => {
+    setTimeout(() => {
       listRef.current?.scrollToIndex({
         index: info.index,
         animated: false,
@@ -391,6 +402,163 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     }
   }, [playContext, appendQueue]);
 
+  const handleRefresh = useCallback(async () => {
+    if (!visible || !playContext || refreshingRef.current || loadingMoreRef.current) return;
+    if (syncStatus === 'syncing' && !playContext.onlineSearch) {
+      const message = '全局索引同步中，请完成后再刷新本地列表';
+      if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
+      else Alert.alert('暂不可刷新', message);
+      return;
+    }
+    const refreshKey = playContext.refreshKey ?? playContext.sourceKey;
+    if (!refreshKey) {
+      const message = '当前播放列表没有可刷新的来源';
+      if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
+      else Alert.alert('无法刷新', message);
+      return;
+    }
+
+    refreshingRef.current = true;
+    setRefreshing(true);
+    const controller = new AbortController();
+    refreshControllerRef.current = controller;
+
+    try {
+      if (playContext.onlineSearch) {
+        const searchContext = playContext.onlineSearch;
+        const criteria = {
+          keyword: searchContext.keyword,
+          tagFilter: searchContext.tagFilter,
+          sort: searchContext.sort,
+          durationLimitSeconds: searchContext.durationLimitSeconds,
+        };
+        const onlineRefreshKey = getOnlineSearchRefreshKey(criteria);
+        const latestPlayer = usePlayerStore.getState();
+        if (latestPlayer.playContext?.refreshKey !== onlineRefreshKey) return;
+
+        const refreshedResults = new Map<string, OnlineVideoSearchResult>();
+        let fetchedPage = 0;
+        let hasMore = true;
+        for (let page = 1; page <= Math.max(1, searchContext.page) && hasMore; page += 1) {
+          const response = await fetchOnlineVideoSearchPage(criteria, page, controller.signal);
+          response.results.forEach(video => refreshedResults.set(video.bvid, video));
+          fetchedPage = page;
+          hasMore = response.hasMore;
+          if (controller.signal.aborted) return;
+        }
+
+        const results = Array.from(refreshedResults.values());
+        const videos = results.map(searchVideoToFavoriteVideo);
+        const currentPlayer = usePlayerStore.getState();
+        if (currentPlayer.playContext?.refreshKey !== onlineRefreshKey) return;
+        const replaced = currentPlayer.replaceQueueFromSearchRefresh(onlineRefreshKey, videos);
+        if (!replaced) return;
+        const updatedContext = usePlayerStore.getState().playContext;
+        if (updatedContext?.refreshKey === onlineRefreshKey) {
+          usePlayerStore.getState().setPlayContext({
+            ...updatedContext,
+            onlineSearch: {
+              ...searchContext,
+              page: fetchedPage,
+              hasMore,
+            },
+          });
+        }
+        publishOnlineSearchRefresh({
+          refreshKey: onlineRefreshKey,
+          criteria,
+          results,
+          page: fetchedPage,
+          hasMore,
+        });
+        return;
+      }
+
+      if (playContext.favoriteSearch) {
+        const {uid, keyword} = playContext.favoriteSearch;
+        if (!uid || useAuthStore.getState().userId !== uid) {
+          throw new Error('登录账号已变化，请重新进入收藏夹搜索');
+        }
+        const sources = await importedPlaylistService.getCollectedPlaylists(
+          uid,
+          true,
+          controller.signal,
+        );
+        await loadGlobalIndexCache();
+        if (controller.signal.aborted || useAuthStore.getState().userId !== uid) return;
+        if (storage.getString('lastUid') !== uid) {
+          throw new Error('收藏索引正在随账号切换，请稍后重试');
+        }
+
+        const normalizedKeyword = keyword.trim().toLocaleLowerCase();
+        const refreshedIndex = favoriteService.getGlobalIndex(
+          [],
+          sources.map(source => source.sourceKey),
+        );
+        const results = refreshedIndex.filter(video =>
+          video.title.toLocaleLowerCase().includes(normalizedKeyword) ||
+          (video.upper?.name ?? '').toLocaleLowerCase().includes(normalizedKeyword),
+        );
+        usePlayerStore.getState().replaceQueueFromSearchRefresh(
+          getFavoriteSearchRefreshKey(uid, keyword),
+          results,
+        );
+        return;
+      }
+
+      const sourceKey = playContext.sourceKey;
+      if (!sourceKey) throw new Error('播放列表来源已失效');
+      const folderStore = useFolderDataStore.getState();
+      const matchesSource = folderStore.sourceKey === sourceKey && (
+        playContext.folderId == null || folderStore.folderId === playContext.folderId
+      );
+      if (!matchesSource) {
+        throw new Error('请返回歌曲列表后再刷新当前播放来源');
+      }
+      if (folderStore.loading || folderStore.isRefreshing) {
+        throw new Error('歌曲列表正在加载或刷新，请稍后再试');
+      }
+
+      const previousBvids = new Set(
+        folderStore.getDisplayedList().map(video => video.bvid),
+      );
+      if (playContext.folderId != null) {
+        await folderStore.refreshFolder(playContext.folderId, controller.signal);
+      } else {
+        await folderStore.refreshImportedSource(controller.signal);
+      }
+      if (controller.signal.aborted) return;
+
+      const refreshedStore = useFolderDataStore.getState();
+      if (refreshedStore.sourceKey !== sourceKey) return;
+      const sourceVideos = refreshedStore.getDisplayedList();
+      const addedVideos = sourceVideos.filter(video => !previousBvids.has(video.bvid));
+      usePlayerStore.getState().syncQueueFromSourceRefresh(
+        sourceKey,
+        sourceVideos,
+        addedVideos,
+      );
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const message = error instanceof Error ? error.message : '刷新播放列表失败';
+      if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
+      else Alert.alert('刷新失败', message);
+    } finally {
+      if (refreshControllerRef.current === controller) {
+        refreshControllerRef.current = null;
+        refreshingRef.current = false;
+        setRefreshing(false);
+      }
+    }
+  }, [playContext, syncStatus, visible]);
+
+  useEffect(() => {
+    if (!visible) {
+      refreshControllerRef.current?.abort();
+    }
+    return () => refreshControllerRef.current?.abort();
+  }, [visible]);
+
   useEffect(() => {
     if (!currentBvid || playMode !== 'sequential' || !playContext?.sourceKey) return;
     const currentIndex = queue.findIndex(video => video.bvid === currentBvid);
@@ -459,6 +627,14 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
           windowSize={5}
           removeClippedSubviews={true}
           showsVerticalScrollIndicator={false}
+          refreshControl={(
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void handleRefresh()}
+              tintColor={t.colors.primary}
+              colors={[t.colors.primary]}
+            />
+          )}
           ListFooterComponent={renderFooter}
           onEndReached={() => {
             if (!listEndReachedArmedRef.current) return;

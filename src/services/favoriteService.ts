@@ -328,15 +328,15 @@ export function subscribeGlobalIndexRevision(
 }
 
 /**
- * 单收藏夹增量刷新 —— 仅拉取新增视频数据，不触发全量重新加载。
+ * 单收藏夹增量刷新 —— 拉取新增视频，并刷新首个重叠页面的元数据，不触发全量重新加载。
  *
  * === 数据流向 ===
  * 1. 从本地数据库获取当前收藏夹已有视频的 BVID 集合
  * 2. 从 B 站 API 逐页拉取（order=mtime 收藏时间倒序，最新视频排在最前）
- * 3. 遍历远端数据，遇到首个已存在于本地的 BVID 时停止（后续全部为旧数据）
- * 4. 将纯新增的视频批量写入 WatermelonDB（upsertVideosBatch）
- * 5. 将新增视频直接追加合并到 globalIndexCache（内存缓存），不触发全量 DB 重读
- * 6. 返回新增视频列表供 UI 层直接消费
+ * 3. 读取到首个已存在条目后停止后续分页，但消费完该页
+ * 4. 将新增视频和该重叠页的远端条目批量写入 WatermelonDB（upsertVideosBatch）
+ * 5. 合并远端元数据与收藏夹关系到 globalIndexCache，不触发全量 DB 重读
+ * 6. 返回新增视频与本次刷新的远端视频供列表和播放队列同步
  *
  * === 增量判断原理 ===
  * B 站收藏夹资源列表接口支持 order=mtime 参数，返回按收藏时间倒序排列的数据。
@@ -345,12 +345,12 @@ export function subscribeGlobalIndexRevision(
  *
  * @param mediaId  收藏夹 ID
  * @param signal   可选的 AbortSignal，用于取消进行中的请求
- * @returns        新增视频列表（FavoriteVideo[]），无新增时返回空数组
+ * @returns        本次新增视频和本次拉取的最新远端视频
  */
 async function syncSingleFolder(
   mediaId: number,
   signal?: AbortSignal,
-): Promise<FavoriteVideo[]> {
+): Promise<{newVideos: FavoriteVideo[]; refreshedVideos: FavoriteVideo[]}> {
   const playlistId = mediaId.toString();
 
   // Step 1: 读取本地已有视频的 BVID 集合（仅限该收藏夹，含未删除记录）
@@ -360,6 +360,8 @@ async function syncSingleFolder(
   );
 
   const newVideos: FavoriteVideo[] = [];
+  const refreshedVideos: FavoriteVideo[] = [];
+  const refreshedBvids = new Set<string>();
   let page = 1;
   let hasMore = true;
   let reachedExisting = false;
@@ -370,15 +372,19 @@ async function syncSingleFolder(
     if (pageRes.list.length === 0) break;
 
     for (const video of pageRes.list) {
-      if (existingBvids.has(video.bvid)) {
-        // 由 mtime 倒序可知：一旦遇到已存在的视频，后续全为旧数据，终止拉取
-        reachedExisting = true;
-        break;
-      }
+      if (!video.bvid || refreshedBvids.has(video.bvid)) continue;
+      refreshedBvids.add(video.bvid);
       // 确保 folderIds 携带当前收藏夹 ID（trimFavoriteVideo 不填充此字段）
       video.folderIds = video.folderIds
         ? [...new Set([...video.folderIds, mediaId])]
         : [mediaId];
+      refreshedVideos.push(video);
+
+      if (existingBvids.has(video.bvid)) {
+        // 由 mtime 倒序停止后续分页，但仍刷新本页已取得的其他条目。
+        reachedExisting = true;
+        continue;
+      }
       newVideos.push(video);
       existingBvids.add(video.bvid); // 同批次内去重
     }
@@ -392,23 +398,24 @@ async function syncSingleFolder(
     }
   }
 
-  // 无新增数据，提前返回空数组
-  if (newVideos.length === 0) return [];
+  if (signal?.aborted || refreshedVideos.length === 0) {
+    return {newVideos, refreshedVideos};
+  }
 
-  // Step 3: 批量写入 WatermelonDB（upsertVideosBatch 内部区分 create / update）
-  await upsertVideosBatch(playlistId, newVideos);
+  // Step 3: 更新首段远端元数据并写入新增记录。
+  await upsertVideosBatch(playlistId, refreshedVideos);
 
   // 首次加载尚未完成时从数据库重建，避免缓存只包含本次增量。
   if (!globalIndexCacheLoaded) {
     await loadGlobalIndexCache();
-    return newVideos;
+    return {newVideos, refreshedVideos};
   }
 
   // 用 Map 合并同一 BVID 的收藏夹关系，并替换数组引用以便订阅方识别快照变化。
   const updatedIndex = [...globalIndexCache];
   const cachedVideoIndexes = new Map<string, number>();
   updatedIndex.forEach((video, index) => cachedVideoIndexes.set(video.bvid, index));
-  for (const video of newVideos) {
+  for (const video of refreshedVideos) {
     const cachedIndex = cachedVideoIndexes.get(video.bvid);
     if (cachedIndex === undefined) {
       cachedVideoIndexes.set(video.bvid, updatedIndex.length);
@@ -419,16 +426,11 @@ async function syncSingleFolder(
     const cached = updatedIndex[cachedIndex];
     const folderIds = [...new Set([...(cached.folderIds || []), ...(video.folderIds || [])])];
     const sourceKeys = [...new Set([...(cached.sourceKeys || []), ...(video.sourceKeys || [])])];
-    if (
-      folderIds.length !== cached.folderIds?.length ||
-      sourceKeys.length !== cached.sourceKeys?.length
-    ) {
-      updatedIndex[cachedIndex] = { ...cached, folderIds, sourceKeys };
-    }
+    updatedIndex[cachedIndex] = {...video, folderIds, sourceKeys};
   }
   replaceGlobalIndexCache(updatedIndex);
 
-  return newVideos;
+  return {newVideos, refreshedVideos};
 }
 
 export const favoriteService = {

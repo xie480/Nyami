@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
+  RefreshControl,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -19,9 +20,18 @@ import {FavoriteFolderPickerSheet} from '../components/FavoriteFolderPickerSheet
 import {GlassView} from '../components/GlassView';
 import {Header} from '../components/Header';
 import {IconButton} from '../components/IconButton';
-import {favoriteService, loadGlobalIndexCache} from '../services/favoriteService';
+import {
+  favoriteService,
+  loadGlobalIndexCache,
+  subscribeGlobalIndexRevision,
+} from '../services/favoriteService';
 import {importedPlaylistService} from '../services/importedPlaylistService';
-import {fetchOnlineVideoSearchPage, sortOnlineVideoSearchResults} from '../services/onlineVideoSearchService';
+import {
+  fetchOnlineVideoSearchPage,
+  getOnlineSearchRefreshKey,
+  sortOnlineVideoSearchResults,
+  subscribeOnlineSearchRefresh,
+} from '../services/onlineVideoSearchService';
 import {loadQueue, resolveCurrentTrack} from '../services/trackPlayer';
 import {prefetchAudioUrl} from '../services/dataPrefetcher';
 import {searchVideoToFavoriteVideo} from '../services/transformers';
@@ -33,6 +43,7 @@ import {useSettingsStore} from '../store/settingsStore';
 import {useTheme} from '../theme';
 import {storage} from '../core/storage';
 import {formatDuration} from '../utils/format';
+import {getFavoriteSearchRefreshKey} from '../utils/playbackRefreshKey';
 import type {FavoriteVideo, OnlineVideoSearchResult, OnlineVideoSearchSort} from '../types/domain';
 
 type SearchMode = 'bilibili' | 'favorites';
@@ -57,6 +68,7 @@ export const SearchScreen = ({navigation}: any) => {
   const [tagFilter, setTagFilter] = useState('');
   const [onlineResults, setOnlineResults] = useState<OnlineVideoSearchResult[]>([]);
   const [favoriteIndex, setFavoriteIndex] = useState<FavoriteVideo[]>([]);
+  const [favoriteSourceKeys, setFavoriteSourceKeys] = useState<string[]>([]);
   const [onlinePage, setOnlinePage] = useState(0);
   const [onlineHasMore, setOnlineHasMore] = useState(false);
   const [onlineLoading, setOnlineLoading] = useState(false);
@@ -81,9 +93,10 @@ export const SearchScreen = ({navigation}: any) => {
     minutes: recommendationDurationLimitMinutes,
   });
 
-  const loadFavorites = useCallback(async () => {
+  const loadFavorites = useCallback(async (forceCatalog = false) => {
     if (!uid) {
       setFavoriteIndex([]);
+      setFavoriteSourceKeys([]);
       setFavoriteLoading(false);
       return;
     }
@@ -94,7 +107,7 @@ export const SearchScreen = ({navigation}: any) => {
     setFavoriteLoading(true);
     setError(null);
     try {
-      const sources = await importedPlaylistService.getCollectedPlaylists(uid, false, controller.signal);
+      const sources = await importedPlaylistService.getCollectedPlaylists(uid, forceCatalog, controller.signal);
       if (controller.signal.aborted || currentRequestId !== favoriteRequestId.current || useAuthStore.getState().userId !== uid) return;
       useImportedPlaylistStore.getState().setCatalog(uid, sources);
       await loadGlobalIndexCache();
@@ -105,7 +118,22 @@ export const SearchScreen = ({navigation}: any) => {
         return;
       }
       const allSourceKeys = sources.map(source => source.sourceKey);
-      setFavoriteIndex(favoriteService.getGlobalIndex([], allSourceKeys));
+      setFavoriteSourceKeys(allSourceKeys);
+      const refreshedIndex = favoriteService.getGlobalIndex([], allSourceKeys);
+      setFavoriteIndex(refreshedIndex);
+
+      const keyword = deferredQuery.trim();
+      const refreshKey = getFavoriteSearchRefreshKey(uid, keyword);
+      const matchingVideos = keyword
+        ? refreshedIndex.filter(video =>
+            video.title.toLocaleLowerCase().includes(keyword.toLocaleLowerCase()) ||
+            (video.upper?.name ?? '').toLocaleLowerCase().includes(keyword.toLocaleLowerCase()),
+          )
+        : [];
+      usePlayerStore.getState().replaceQueueFromSearchRefresh(
+        refreshKey,
+        matchingVideos,
+      );
     } catch (loadError) {
       if (!controller.signal.aborted && currentRequestId === favoriteRequestId.current) {
         setError(loadError instanceof Error ? loadError.message : '读取本地收藏失败');
@@ -116,7 +144,7 @@ export const SearchScreen = ({navigation}: any) => {
         setFavoriteLoading(false);
       }
     }
-  }, [uid]);
+  }, [deferredQuery, uid]);
 
   useFocusEffect(
     useCallback(() => {
@@ -181,6 +209,33 @@ export const SearchScreen = ({navigation}: any) => {
         controller.signal,
       );
       if (currentRequestId !== requestId.current || controller.signal.aborted) return;
+      const criteria = {
+        keyword,
+        tagFilter: tagFilter.trim(),
+        sort,
+        durationLimitSeconds: recommendationDurationFilterEnabled
+          ? recommendationDurationLimitMinutes * 60
+          : null,
+      };
+      const refreshKey = getOnlineSearchRefreshKey(criteria);
+      const playerState = usePlayerStore.getState();
+      if (page === 1 && playerState.playContext?.refreshKey === refreshKey) {
+        playerState.replaceQueueFromSearchRefresh(
+          refreshKey,
+          response.results.map(searchVideoToFavoriteVideo),
+        );
+        playerState.setPlayContext({
+          ...playerState.playContext,
+          onlineSearch: {
+            keyword,
+            tagFilter: criteria.tagFilter,
+            sort,
+            page: 1,
+            hasMore: response.hasMore,
+            durationLimitSeconds: criteria.durationLimitSeconds,
+          },
+        });
+      }
       setOnlineResults(current => {
         const combined = page === 1 ? response.results : [...current, ...response.results];
         return Array.from(new Map(combined.map(item => [item.bvid, item])).values());
@@ -199,6 +254,120 @@ export const SearchScreen = ({navigation}: any) => {
       }
     }
   }, [query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, sort, tagFilter, uid]);
+
+  const refreshOnlineResults = useCallback(async () => {
+    const keyword = query.trim() || tagFilter.trim();
+    if (!keyword || !uid || onlineLoadingRef.current) return;
+
+    requestController.current?.abort();
+    const controller = new AbortController();
+    requestController.current = controller;
+    const currentRequestId = ++requestId.current;
+    onlineLoadingRef.current = true;
+    setOnlineLoading(true);
+    setError(null);
+    onlineEndReachedArmedRef.current = false;
+
+    const criteria = {
+      keyword,
+      tagFilter: tagFilter.trim(),
+      sort,
+      durationLimitSeconds: recommendationDurationFilterEnabled
+        ? recommendationDurationLimitMinutes * 60
+        : null,
+    };
+    const refreshKey = getOnlineSearchRefreshKey(criteria);
+    const targetPage = Math.max(1, onlinePage);
+
+    try {
+      const refreshedResults = new Map<string, OnlineVideoSearchResult>();
+      let page = 1;
+      let hasMore = true;
+      while (page <= targetPage && hasMore && !controller.signal.aborted) {
+        const response = await fetchOnlineVideoSearchPage(criteria, page, controller.signal);
+        response.results.forEach(video => refreshedResults.set(video.bvid, video));
+        hasMore = response.hasMore;
+        if (!hasMore) break;
+        page += 1;
+      }
+      if (controller.signal.aborted || currentRequestId !== requestId.current) return;
+
+      const results = Array.from(refreshedResults.values());
+      const fetchedPage = Math.min(targetPage, page);
+      setOnlineResults(results);
+      setOnlinePage(fetchedPage);
+      setOnlineHasMore(hasMore);
+      setDidSearch(true);
+
+      const playerState = usePlayerStore.getState();
+      if (playerState.playContext?.refreshKey === refreshKey) {
+        playerState.replaceQueueFromSearchRefresh(
+          refreshKey,
+          results.map(searchVideoToFavoriteVideo),
+        );
+        playerState.setPlayContext({
+          ...playerState.playContext,
+          onlineSearch: {
+            ...playerState.playContext.onlineSearch!,
+            page: fetchedPage,
+            hasMore,
+          },
+        });
+      }
+    } catch (refreshError) {
+      if (currentRequestId === requestId.current && !controller.signal.aborted) {
+        setError(refreshError instanceof Error ? refreshError.message : '刷新 B 站搜索结果失败');
+      }
+    } finally {
+      if (currentRequestId === requestId.current) {
+        onlineLoadingRef.current = false;
+        setOnlineLoading(false);
+      }
+    }
+  }, [
+    onlinePage,
+    query,
+    recommendationDurationFilterEnabled,
+    recommendationDurationLimitMinutes,
+    sort,
+    tagFilter,
+    uid,
+  ]);
+
+  useEffect(() => subscribeOnlineSearchRefresh(snapshot => {
+    if (mode !== 'bilibili') return;
+    const keyword = query.trim() || tagFilter.trim();
+    const refreshKey = getOnlineSearchRefreshKey({
+      keyword,
+      tagFilter: tagFilter.trim(),
+      sort,
+      durationLimitSeconds: recommendationDurationFilterEnabled
+        ? recommendationDurationLimitMinutes * 60
+        : null,
+    });
+    if (snapshot.refreshKey !== refreshKey) return;
+    if (usePlayerStore.getState().playContext?.refreshKey !== refreshKey) return;
+
+    setOnlineResults(snapshot.results);
+    setOnlinePage(snapshot.page);
+    setOnlineHasMore(snapshot.hasMore);
+    setDidSearch(true);
+    setError(null);
+  }), [
+    mode,
+    query,
+    recommendationDurationFilterEnabled,
+    recommendationDurationLimitMinutes,
+    sort,
+    tagFilter,
+  ]);
+
+  useEffect(() => {
+    if (mode !== 'favorites' || !uid) return;
+    return subscribeGlobalIndexRevision(() => {
+      setFavoriteIndex(favoriteService.getGlobalIndex([], favoriteSourceKeys));
+    });
+  }, [favoriteSourceKeys, mode, uid]);
 
   useEffect(() => {
     const changed =
@@ -219,26 +388,57 @@ export const SearchScreen = ({navigation}: any) => {
     [onlineResults, sort],
   );
 
+  const favoriteSearchIndex = useMemo(
+    () => favoriteIndex.map(video => ({
+      video,
+      normalizedTitle: video.title.toLocaleLowerCase(),
+      normalizedAuthor: (video.upper?.name ?? '').toLocaleLowerCase(),
+    })),
+    [favoriteIndex],
+  );
+
+  const filteredFavorites = useMemo(() => {
+    const normalized = deferredQuery.trim().toLocaleLowerCase();
+    if (!normalized) return [];
+    return favoriteSearchIndex
+      .filter(item => item.normalizedTitle.includes(normalized) || item.normalizedAuthor.includes(normalized))
+      .map(item => item.video);
+  }, [deferredQuery, favoriteSearchIndex]);
+
   const playVideo = useCallback((video: FavoriteVideo) => {
     try {
       const queue = mode === 'bilibili'
         ? sortedOnlineResults.map(searchVideoToFavoriteVideo)
-        : [video];
+        : filteredFavorites;
+      const onlineCriteria = {
+        keyword: query.trim() || tagFilter.trim(),
+        tagFilter: tagFilter.trim(),
+        sort,
+        durationLimitSeconds: recommendationDurationFilterEnabled
+          ? recommendationDurationLimitMinutes * 60
+          : null,
+      };
       const playContext = mode === 'bilibili'
         ? {
+            refreshKey: getOnlineSearchRefreshKey(onlineCriteria),
             includeVideoParts: true,
             onlineSearch: {
-              keyword: query.trim() || tagFilter.trim(),
-              tagFilter: tagFilter.trim(),
+              keyword: onlineCriteria.keyword,
+              tagFilter: onlineCriteria.tagFilter,
               sort,
               page: onlinePage,
               hasMore: onlineHasMore,
-              durationLimitSeconds: recommendationDurationFilterEnabled
-                ? recommendationDurationLimitMinutes * 60
-                : null,
+              durationLimitSeconds: onlineCriteria.durationLimitSeconds,
             },
           }
-        : {};
+        : {
+            refreshKey: uid
+              ? getFavoriteSearchRefreshKey(uid, deferredQuery)
+              : undefined,
+            favoriteSearch: uid
+              ? {uid, keyword: deferredQuery.trim()}
+              : undefined,
+          };
       if (mode === 'bilibili') usePlayerStore.getState().setPlayMode('sequential');
       setQueue(queue, video.bvid, playContext);
       usePlayerStore.getState().setResolving(true);
@@ -266,24 +466,7 @@ export const SearchScreen = ({navigation}: any) => {
       usePlayerStore.getState().setResolving(false);
       Alert.alert('播放失败', playError instanceof Error ? playError.message : '视频暂时无法播放');
     }
-  }, [mode, navigation, onlineHasMore, onlinePage, query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, setQueue, sort, sortedOnlineResults, tagFilter]);
-
-  const favoriteSearchIndex = useMemo(
-    () => favoriteIndex.map(video => ({
-      video,
-      normalizedTitle: video.title.toLocaleLowerCase(),
-      normalizedAuthor: (video.upper?.name ?? '').toLocaleLowerCase(),
-    })),
-    [favoriteIndex],
-  );
-
-  const filteredFavorites = useMemo(() => {
-    const normalized = deferredQuery.trim().toLocaleLowerCase();
-    if (!normalized) return [];
-    return favoriteSearchIndex
-      .filter(item => item.normalizedTitle.includes(normalized) || item.normalizedAuthor.includes(normalized))
-      .map(item => item.video);
-  }, [deferredQuery, favoriteSearchIndex]);
+  }, [deferredQuery, filteredFavorites, mode, navigation, onlineHasMore, onlinePage, query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, setQueue, sort, sortedOnlineResults, tagFilter, uid]);
 
   const glassBackground = t.glass?.colors.glass.bg ?? t.colors.surface;
   const glassBorder = t.glass?.colors.glass.border ?? t.colors.divider;
@@ -440,6 +623,17 @@ export const SearchScreen = ({navigation}: any) => {
         <FlatList
           style={{flex: 1}}
           data={results}
+          refreshControl={(
+            <RefreshControl
+              refreshing={mode === 'bilibili' ? onlineLoading : favoriteLoading}
+              onRefresh={() => {
+                if (mode === 'bilibili') void refreshOnlineResults();
+                else void loadFavorites(true);
+              }}
+              tintColor={t.colors.primary}
+              colors={[t.colors.primary]}
+            />
+          )}
           keyExtractor={item => item.bvid}
           renderItem={({item}) => resultItem(item)}
           keyboardShouldPersistTaps="handled"
