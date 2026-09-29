@@ -17,7 +17,7 @@ import {
   createSyncJob,
   finishSyncJob,
   upsertVideosBatch,
-  updatePlaylistSyncProgress,
+  syncPlaylistVideosPage,
   markPlaylistSyncSuccess,
   softDeleteMissingVideos,
   getAllValidVideos,
@@ -27,8 +27,6 @@ import {
   getPlaylistVideoCount,
   getVideosByPlaylistId,
 } from '../db/operations';
-import { videoMetaCollection } from '../db/database';
-import { Q } from '@nozbe/watermelondb';
 import { Mutex } from '../utils/mutex';
 import { AuthRequiredError } from '../core/errors';
 import LoggerService from './LoggerService';
@@ -805,9 +803,13 @@ export const favoriteService = {
 
           let hasMore = true;
           let isIncrementalDone = false;
-          const remoteVideoIds: string[] = [];
+          const remoteVideoIds = new Set<string>();
+          let syncedVideoCount = 0;
 
           try {
+            if (!force && !remoteCountDecreased) {
+              syncedVideoCount = await getPlaylistVideoCount(playlistId);
+            }
             while (
               hasMore &&
               !isIncrementalDone &&
@@ -832,44 +834,37 @@ export const favoriteService = {
                 if (!hasMore) break;
               }
 
-              const currentBvids = Array.from(new Set(pageRes.list.map(video => video.bvid)));
-              const existingBvids = new Set<string>();
-              if (!force && currentBvids.length > 0) {
-                const existingVideos = await videoMetaCollection.query(
-                  Q.where('playlist_id', playlistId),
-                  Q.where('video_id', Q.oneOf(currentBvids)),
-                  Q.where('is_deleted', false),
-                ).fetch();
-                existingVideos.forEach(video => existingBvids.add(video.videoId));
-              }
-
-              const uniquePageBvids = new Set(currentBvids);
+              pageRes.list.forEach(video => remoteVideoIds.add(video.bvid));
+              const pageWrite = await syncPlaylistVideosPage(
+                playlistId,
+                pageRes.list,
+                {
+                  force,
+                  cursor: `page_${page}`,
+                  previousSyncedCount: syncedVideoCount,
+                  fullScanCount: force || remoteCountDecreased
+                    ? remoteVideoIds.size
+                    : undefined,
+                },
+              );
+              const uniquePageBvids = new Set(
+                pageRes.list.map(video => video.bvid),
+              );
               if (!force && !remoteCountDecreased && localMeta.localSyncedCount > 0 && page === 1) {
-                isIncrementalDone = existingBvids.size === uniquePageBvids.size && uniquePageBvids.size > 0;
+                isIncrementalDone =
+                  pageWrite.existingBvids.size === uniquePageBvids.size &&
+                  uniquePageBvids.size > 0;
               } else if (!force && !remoteCountDecreased && localMeta.localSyncedCount > 0 && page > 1) {
-                isIncrementalDone = existingBvids.size > 0;
+                isIncrementalDone = pageWrite.existingBvids.size > 0;
               }
 
-              const videosToUpsert: FavoriteVideo[] = [];
-              const seenPageIds = new Set<string>();
-              for (const video of pageRes.list) {
-                remoteVideoIds.push(video.bvid);
-                if (seenPageIds.has(video.bvid)) continue;
-                seenPageIds.add(video.bvid);
-                if (force || !existingBvids.has(video.bvid)) {
-                  videosToUpsert.push(video);
-                }
-              }
-
-              if (videosToUpsert.length > 0) {
-                await upsertVideosBatch(playlistId, videosToUpsert);
+              syncedVideoCount = pageWrite.syncedCount;
+              if (pageWrite.videosToUpsert.length > 0) {
                 indexMayHaveChanged = true;
-                onVideosSynced?.(videosToUpsert);
+                onVideosSynced?.(pageWrite.videosToUpsert);
               }
 
-              const absoluteSyncedCount = await getPlaylistVideoCount(playlistId);
-              await updatePlaylistSyncProgress(playlistId, `page_${page}`, absoluteSyncedCount);
-              updateTargetProgress(targetIndex, absoluteSyncedCount);
+              updateTargetProgress(targetIndex, syncedVideoCount);
               reportProgress();
 
               hasMore = pageRes.hasMore || pageRes.rawCount === 20;
@@ -887,7 +882,10 @@ export const favoriteService = {
             }
 
             if (force || (!isIncrementalDone && !hasMore)) {
-              await softDeleteMissingVideos(playlistId, remoteVideoIds);
+              await softDeleteMissingVideos(
+                playlistId,
+                Array.from(remoteVideoIds),
+              );
               indexMayHaveChanged = true;
             }
             await finishSyncJob(jobId, 'success');

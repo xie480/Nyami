@@ -76,6 +76,99 @@ export async function upsertVideosBatch(playlistId: string, videos: FavoriteVide
   });
 }
 
+/** 原子处理全局索引的一页：复用存在性查询，同时持久化游标与计数。 */
+export async function syncPlaylistVideosPage(
+  playlistId: string,
+  videos: FavoriteVideo[],
+  options: {
+    force: boolean;
+    cursor: string;
+    previousSyncedCount: number;
+    fullScanCount?: number;
+  },
+): Promise<{
+  existingBvids: Set<string>;
+  videosToUpsert: FavoriteVideo[];
+  syncedCount: number;
+}> {
+  const uniqueVideos = Array.from(
+    new Map(videos.filter(video => video.bvid).map(video => [video.bvid, video])).values(),
+  );
+  const videoIds = uniqueVideos.map(video => video.bvid);
+  let existingBvids = new Set<string>();
+  let videosToUpsert: FavoriteVideo[] = [];
+  let syncedCount = options.fullScanCount ?? options.previousSyncedCount;
+
+  await database.write(async writer => {
+    const existingRecords = videoIds.length > 0
+      ? await videoMetaCollection.query(
+          Q.where('playlist_id', playlistId),
+          Q.where('video_id', Q.oneOf(videoIds)),
+        ).fetch()
+      : [];
+    const existingByBvid = new Map(existingRecords.map(record => [record.videoId, record]));
+    existingBvids = new Set(
+      existingRecords
+        .filter(record => !record.isDeleted)
+        .map(record => record.videoId),
+    );
+    videosToUpsert = options.force
+      ? uniqueVideos
+      : uniqueVideos.filter(video => !existingBvids.has(video.bvid));
+    syncedCount = options.fullScanCount ??
+      options.previousSyncedCount + videosToUpsert.length;
+
+    const operations: any[] = [];
+    for (const video of videosToUpsert) {
+      const existing = existingByBvid.get(video.bvid);
+      if (existing) {
+        operations.push(existing.prepareUpdate(record => {
+          record.title = video.title;
+          record.cover = video.cover;
+          record.author = video.upper?.name || null;
+          record.duration = video.duration;
+          record.publishTime = video.pubtime;
+          record.favTime = video.favTime;
+          record.isDeleted = false;
+          record.extraJson = JSON.stringify(video.parts || []);
+        }));
+      } else {
+        operations.push(videoMetaCollection.prepareCreate(record => {
+          record.videoId = video.bvid;
+          record.playlistId = playlistId;
+          record.title = video.title;
+          record.author = video.upper?.name || null;
+          record.cover = video.cover;
+          record.duration = video.duration;
+          record.publishTime = video.pubtime;
+          record.favTime = video.favTime;
+          record.randomWeight = Math.random();
+          record.isCached = false;
+          record.isDeleted = false;
+          record.extraJson = JSON.stringify(video.parts || []);
+          record.syncedAt = new Date();
+        }));
+      }
+    }
+
+    const metas = await playlistMetaCollection.query(
+      Q.where('playlist_id', playlistId),
+    ).fetch();
+    if (metas[0]) {
+      operations.push(metas[0].prepareUpdate(record => {
+        record.syncCursor = options.cursor;
+        record.localSyncedCount = syncedCount;
+      }));
+    }
+
+    if (operations.length > 0) {
+      await writer.batch(...operations);
+    }
+  });
+
+  return {existingBvids, videosToUpsert, syncedCount};
+}
+
 /**
  * 获取收藏夹元数据
  */

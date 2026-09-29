@@ -24,7 +24,7 @@
     cacheQueryChunkSize: 500,
     maxProfileTags: 5,
     searchConcurrency: 5,
-    backfillBatchSize: 32,
+    backfillBatchSize: 64,
     backfillConcurrency: 16,
     maxRecommendations: 30,
     musicTid: 3,

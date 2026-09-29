@@ -327,108 +327,125 @@ export async function backfillFavoriteTags(
   const concurrency = config.tagRecommendations.backfillConcurrency;
   for (let offset = 0; offset < uncachedVideos.length && !progress.paused; offset += batchSize) {
     const batchGroup = uncachedVideos.slice(offset, offset + batchSize);
-    for (
-      let batchOffset = 0;
-      batchOffset < batchGroup.length && !progress.paused;
-      batchOffset += concurrency
-    ) {
-      if (signal.aborted) break;
-      if (useAuthStore.getState().userId !== expectedUid) {
-        progress.paused = true;
-        break;
-      }
+    const outcomes: BackfillOutcome[] = new Array(batchGroup.length).fill(null);
+    let nextIndex = 0;
+    let stopScheduling = false;
 
-      const batch = batchGroup.slice(batchOffset, batchOffset + concurrency);
-      const outcomes = await Promise.all(batch.map(async (video): Promise<BackfillOutcome> => {
+    const worker = async (): Promise<void> => {
+      while (!stopScheduling && !signal.aborted && nextIndex < batchGroup.length) {
+        if (useAuthStore.getState().userId !== expectedUid) {
+          progress.paused = true;
+          stopScheduling = true;
+          return;
+        }
+
+        const index = nextIndex++;
+        const video = batchGroup[index];
         const cached = cacheByVideoId.get(video.bvid);
+        let outcome: BackfillOutcome;
         try {
           const response = await biliApi.getVideoTags(video.bvid, signal);
-          if (signal.aborted) return null;
-          if (useAuthStore.getState().userId !== expectedUid) {
-            return {kind: 'accountChanged'};
-          }
-          const tags = trimVideoTags(response);
-          const fetchedAt = Date.now();
-          return tags.length > 0
-            ? {kind: 'success' as const, videoId: video.bvid, tags, fetchedAt}
-            : {kind: 'empty' as const, videoId: video.bvid, tags, fetchedAt};
-        } catch (error) {
-          if (signal.aborted) return null;
-          if (useAuthStore.getState().userId !== expectedUid) {
-            return {kind: 'accountChanged'};
-          }
-          return {
-            kind: 'failure',
-            videoId: video.bvid,
-            cached,
-            retryAfter: Date.now() + retryDelayFor(error),
-            pause: shouldPauseBackfill(error),
-          };
-        }
-      }));
-
-      if (useAuthStore.getState().userId !== expectedUid) {
-        progress.paused = true;
-        onProgress({...progress});
-        break;
-      }
-
-      const cacheWrites: Array<{
-        videoId: string;
-        tags?: VideoTag[];
-        fetchedAt?: number | null;
-        retryAfter?: number | null;
-      }> = [];
-      let pauseAfterBatch = false;
-      for (const outcome of outcomes) {
-        if (!outcome) continue;
-        if (outcome.kind === 'accountChanged') {
-          progress.paused = true;
-          pauseAfterBatch = true;
-          continue;
-        }
-        if (outcome.kind === 'success' || outcome.kind === 'empty') {
-          const cachedEntry = {
-            videoId: outcome.videoId,
-            tags: outcome.tags,
-            fetchedAt: outcome.fetchedAt,
-            retryAfter: null,
-          };
-          cacheWrites.push(cachedEntry);
-          cacheByVideoId.set(outcome.videoId, cachedEntry);
-          progress.completedVideoCount += 1;
-          if (outcome.kind === 'success') {
-            progress.successfulVideoCount += 1;
+          if (signal.aborted) {
+            outcome = null;
+          } else if (useAuthStore.getState().userId !== expectedUid) {
+            outcome = {kind: 'accountChanged'};
           } else {
-            progress.emptyVideoCount += 1;
+            const tags = trimVideoTags(response);
+            const fetchedAt = Date.now();
+            outcome = tags.length > 0
+              ? {kind: 'success', videoId: video.bvid, tags, fetchedAt}
+              : {kind: 'empty', videoId: video.bvid, tags, fetchedAt};
           }
-          continue;
+        } catch (error) {
+          if (signal.aborted) {
+            outcome = null;
+          } else if (useAuthStore.getState().userId !== expectedUid) {
+            outcome = {kind: 'accountChanged'};
+          } else {
+            outcome = {
+              kind: 'failure',
+              videoId: video.bvid,
+              cached,
+              retryAfter: Date.now() + retryDelayFor(error),
+              pause: shouldPauseBackfill(error),
+            };
+          }
         }
 
+        outcomes[index] = outcome;
+        if (
+          outcome?.kind === 'accountChanged' ||
+          (outcome?.kind === 'failure' && outcome.pause)
+        ) {
+          stopScheduling = true;
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from(
+        {length: Math.min(concurrency, batchGroup.length)},
+        () => worker(),
+      ),
+    );
+
+    if (
+      useAuthStore.getState().userId !== expectedUid ||
+      outcomes.some(outcome => outcome?.kind === 'accountChanged')
+    ) {
+      progress.paused = true;
+    }
+
+    const cacheWrites: Array<{
+      videoId: string;
+      tags?: VideoTag[];
+      fetchedAt?: number | null;
+      retryAfter?: number | null;
+    }> = [];
+    for (const outcome of outcomes) {
+      if (!outcome) continue;
+      if (outcome.kind === 'accountChanged') {
+        progress.paused = true;
+        continue;
+      }
+      if (outcome.kind === 'success' || outcome.kind === 'empty') {
         const cachedEntry = {
           videoId: outcome.videoId,
-          tags: outcome.cached?.tags ?? [],
-          fetchedAt: outcome.cached?.fetchedAt ?? null,
-          retryAfter: outcome.retryAfter,
+          tags: outcome.tags,
+          fetchedAt: outcome.fetchedAt,
+          retryAfter: null,
         };
-        cacheWrites.push({
-          videoId: cachedEntry.videoId,
-          fetchedAt: cachedEntry.fetchedAt,
-          retryAfter: cachedEntry.retryAfter,
-        });
+        cacheWrites.push(cachedEntry);
         cacheByVideoId.set(outcome.videoId, cachedEntry);
         progress.completedVideoCount += 1;
-        progress.failedVideoCount += 1;
-        if (outcome.pause) {
-          progress.paused = true;
-          pauseAfterBatch = true;
+        if (outcome.kind === 'success') {
+          progress.successfulVideoCount += 1;
+        } else {
+          progress.emptyVideoCount += 1;
         }
+        continue;
       }
 
-      await upsertVideoTagCacheBatch(cacheWrites);
-      onProgress({...progress});
-      if (pauseAfterBatch || signal.aborted) break;
+      const cachedEntry = {
+        videoId: outcome.videoId,
+        tags: outcome.cached?.tags ?? [],
+        fetchedAt: outcome.cached?.fetchedAt ?? null,
+        retryAfter: outcome.retryAfter,
+      };
+      cacheWrites.push({
+        videoId: cachedEntry.videoId,
+        fetchedAt: cachedEntry.fetchedAt,
+        retryAfter: cachedEntry.retryAfter,
+      });
+      cacheByVideoId.set(outcome.videoId, cachedEntry);
+      progress.completedVideoCount += 1;
+      progress.failedVideoCount += 1;
+      if (outcome.pause) progress.paused = true;
     }
+
+    await upsertVideoTagCacheBatch(cacheWrites);
+    onProgress({...progress});
+    if (progress.paused || signal.aborted) break;
   }
 
   return {
