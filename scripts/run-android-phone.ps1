@@ -36,6 +36,59 @@ $env:ANDROID_HOME = $sdkRoot
 $env:ANDROID_SDK_ROOT = $sdkRoot
 $env:PATH = "$(Join-Path $sdkRoot 'platform-tools');$env:PATH"
 
+# Some launcher contexts set the JVM user.home to a sandbox account even when
+# PowerShell is running as the Windows user. Keep Gradle's native caches aligned
+# with that user's profile unless the caller explicitly configured a Gradle home.
+if ([string]::IsNullOrWhiteSpace($env:GRADLE_USER_HOME)) {
+    if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        throw '无法确定 Windows 用户目录，且未配置 GRADLE_USER_HOME。'
+    }
+    $env:GRADLE_USER_HOME = Join-Path $env:USERPROFILE '.gradle'
+}
+Write-Host "Gradle 缓存目录：$env:GRADLE_USER_HOME"
+
+# Ninja stores resolved header paths in a binary dependency index. A CMake
+# reconfigure can update build.ninja while leaving that index tied to another
+# Windows profile, causing FindFirstFileExA to fail on the next native build.
+$expectedGradleCache = [System.IO.Path]::GetFullPath((Join-Path $env:GRADLE_USER_HOME 'caches'))
+$expectedGradleCache = $expectedGradleCache.TrimEnd('\', '/').Replace('\', '/').ToLowerInvariant() + '/'
+$nodeModulesRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'node_modules')).TrimEnd('\', '/') + '\'
+$nativeCxxPatterns = @(
+    Join-Path $repoRoot 'node_modules/*/android/.cxx'
+    Join-Path $repoRoot 'node_modules/@*/*/android/.cxx'
+)
+$staleNinjaDepsFiles = @(
+    foreach ($pattern in $nativeCxxPatterns) {
+        $cxxDirectories = @(Get-ChildItem -Path $pattern -Directory -Force -ErrorAction SilentlyContinue)
+        foreach ($cxxDirectory in $cxxDirectories) {
+            Get-ChildItem -LiteralPath $cxxDirectory.FullName -Filter '.ninja_deps' -File -Recurse -Force -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    $indexPath = [System.IO.Path]::GetFullPath($_.FullName)
+                    if (-not $indexPath.StartsWith($nodeModulesRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        throw "拒绝清理工作区 node_modules 之外的 Ninja 缓存：$indexPath"
+                    }
+
+                    $indexText = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($indexPath)).ToLowerInvariant()
+                    $cachePaths = [regex]::Matches($indexText, '[a-z]:[\\/][^\x00\r\n]{0,260}?[\\/]\.gradle[\\/]caches[\\/]')
+                    foreach ($cachePath in $cachePaths) {
+                        $normalizedCachePath = $cachePath.Value.Replace('\', '/').ToLowerInvariant()
+                        if ($normalizedCachePath -ne $expectedGradleCache) {
+                            $indexPath
+                            break
+                        }
+                    }
+                }
+        }
+    }
+) | Sort-Object -Unique
+
+foreach ($indexPath in $staleNinjaDepsFiles) {
+    Remove-Item -LiteralPath $indexPath -Force
+}
+if ($staleNinjaDepsFiles.Count -gt 0) {
+    Write-Host "已清理 $($staleNinjaDepsFiles.Count) 个引用其他 Gradle 缓存目录的 Ninja 依赖索引。"
+}
+
 $previousErrorActionPreference = $ErrorActionPreference
 try {
     # Windows PowerShell 5.1 treats native stderr as an error record; adb writes
