@@ -158,6 +158,7 @@ function rankCollections(
 export async function generateHomeFeed(
   uid: string,
   signal: AbortSignal,
+  currentCollections: CollectionRecommendation[] = [],
 ): Promise<GeneratedHomeFeed> {
   if (!uid || useAuthStore.getState().userId !== uid) {
     throw new Error('B 站账号已变化，请刷新推荐');
@@ -183,16 +184,24 @@ export async function generateHomeFeed(
   if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
 
+  const rankedCollections = rankCollections(sources, context.profile);
   const recommendations = await filterAndRecordRecommendations(
     uid,
     songResult.recommendations,
-    rankCollections(sources, context.profile),
+    rankedCollections,
+    undefined,
+    signal,
   );
   if (signal.aborted) throw new Error('推荐刷新已取消');
   assertCurrentRecommendationAccount(uid);
 
+  const currentSourceKeys = new Set(rankedCollections.map(source => source.sourceKey));
+  const collections = recommendations.collections.length > 0
+    ? recommendations.collections
+    : currentCollections.filter(source => currentSourceKeys.has(source.sourceKey));
+
   return {
-    collections: recommendations.collections,
+    collections,
     collectionsHasMore: recommendations.collectionsHasMore,
     songs: recommendations.videos,
     songPage: 1,
@@ -223,6 +232,8 @@ export async function loadMoreRecommendedCollections(
     uid,
     [],
     rankCollections(sources, context.profile),
+    undefined,
+    signal,
   );
   if (signal.aborted) throw new Error('合集推荐加载已取消');
   assertCurrentRecommendationAccount(uid);

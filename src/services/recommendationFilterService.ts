@@ -20,6 +20,7 @@ export async function filterAndRecordRecommendations(
   videos: TagRecommendation[],
   collections: CollectionRecommendation[],
   maxCollections = config.recommendations.homePlaylistLimit,
+  signal?: AbortSignal,
 ): Promise<FilteredRecommendations> {
   if (!uid) return {videos: [], collections: [], collectionsHasMore: false};
   const now = Date.now();
@@ -29,6 +30,9 @@ export async function filterAndRecordRecommendations(
     const records = await recommendationFilterCollection
       .query(Q.where('uid', uid))
       .fetch();
+    if (signal?.aborted) {
+      return {videos: [], collections: [], collectionsHasMore: false};
+    }
     const expired = records.filter(record => record.expiresAt <= now);
     if (expired.length > 0) {
       await writer.batch(...expired.map(record => record.prepareDestroyPermanently()));
@@ -87,6 +91,9 @@ export async function filterAndRecordRecommendations(
       }));
     }
 
+    if (signal?.aborted) {
+      return {videos: [], collections: [], collectionsHasMore: false};
+    }
     if (writes.length > 0) await writer.batch(...writes);
     return {
       videos: filteredVideos,

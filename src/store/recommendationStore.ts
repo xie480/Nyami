@@ -41,11 +41,12 @@ interface RecommendationState {
   feedsByUid: Record<string, HomeRecommendationFeed>;
   lastSuccessfulRefreshAtByUid: Record<string, number>;
   refreshingUid: string | null;
+  refreshSequence: number;
   getFeed: (uid: string) => HomeRecommendationFeed;
-  tryBeginAutomaticRefresh: (uid: string, now: number) => boolean;
-  beginManualRefresh: (uid: string) => boolean;
-  finishRefresh: (uid: string, feed: HomeRecommendationFeed) => void;
-  failRefresh: (uid: string, error: string) => void;
+  tryBeginAutomaticRefresh: (uid: string, now: number) => number | null;
+  beginManualRefresh: (uid: string) => number | null;
+  finishRefresh: (uid: string, sequence: number, feed: HomeRecommendationFeed) => void;
+  failRefresh: (uid: string, sequence: number, error: string) => void;
 }
 
 export const useRecommendationStore = create<RecommendationState>()(
@@ -54,6 +55,7 @@ export const useRecommendationStore = create<RecommendationState>()(
       feedsByUid: {},
       lastSuccessfulRefreshAtByUid: {},
       refreshingUid: null,
+      refreshSequence: 0,
       getFeed: uid => get().feedsByUid[uid] ?? EMPTY_HOME_RECOMMENDATION_FEED,
       tryBeginAutomaticRefresh: (uid, now) => {
         const state = get();
@@ -61,37 +63,49 @@ export const useRecommendationStore = create<RecommendationState>()(
         if (
           !uid ||
           now - lastRefreshAt < config.recommendations.homeRefreshIntervalMs ||
-          state.refreshingUid !== null
+          state.refreshingUid === uid
         ) {
-          return false;
+          return null;
         }
-        set({refreshingUid: uid});
-        return true;
+        const sequence = state.refreshSequence + 1;
+        set({refreshingUid: uid, refreshSequence: sequence});
+        return sequence;
       },
       beginManualRefresh: uid => {
         const state = get();
-        if (!uid || state.refreshingUid !== null) return false;
-        set({refreshingUid: uid});
-        return true;
+        if (!uid) return null;
+        const sequence = state.refreshSequence + 1;
+        set({refreshingUid: uid, refreshSequence: sequence});
+        return sequence;
       },
-      finishRefresh: (uid, feed) =>
-        set(state => ({
-          feedsByUid: {...state.feedsByUid, [uid]: feed},
-          lastSuccessfulRefreshAtByUid: {
-            ...state.lastSuccessfulRefreshAtByUid,
-            [uid]: feed.updatedAt,
-          },
-          refreshingUid: state.refreshingUid === uid ? null : state.refreshingUid,
-        })),
-      failRefresh: (uid, error) =>
+      finishRefresh: (uid, sequence, feed) =>
         set(state => {
+          if (state.refreshingUid !== uid || state.refreshSequence !== sequence) {
+            return state;
+          }
+          const updatedAt = feed.updatedAt ?? Date.now();
+          const refreshedFeed = {...feed, updatedAt};
+          return {
+            feedsByUid: {...state.feedsByUid, [uid]: refreshedFeed},
+            lastSuccessfulRefreshAtByUid: {
+              ...state.lastSuccessfulRefreshAtByUid,
+              [uid]: updatedAt,
+            },
+            refreshingUid: null,
+          };
+        }),
+      failRefresh: (uid, sequence, error) =>
+        set(state => {
+          if (state.refreshingUid !== uid || state.refreshSequence !== sequence) {
+            return state;
+          }
           const previous = state.feedsByUid[uid] ?? EMPTY_HOME_RECOMMENDATION_FEED;
           return {
             feedsByUid: {
               ...state.feedsByUid,
               [uid]: {...previous, error},
             },
-            refreshingUid: state.refreshingUid === uid ? null : state.refreshingUid,
+            refreshingUid: null,
           };
         }),
     }),
