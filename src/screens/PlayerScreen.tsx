@@ -6,7 +6,6 @@ import {
   AppState,
   Linking,
   Platform,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -375,19 +374,15 @@ export const PlayerScreen = () => {
         blurAmount={playerArtworkBlurAmount}
       />
 
-      <ScrollView
-        style={styles.contentScroll}
-        contentContainerStyle={[
+      <View
+        style={[
           styles.content,
           {
-            minHeight: availableHeight,
             paddingTop: statusBarHeight + 2,
             paddingBottom: Math.max(8, insets.bottom + 8),
             paddingHorizontal: Math.min(26, screenWidth * 0.062),
           },
-        ]}
-        showsVerticalScrollIndicator={false}
-        bounces={false}>
+        ]}>
         <View style={styles.header}>
           <IconButton
             name="chevron-down"
@@ -483,7 +478,7 @@ export const PlayerScreen = () => {
           onTimer={() => setIsSleepTimerSheetVisible(true)}
           onMore={() => setIsMoreSheetVisible(true)}
         />
-      </ScrollView>
+      </View>
 
       <SleepTimerSheet
         visible={isSleepTimerSheetVisible}
@@ -527,8 +522,7 @@ export const PlayerScreen = () => {
 
 const styles = StyleSheet.create({
   screen: {flex: 1, overflow: 'hidden'},
-  contentScroll: {flex: 1},
-  content: {flexGrow: 1},
+  content: {flex: 1},
   loading: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   header: {
     minHeight: 42,
