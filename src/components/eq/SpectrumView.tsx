@@ -18,6 +18,8 @@ import {
   Text,
   Animated,
 } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import {useTheme} from '../../theme';
 
 interface NativeSpectrumViewProps {
   spectrumData: number[];
@@ -55,6 +57,7 @@ function isSpectrumIdle(data: number[]): boolean {
  * 空闲状态呼吸动画占位组件
  */
 const IdleOverlay: React.FC<{ style?: ViewStyle }> = ({ style }) => {
+  const t = useTheme();
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -83,7 +86,9 @@ const IdleOverlay: React.FC<{ style?: ViewStyle }> = ({ style }) => {
           ...StyleSheet.absoluteFillObject,
           justifyContent: 'center',
           alignItems: 'center',
-          backgroundColor: 'rgba(0,0,0,0.25)',
+          backgroundColor: t.isDark
+            ? 'rgba(0,0,0,0.36)'
+            : 'rgba(255,255,255,0.82)',
           borderRadius: 12,
         },
         style,
@@ -91,11 +96,11 @@ const IdleOverlay: React.FC<{ style?: ViewStyle }> = ({ style }) => {
       pointerEvents="none"
     >
       <Animated.View style={{ opacity: pulseAnim, alignItems: 'center' }}>
-        <Text style={{ color: '#888', fontSize: 28, marginBottom: 8 }}>🎵</Text>
-        <Text style={{ color: '#aaa', fontSize: 13, fontWeight: '500' }}>
+        <Icon name="waveform" size={27} color={t.colors.primary} style={{marginBottom: 8}} />
+        <Text style={{ color: t.colors.text, fontSize: 13, fontWeight: '600' }}>
           启动播放以激活频谱动效
         </Text>
-        <Text style={{ color: '#666', fontSize: 10, marginTop: 4 }}>
+        <Text style={{ color: t.colors.textSub, fontSize: 10, marginTop: 4 }}>
           实时 FFT 频谱 & 猫耳动态显示
         </Text>
       </Animated.View>

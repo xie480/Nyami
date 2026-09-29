@@ -1,28 +1,25 @@
-import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
+import React, {memo, useState} from 'react';
 import {
-  View,
-  Text,
   ScrollView,
-  StyleSheet,
-  TouchableOpacity,
   StatusBar,
-  Animated,
-  Dimensions,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Header } from '../components/Header';
-import { Switch } from '../components/Switch';
-import { useTheme } from '../theme';
-import { useEQStore, BAND_FREQUENCIES, GraphicBands, EMOTION_PRESETS } from '../store/eqStore';
-import { GraphicEQ } from '../components/eq/GraphicEQ';
-import { ParametricEQ } from '../components/eq/ParametricEQ';
-import { PEQFilterEditor } from '../components/eq/PEQFilterEditor';
-import { PresetSelector } from '../components/eq/PresetSelector';
-import { SpectrumView } from '../components/eq/SpectrumView';
-import { useSpectrumPoller } from '../hooks/useSpectrumPoller';
-import type { EQMode } from '../store/eqStore';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import {Header} from '../components/Header';
+import {Switch} from '../components/Switch';
+import {GraphicEQ} from '../components/eq/GraphicEQ';
+import {ParametricEQ} from '../components/eq/ParametricEQ';
+import {PEQFilterEditor} from '../components/eq/PEQFilterEditor';
+import {PresetSelector} from '../components/eq/PresetSelector';
+import {SpectrumView} from '../components/eq/SpectrumView';
+import {useSpectrumPoller} from '../hooks/useSpectrumPoller';
+import {BAND_FREQUENCIES, EMOTION_PRESETS, useEQStore} from '../store/eqStore';
+import type {EQMode, GraphicBands} from '../store/eqStore';
+import {useTheme} from '../theme';
 
-// ========== Styles（定义在组件之前，避免 Hermes TDZ 问题） ==========
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -31,243 +28,304 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 16,
-  },
-
-  // 底部固定 EQ 控制台
-  bottomConsole: {
-    borderTopWidth: 1,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16
+    paddingTop: 8,
+    paddingBottom: 36,
   },
-
-  // EQ 控制栏
-  controlBar: {
+  heroCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 20,
+    overflow: 'hidden',
+  },
+  heroOrb: {
+    position: 'absolute',
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    right: -45,
+    top: -70,
+  },
+  eyebrowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  eyebrow: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+  },
+  heroTitle: {
+    fontSize: 22,
+    lineHeight: 29,
+    fontWeight: '800',
+  },
+  heroSubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  heroDivider: {
+    height: 1,
+    marginVertical: 16,
+  },
+  heroControl: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
   },
-  switchRow: {
+  heroControlCopy: {
+    flex: 1,
+    marginRight: 12,
+  },
+  heroControlTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  heroControlHint: {
+    fontSize: 11,
+    marginTop: 3,
+  },
+  sectionCard: {
+    marginTop: 14,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+  },
+  sectionHeadingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 3,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  sectionSubtitle: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 3,
+  },
+  resetButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 12,
   },
-  switchLabel: {
-    fontSize: 15,
-    fontWeight: '600',
+  resetText: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginLeft: 4,
   },
-
-  // 模式切换
+  spectrumHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 99,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 5,
+  },
+  liveText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  spectrumView: {
+    width: '100%',
+    height: 132,
+    marginTop: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  editorCard: {
+    marginTop: 14,
+    borderRadius: 22,
+    borderWidth: 1,
+    paddingTop: 16,
+    paddingBottom: 16,
+    overflow: 'hidden',
+  },
+  editorHeader: {
+    paddingHorizontal: 16,
+    marginBottom: 13,
+  },
   modeRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8,
+    marginTop: 13,
+    marginHorizontal: 16,
+    padding: 4,
+    borderRadius: 15,
   },
-  modeBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 10,
+  modeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: 38,
+    borderRadius: 12,
   },
-  modeBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
+  modeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 6,
   },
-
-  // 预设指示
-  presetLabel: {
-    fontSize: 11,
-    fontWeight: '500',
+  editorBody: {
+    marginTop: 12,
   },
-
-  // EQ 区域可滚动容器
   eqScrollArea: {
-    marginTop: 4,
     marginHorizontal: -16,
     paddingHorizontal: 16,
   },
-
-  // PEQ 紧凑布局
-  peqCompact: {
-    minWidth: 300,
+  bandGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 13,
+    alignItems: 'center',
   },
-
-  // PEQ 滤波器行
+  bandItem: {
+    alignItems: 'center',
+    width: 28,
+  },
+  bandFreq: {
+    fontSize: 8,
+    fontWeight: '600',
+    marginBottom: 5,
+  },
+  bandValue: {
+    fontSize: 8,
+    fontWeight: '700',
+    marginBottom: 5,
+  },
+  miniBarTrack: {
+    width: 18,
+    height: 4,
+    borderRadius: 2,
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  miniBar: {
+    height: 4,
+    borderRadius: 2,
+  },
+  peqSection: {
+    marginHorizontal: 16,
+  },
+  peqGraph: {
+    minWidth: 320,
+  },
   peqFilterRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 10,
   },
   peqFilterScroll: {
     flex: 1,
   },
   peqFilterChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 0,
-    minWidth: 70,
-    marginRight: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    minWidth: 88,
+    marginRight: 7,
   },
   peqFilterChipText: {
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   peqFilterChipSub: {
-    fontSize: 8,
-    fontWeight: '400',
-    marginTop: 1,
+    fontSize: 9,
+    fontWeight: '500',
+    marginTop: 3,
   },
-
-  // 添加滤波器小按钮
-  addFilterBtnSmall: {
-    width: 28,
-    height: 28,
+  addFilterButton: {
+    width: 38,
+    height: 38,
     borderRadius: 14,
     borderWidth: 1,
-    borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 4,
   },
-  addFilterBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    lineHeight: 18,
-  },
-
-  // PEQ 编辑器容器
-  peqEditorContainer: {
-    marginTop: 4,
-  },
-
-  // 预设区域
-  presetSection: {
-    marginTop: 12,
-    marginHorizontal: 16,
-  },
-  sectionTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-    paddingHorizontal: 4,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  resetBtn: {
-    fontSize: 13,
+  addFilterText: {
+    fontSize: 21,
     fontWeight: '500',
-  },
-
-  // 频谱
-  spectrumCard: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 16,
-    overflow: 'hidden',
-    padding: 16,
-  },
-  spectrumView: {
-    width: '100%',
-    height: 100,
-    marginTop: 8,
-    borderRadius: 12,
-  },
-
-  // 频段详情
-  detailCard: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 16,
-    overflow: 'hidden',
-    padding: 16,
-  },
-  bandGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-    alignItems: 'center',
-  },
-  bandItem: {
-    alignItems: 'center',
-    width: 32,
-  },
-  bandFreq: {
-    fontSize: 8,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  bandValue: {
-    fontSize: 9,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  miniBar: {
-    borderRadius: 2,
+    lineHeight: 24,
   },
 });
 
-const MODE_OPTIONS: Array<{ key: EQMode; label: string }> = [
-  { key: 'graphic', label: '图形 EQ' },
-  { key: 'parametric', label: '参数 EQ' },
+const MODE_OPTIONS: Array<{key: EQMode; label: string; icon: string}> = [
+  {key: 'graphic', label: '图形均衡', icon: 'equalizer'},
+  {key: 'parametric', label: '参数均衡', icon: 'chart-bell-curve-cumulative'},
 ];
 
-// ========== 频段详情组件（独立 memo 避免主组件重渲染时重建） ==========
 interface BandDetailProps {
   graphicBands: GraphicBands;
 }
 
-const BandDetail = memo<BandDetailProps>(({ graphicBands }) => {
+const BandDetail = memo<BandDetailProps>(({graphicBands}) => {
   const t = useTheme();
 
   return (
-    <View style={[styles.detailCard, { backgroundColor: t.colors.surface }]}>
-      <Text style={[styles.sectionTitle, { color: t.colors.text }]}>
-        频段详情
-      </Text>
+    <View style={{paddingHorizontal: 16, marginTop: 18}}>
+      <View style={styles.sectionHeadingRow}>
+        <Text style={[styles.sectionTitle, {color: t.colors.text}]}>
+          频段概览
+        </Text>
+        <Text style={{fontSize: 10, color: t.colors.textHint}}>
+          10 BAND · dB
+        </Text>
+      </View>
       <View style={styles.bandGrid}>
-        {BAND_FREQUENCIES.map((freq, i) => (
-          <View key={freq} style={styles.bandItem}>
-            <Text style={[styles.bandFreq, { color: t.colors.textSub }]}>
-              {freq}Hz
-            </Text>
-            <Text
-              style={[
-                styles.bandValue,
-                {
-                  color:
-                    graphicBands[i] > 0
-                      ? t.colors.primary
-                      : graphicBands[i] < 0
-                      ? '#6C5CE7'
-                      : t.colors.textHint,
-                },
-              ]}
-            >
-              {graphicBands[i] > 0 ? '+' : ''}{graphicBands[i]} dB
-            </Text>
-            {/* 迷你能量条 */}
-            <View
-              style={[
-                styles.miniBar,
-                {
-                  width: 4,
-                  height: Math.abs(graphicBands[i]) * 4 + 4,
-                  backgroundColor:
-                    graphicBands[i] > 0
-                      ? t.colors.primary
-                      : '#6C5CE7',
-                },
-              ]}
-            />
-          </View>
-        ))}
+        {BAND_FREQUENCIES.map((freq, index) => {
+          const value = graphicBands[index];
+          const magnitude = Math.abs(value) / 12;
+          const color =
+            value > 0
+              ? t.colors.primary
+              : value < 0
+              ? '#6C8CFF'
+              : t.colors.textHint;
+          return (
+            <View key={freq} style={styles.bandItem}>
+              <Text style={[styles.bandFreq, {color: t.colors.textSub}]}>
+                {freq}
+              </Text>
+              <Text style={[styles.bandValue, {color}]}>
+                {value > 0 ? '+' : ''}
+                {value}
+              </Text>
+              <View
+                style={[
+                  styles.miniBarTrack,
+                  {backgroundColor: t.colors.divider},
+                ]}>
+                <View
+                  style={[
+                    styles.miniBar,
+                    {
+                      width: `${Math.max(12, magnitude * 100)}%`,
+                      backgroundColor: color,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -275,27 +333,20 @@ const BandDetail = memo<BandDetailProps>(({ graphicBands }) => {
 
 export const SoundLabScreen = () => {
   const t = useTheme();
-  const insets = useSafeAreaInsets();
-
-  // EQ State - 仅订阅必要的状态，graphicBands 不下放到这里
-  const mode = useEQStore(s => s.mode);
-  const setMode = useEQStore(s => s.setMode);
-  const enabled = useEQStore(s => s.enabled);
-  const setEnabled = useEQStore(s => s.setEnabled);
-  const activePresetId = useEQStore(s => s.activePresetId);
-  const resetToFlat = useEQStore(s => s.resetToFlat);
-
-  // PEQ 本地状态
+  const mode = useEQStore(state => state.mode);
+  const setMode = useEQStore(state => state.setMode);
+  const enabled = useEQStore(state => state.enabled);
+  const setEnabled = useEQStore(state => state.setEnabled);
+  const activePresetId = useEQStore(state => state.activePresetId);
+  const resetToFlat = useEQStore(state => state.resetToFlat);
   const [selectedFilterId, setSelectedFilterId] = useState<number | null>(null);
-
-  // 当前预设名称
-  const activePreset = EMOTION_PRESETS.find(p => p.id === activePresetId);
-
-  // FFT 频谱数据轮询（EQ 启用时持续轮询，覆盖所有模式）
-  const { spectrum, catEarLeft, catEarRight } = useSpectrumPoller(enabled);
+  const activePreset = EMOTION_PRESETS.find(
+    preset => preset.id === activePresetId,
+  );
+  const {spectrum, catEarLeft, catEarRight} = useSpectrumPoller(enabled);
 
   return (
-    <View style={[styles.safeArea, { backgroundColor: t.colors.background }]}>
+    <View style={[styles.safeArea, {backgroundColor: t.colors.background}]}>
       <StatusBar
         barStyle={t.isDark ? 'light-content' : 'dark-content'}
         translucent
@@ -303,22 +354,78 @@ export const SoundLabScreen = () => {
       />
       <Header title="声音实验室" showBack noBorder />
 
-      {/* ---- 上部可滚动内容区 ---- */}
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ===== 预设选择器 ===== */}
-        <View style={styles.presetSection}>
-          <View style={styles.sectionTitleRow}>
-            <Text style={[styles.sectionTitle, { color: t.colors.text }]}>
-              情绪化预设
+        showsVerticalScrollIndicator={false}>
+        <View
+          style={[
+            styles.heroCard,
+            {backgroundColor: t.colors.surface, borderColor: t.colors.divider},
+          ]}>
+          <View
+            style={[styles.heroOrb, {backgroundColor: t.colors.primaryLight}]}
+          />
+          <View style={styles.eyebrowRow}>
+            <Icon name="tune-vertical" size={14} color={t.colors.primary} />
+            <Text
+              style={[
+                styles.eyebrow,
+                {color: t.colors.primary, marginLeft: 6},
+              ]}>
+              EQ STUDIO
             </Text>
+          </View>
+          <Text style={[styles.heroTitle, {color: t.colors.text}]}>
+            把声音调成喜欢的样子
+          </Text>
+          <Text style={[styles.heroSubtitle, {color: t.colors.textSub}]}>
+            从一键预设开始，也可以细调每一段频率。
+          </Text>
+          <View
+            style={[styles.heroDivider, {backgroundColor: t.colors.divider}]}
+          />
+          <View style={styles.heroControl}>
+            <View style={styles.heroControlCopy}>
+              <Text style={[styles.heroControlTitle, {color: t.colors.text}]}>
+                均衡器总开关
+              </Text>
+              <Text
+                style={[styles.heroControlHint, {color: t.colors.textHint}]}>
+                {enabled ? '音效正在应用到当前播放' : '关闭后恢复原始声音'}
+              </Text>
+            </View>
+            <Switch value={enabled} onValueChange={setEnabled} />
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.sectionCard,
+            {backgroundColor: t.colors.surface, borderColor: t.colors.divider},
+          ]}>
+          <View style={styles.sectionHeadingRow}>
+            <View>
+              <Text style={[styles.sectionTitle, {color: t.colors.text}]}>
+                声音预设
+              </Text>
+              <Text
+                style={[styles.sectionSubtitle, {color: t.colors.textHint}]}>
+                {activePreset?.description ?? '选择一组适合当前聆听的声音曲线'}
+              </Text>
+            </View>
             {activePresetId !== 'flat' && (
-              <TouchableOpacity onPress={resetToFlat}>
-                <Text style={[styles.resetBtn, { color: t.colors.primary }]}>
-                  重置
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="恢复原音预设"
+                onPress={resetToFlat}
+                style={[
+                  styles.resetButton,
+                  {backgroundColor: t.colors.primaryLight},
+                ]}>
+                <Icon name="restore" size={14} color={t.colors.primary} />
+                <Text style={[styles.resetText, {color: t.colors.primary}]}>
+                  原音
                 </Text>
               </TouchableOpacity>
             )}
@@ -326,11 +433,49 @@ export const SoundLabScreen = () => {
           <PresetSelector />
         </View>
 
-        {/* ===== FFT 频谱区域（Native OpenGL SpectrumView） ===== */}
-        <View style={[styles.spectrumCard, { backgroundColor: t.colors.surface }]}>
-          <Text style={[styles.sectionTitle, { color: t.colors.text }]}>
-            实时频谱
-          </Text>
+        <View
+          style={[
+            styles.sectionCard,
+            {backgroundColor: t.colors.surface, borderColor: t.colors.divider},
+          ]}>
+          <View style={styles.spectrumHeader}>
+            <View>
+              <Text style={[styles.sectionTitle, {color: t.colors.text}]}>
+                实时频谱
+              </Text>
+              <Text
+                style={[styles.sectionSubtitle, {color: t.colors.textHint}]}>
+                播放音乐时观察不同频段的能量变化
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.liveBadge,
+                {
+                  backgroundColor: enabled
+                    ? t.colors.primaryLight
+                    : t.colors.surfaceHigh,
+                },
+              ]}>
+              <View
+                style={[
+                  styles.liveDot,
+                  {
+                    backgroundColor: enabled
+                      ? t.colors.success
+                      : t.colors.textHint,
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.liveText,
+                  {color: enabled ? t.colors.primary : t.colors.textHint},
+                ]}>
+                {enabled ? 'EQ ON' : 'EQ OFF'}
+              </Text>
+            </View>
+          </View>
           <SpectrumView
             style={styles.spectrumView}
             spectrumData={spectrum}
@@ -339,206 +484,217 @@ export const SoundLabScreen = () => {
           />
         </View>
 
-        {/* ===== 频段详情（仅 Graphic EQ 模式，使用独立组件） ===== */}
-        {mode === 'graphic' && <BandDetailView />}
-      </ScrollView>
-
-      {/* ---- 底部固定 EQ 控制台 ---- */}
-      <View
-        style={[
-          styles.bottomConsole,
-          {
-            backgroundColor: t.colors.surface,
-            borderTopColor: t.colors.divider,
-            zIndex: 100,
-          },
-        ]}
-      >
-        {/* EQ 开关 + 模式切换 */}
-        <View style={styles.controlBar}>
-          <View style={styles.switchRow}>
-            <Text style={[styles.switchLabel, { color: t.colors.text }]}>
-              EQ 均衡器
+        <View
+          style={[
+            styles.editorCard,
+            {backgroundColor: t.colors.surface, borderColor: t.colors.divider},
+          ]}>
+          <View style={styles.editorHeader}>
+            <View style={styles.sectionHeadingRow}>
+              <Text style={[styles.sectionTitle, {color: t.colors.text}]}>
+                均衡器调节
+              </Text>
+              <Text style={{fontSize: 10, color: t.colors.textHint}}>
+                {enabled ? '已启用' : '已关闭'}
+              </Text>
+            </View>
+            <Text style={[styles.sectionSubtitle, {color: t.colors.textHint}]}>
+              拖动控制点调整曲线，变化会同步到播放器。
             </Text>
-            <Switch value={enabled} onValueChange={setEnabled} />
           </View>
-          {/* 当前预设标签 */}
-          {activePreset && (
-            <Text style={[styles.presetLabel, { color: t.colors.textHint }]}>
-              预设：<Text style={{ color: t.colors.primary }}>{activePreset.name}</Text>
-            </Text>
+
+          <View
+            style={[styles.modeRow, {backgroundColor: t.colors.surfaceHigh}]}>
+            {MODE_OPTIONS.map(option => {
+              const active = mode === option.key;
+              return (
+                <TouchableOpacity
+                  key={option.key}
+                  accessibilityRole="tab"
+                  accessibilityState={{selected: active}}
+                  activeOpacity={0.8}
+                  onPress={() => setMode(option.key)}
+                  style={[
+                    styles.modeButton,
+                    active && {backgroundColor: t.colors.surface},
+                  ]}>
+                  <Icon
+                    name={option.icon}
+                    size={15}
+                    color={active ? t.colors.primary : t.colors.textHint}
+                  />
+                  <Text
+                    style={[
+                      styles.modeText,
+                      {color: active ? t.colors.primary : t.colors.textSub},
+                    ]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {mode === 'graphic' ? (
+            <GraphicEQSection enabled={enabled} />
+          ) : (
+            <PEQSection
+              enabled={enabled}
+              selectedFilterId={selectedFilterId}
+              onSelectFilter={setSelectedFilterId}
+            />
           )}
         </View>
-
-        {/* 模式选择器 */}
-        <View style={styles.modeRow}>
-          {MODE_OPTIONS.map(opt => {
-            const isActive = mode === opt.key;
-            return (
-              <TouchableOpacity
-                key={opt.key}
-                activeOpacity={0.7}
-                onPress={() => setMode(opt.key)}
-                style={[
-                  styles.modeBtn,
-                  isActive
-                    ? { backgroundColor: t.colors.primary + '25', borderColor: t.colors.primary, borderWidth: 1.5 }
-                    : { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'transparent', borderWidth: 1 },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.modeBtnText,
-                    { color: isActive ? t.colors.primary : t.colors.textSub },
-                  ]}
-                >
-                  {opt.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {/* ===== Graphic EQ 区域 ===== */}
-        {mode === 'graphic' && (
-          <View style={[styles.eqScrollArea, { opacity: enabled ? 1 : 0.35 }]}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              bounces={false}
-              nestedScrollEnabled
-            >
-              <GraphicEQ />
-            </ScrollView>
-          </View>
-        )}
-
-        {/* ===== PEQ 区域 ===== */}
-        {mode === 'parametric' && (
-          <PEQSection
-            selectedFilterId={selectedFilterId}
-            onSelectFilter={setSelectedFilterId}
-          />
-        )}
-      </View>
+      </ScrollView>
     </View>
   );
 };
 
-// ========== BandDetailView - 从 store 读取 graphicBands 的独立组件 ==========
-const BandDetailView = memo(() => {
-  const graphicBands = useEQStore(s => s.graphicBands);
-  return <BandDetail graphicBands={graphicBands} />;
+interface GraphicEQSectionProps {
+  enabled: boolean;
+}
+
+const GraphicEQSection = memo<GraphicEQSectionProps>(({enabled}) => {
+  const graphicBands = useEQStore(state => state.graphicBands);
+  return (
+    <View style={styles.editorBody}>
+      <View
+        pointerEvents={enabled ? 'auto' : 'none'}
+        style={{opacity: enabled ? 1 : 0.45}}>
+        <View style={styles.eqScrollArea}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            bounces={false}
+            nestedScrollEnabled>
+            <GraphicEQ />
+          </ScrollView>
+        </View>
+        <BandDetail graphicBands={graphicBands} />
+      </View>
+    </View>
+  );
 });
 
-// ========== PEQSection - PEQ 区域的独立组件 ==========
 interface PEQSectionProps {
+  enabled: boolean;
   selectedFilterId: number | null;
   onSelectFilter: (id: number | null) => void;
 }
 
-const PEQSection = memo<PEQSectionProps>(({ selectedFilterId, onSelectFilter }) => {
-  const t = useTheme();
-  const peqFilters = useEQStore(s => s.peqFilters);
-  const addFilter = useEQStore(s => s.addFilter);
-  const enabled = useEQStore(s => s.enabled);
+const PEQSection = memo<PEQSectionProps>(
+  ({enabled, selectedFilterId, onSelectFilter}) => {
+    const t = useTheme();
+    const peqFilters = useEQStore(state => state.peqFilters);
+    const addFilter = useEQStore(state => state.addFilter);
+    const selectedFilter = selectedFilterId
+      ? peqFilters.find(filter => filter.id === selectedFilterId) ?? null
+      : null;
 
-  // 当前选中的 PEQ 滤波器
-  const selectedFilter = selectedFilterId
-    ? peqFilters.find(f => f.id === selectedFilterId) ?? null
-    : null;
+    const addAndSelectFilter = () => {
+      const nextId =
+        peqFilters.length > 0
+          ? Math.max(...peqFilters.map(filter => filter.id)) + 1
+          : 1;
+      addFilter();
+      onSelectFilter(nextId);
+    };
 
-  return (
-    <View style={[styles.eqScrollArea, { opacity: enabled ? 1 : 0.35 }]}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        bounces={false}
-        nestedScrollEnabled
-      >
-        <View style={styles.peqCompact}>
-          {/* 频率响应曲线 + 可拖动节点 */}
-          <ParametricEQ
-            filters={peqFilters}
-            onSelectFilter={onSelectFilter}
-            selectedFilterId={selectedFilterId}
-          />
-        </View>
-      </ScrollView>
+    return (
+      <View style={styles.editorBody}>
+        <View style={[styles.peqSection, {opacity: enabled ? 1 : 0.45}]}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            bounces={false}
+            nestedScrollEnabled>
+            <View style={styles.peqGraph}>
+              <ParametricEQ
+                filters={peqFilters}
+                onSelectFilter={onSelectFilter}
+                selectedFilterId={selectedFilterId}
+              />
+            </View>
+          </ScrollView>
 
-      {/* 紧凑型滤波器列表 + 添加按钮 */}
-      <View style={styles.peqFilterRow}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.peqFilterScroll}
-        >
-          {peqFilters.map(filter => (
+          <View style={styles.peqFilterRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.peqFilterScroll}>
+              {peqFilters.map(filter => {
+                const selected = selectedFilterId === filter.id;
+                const frequency =
+                  filter.frequency >= 1000
+                    ? `${(filter.frequency / 1000).toFixed(1)}k`
+                    : `${filter.frequency}`;
+                return (
+                  <TouchableOpacity
+                    key={filter.id}
+                    accessibilityRole="button"
+                    accessibilityState={{selected}}
+                    activeOpacity={0.75}
+                    onPress={() => onSelectFilter(selected ? null : filter.id)}
+                    style={[
+                      styles.peqFilterChip,
+                      {
+                        backgroundColor: selected
+                          ? t.colors.primaryLight
+                          : t.colors.surfaceHigh,
+                        borderColor: selected
+                          ? t.colors.primary
+                          : t.colors.divider,
+                      },
+                    ]}>
+                    <Text
+                      style={[
+                        styles.peqFilterChipText,
+                        {
+                          color: filter.enabled
+                            ? t.colors.primary
+                            : t.colors.textSub,
+                        },
+                      ]}>
+                      #{filter.id} · {filter.type}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.peqFilterChipSub,
+                        {color: t.colors.textHint},
+                      ]}>
+                      {frequency} Hz · {filter.gain > 0 ? '+' : ''}
+                      {filter.gain} dB
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
             <TouchableOpacity
-              key={filter.id}
-              activeOpacity={0.7}
-              onPress={() => onSelectFilter(
-                selectedFilterId === filter.id ? null : filter.id,
-              )}
+              accessibilityRole="button"
+              accessibilityLabel="添加滤波器"
+              activeOpacity={0.75}
+              onPress={addAndSelectFilter}
               style={[
-                styles.peqFilterChip,
+                styles.addFilterButton,
                 {
-                  backgroundColor: filter.enabled
-                    ? t.colors.primary + '18'
-                    : 'rgba(255,255,255,0.05)',
-                  borderColor: selectedFilterId === filter.id
-                    ? t.colors.primary
-                    : 'transparent',
-                  borderWidth: selectedFilterId === filter.id ? 1.5 : 0,
+                  borderColor: t.colors.primary,
+                  backgroundColor: t.colors.primaryLight,
                 },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.peqFilterChipText,
-                  {
-                    color: filter.enabled ? t.colors.primary : t.colors.textSub,
-                    opacity: filter.enabled ? 1 : 0.5,
-                  },
-                ]}
-              >
-                #{filter.id} {filter.type}
-              </Text>
-              <Text style={[styles.peqFilterChipSub, { color: t.colors.textHint }]}>
-                {filter.frequency >= 1000
-                  ? `${(filter.frequency / 1000).toFixed(1)}k`
-                  : `${filter.frequency}`}
-                Hz · {filter.gain > 0 ? '+' : ''}{filter.gain}dB
+              ]}>
+              <Text style={[styles.addFilterText, {color: t.colors.primary}]}>
+                +
               </Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-        <TouchableOpacity
-          activeOpacity={0.7}
-          onPress={() => {
-            addFilter();
-            onSelectFilter(
-              peqFilters.length > 0 ? Math.max(...peqFilters.map(f => f.id)) + 1 : 1,
-            );
-          }}
-          style={[
-            styles.addFilterBtnSmall,
-            { borderColor: t.colors.primary + '40', backgroundColor: t.colors.primary + '0A' },
-          ]}
-        >
-          <Text style={[styles.addFilterBtnText, { color: t.colors.primary }]}>+</Text>
-        </TouchableOpacity>
-      </View>
+          </View>
 
-      {/* 选中滤波器的编辑面板（在底部弹出） */}
-      {selectedFilter && (
-        <View style={styles.peqEditorContainer}>
-          <PEQFilterEditor
-            filter={selectedFilter}
-            onClose={() => onSelectFilter(null)}
-          />
+          {selectedFilter && (
+            <PEQFilterEditor
+              filter={selectedFilter}
+              onClose={() => onSelectFilter(null)}
+            />
+          )}
         </View>
-      )}
-    </View>
-  );
-});
+      </View>
+    );
+  },
+);

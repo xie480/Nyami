@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, {useRef} from 'react';
 import {
   View,
   Text,
@@ -7,8 +7,9 @@ import {
   StyleSheet,
   Animated,
 } from 'react-native';
-import { useTheme } from '../../theme';
-import { useEQStore, EMOTION_PRESETS } from '../../store/eqStore';
+import {useTheme} from '../../theme';
+import {useEQStore, EMOTION_PRESETS} from '../../store/eqStore';
+import type {Colors} from '../../theme/colors';
 
 export const PresetSelector: React.FC = () => {
   const t = useTheme();
@@ -20,8 +21,7 @@ export const PresetSelector: React.FC = () => {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
+        contentContainerStyle={styles.scrollContent}>
         {EMOTION_PRESETS.map(preset => {
           const isActive = activePresetId === preset.id;
           return (
@@ -30,7 +30,7 @@ export const PresetSelector: React.FC = () => {
               preset={preset}
               isActive={isActive}
               onPress={() => applyPreset(preset.id)}
-              accentColor={t.colors.primary}
+              colors={t.colors}
             />
           );
         })}
@@ -42,17 +42,17 @@ export const PresetSelector: React.FC = () => {
 // ===== 预设 Chip 子组件（包含按压动画） =====
 
 interface PresetChipProps {
-  preset: typeof EMOTION_PRESETS[0];
+  preset: (typeof EMOTION_PRESETS)[0];
   isActive: boolean;
   onPress: () => void;
-  accentColor: string;
+  colors: Colors;
 }
 
 const PresetChip: React.FC<PresetChipProps> = ({
   preset,
   isActive,
   onPress,
-  accentColor,
+  colors,
 }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
@@ -73,7 +73,7 @@ const PresetChip: React.FC<PresetChipProps> = ({
   };
 
   return (
-    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+    <Animated.View style={{transform: [{scale: scaleAnim}]}}>
       <TouchableOpacity
         activeOpacity={0.7}
         onPress={onPress}
@@ -83,33 +83,28 @@ const PresetChip: React.FC<PresetChipProps> = ({
           styles.chip,
           isActive
             ? {
-                backgroundColor: accentColor + '25',
-                borderColor: accentColor,
-                borderWidth: 1.5,
+                backgroundColor: colors.primaryLight,
+                borderColor: colors.primary,
               }
             : {
-                backgroundColor: 'rgba(255,255,255,0.06)',
-                borderColor: 'rgba(255,255,255,0.12)',
-                borderWidth: 1,
+                backgroundColor: colors.surfaceHigh,
+                borderColor: colors.divider,
               },
-        ]}
-      >
+        ]}>
         <Text
           style={[
             styles.chipName,
-            { color: isActive ? accentColor : '#E8E8EC' },
+            {color: isActive ? colors.primary : colors.text},
           ]}
-          numberOfLines={1}
-        >
+          numberOfLines={1}>
           {preset.name}
         </Text>
         <Text
           style={[
             styles.chipDesc,
-            { color: isActive ? '#AAAAB8' : '#777784' },
+            {color: isActive ? colors.textSub : colors.textHint},
           ]}
-          numberOfLines={1}
-        >
+          numberOfLines={1}>
           {preset.description}
         </Text>
       </TouchableOpacity>
@@ -122,16 +117,19 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   scrollContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 0,
     gap: 8,
     flexDirection: 'row',
   },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    minWidth: 80,
-    alignItems: 'center',
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    borderRadius: 15,
+    borderWidth: 1,
+    minWidth: 124,
+    minHeight: 64,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   chipName: {
     fontSize: 13,

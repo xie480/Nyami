@@ -56,17 +56,6 @@ interface EQSliderProps {
   disabled?: boolean;
 }
 
-/** 霓虹发光色的 HSL 渐变 - 蓝紫霓虹风格 */
-const getNeonColor = (fraction: number): string => {
-  if (fraction < 0.5) {
-    const t = fraction / 0.5;
-    return `hsl(${240 - t * 120}, 100%, ${60 + t * 10}%)`;
-  } else {
-    const t = (fraction - 0.5) / 0.5;
-    return `hsl(${120 - t * 120}, 100%, ${70 + t * 10}%)`;
-  }
-};
-
 const GAIN_MIN = -12;
 const GAIN_MAX = 12;
 const THROTTLE_MS = 50; // DSP 更新节流间隔
@@ -111,7 +100,11 @@ export const EQSlider: React.FC<EQSliderProps> = ({
 
   // ========== 归一化值 ==========
   const fraction = useMemo(() => (value + 12) / 24, [value]);
-  const neonColor = useMemo(() => getNeonColor(fraction), [fraction]);
+  const neonColor = value > 0
+    ? t.colors.primary
+    : value < 0
+      ? '#6C8CFF'
+      : t.colors.textHint;
 
   // 当前 thumb 应该位于的 bottom 位置（基于 prop value）
   const thumbBottomPx = fraction * trackHeightRef.current;
@@ -285,11 +278,18 @@ export const EQSlider: React.FC<EQSliderProps> = ({
             styles.trackFill,
             {
               width: 4,
-              height: `${fraction * 100}%` as any,
+              height: `${(Math.abs(value) / 24) * 100}%` as any,
+              top: value < 0 ? '50%' : undefined,
+              bottom: value >= 0 ? '50%' : undefined,
               backgroundColor: neonColor,
               borderRadius: 2,
             },
           ]}
+        />
+
+        <View
+          pointerEvents="none"
+          style={[styles.zeroLine, {backgroundColor: t.colors.textHint}]}
         />
 
         {/* 发光底部 */}
@@ -364,7 +364,15 @@ const styles = StyleSheet.create({
   },
   trackFill: {
     position: 'absolute',
-    bottom: 0,
+  },
+  zeroLine: {
+    position: 'absolute',
+    top: '50%',
+    left: -3,
+    width: 10,
+    height: 1,
+    opacity: 0.65,
+    zIndex: 1,
   },
   glow: {
     position: 'absolute',

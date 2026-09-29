@@ -74,8 +74,8 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
       style={[
         styles.container,
         {
-          backgroundColor: 'transparent',
-          borderColor: 'transparent',
+          backgroundColor: t.colors.surfaceHigh,
+          borderColor: t.colors.divider,
           transform: [{
             translateY: slideAnim.interpolate({
               inputRange: [0, 1],
@@ -149,7 +149,7 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
                 styles.typeChip,
                 isActive
                   ? { backgroundColor: t.colors.primary + '25', borderColor: t.colors.primary }
-                  : { backgroundColor: 'rgba(255,255,255,0.06)', borderColor: 'transparent' },
+                  : { backgroundColor: t.colors.surface, borderColor: t.colors.divider },
               ]}
             >
               <Text
@@ -354,7 +354,7 @@ const DragSlider: React.FC<DragSliderProps> = ({
         {...panResponder.panHandlers}
       >
         {/* 轨道背景 */}
-        <View style={[styles.sliderTrack, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
+        <View style={[styles.sliderTrack, { backgroundColor: t.colors.divider }]}>
           {/* 填充条 */}
           <View
             style={[
@@ -402,9 +402,9 @@ function formatMaxValue(min: number, max: number, formatValue?: (v: number) => s
 const styles = StyleSheet.create({
   container: {
     marginTop: 12,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 16,
+    padding: 15,
   },
   header: {
     flexDirection: 'row',
