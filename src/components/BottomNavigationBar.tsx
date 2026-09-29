@@ -1,5 +1,12 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Animated, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {
+  Animated,
+  Easing,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useActiveTrack} from 'react-native-track-player';
 import {GlassView} from './GlassView';
@@ -38,6 +45,7 @@ const NAV_ITEMS: Array<{
   {key: 'profile', title: '用户画像', icon: 'account-circle-outline', route: 'TagRecommendations'},
   {key: 'settings', title: '设置', icon: 'cog-outline', route: 'Settings'},
 ];
+const TAB_INDICATOR_DURATION_MS = 150;
 
 /** 应用级固定磨砂播放导航面板；播放器与导航共用同一块玻璃背景。 */
 const BottomNavigationBarComponent: React.FC<BottomNavigationBarProps> = ({
@@ -50,6 +58,13 @@ const BottomNavigationBarComponent: React.FC<BottomNavigationBarProps> = ({
   const openPlayer = useCallback(
     () => navigation.navigate('Player'),
     [navigation],
+  );
+  const navigateToTab = useCallback(
+    (route: string | undefined) => {
+      if (!route || route === currentRouteName) return;
+      navigation.navigate(route);
+    },
+    [currentRouteName, navigation],
   );
   const hasActiveTrack = !!activeTrack;
   const activeTab = getActiveTab(currentRouteName);
@@ -69,9 +84,11 @@ const BottomNavigationBarComponent: React.FC<BottomNavigationBarProps> = ({
 
   useEffect(() => {
     if (activeIndex < 0 || indicatorWidth === 0) return;
+    indicatorTranslateX.stopAnimation();
     Animated.timing(indicatorTranslateX, {
       toValue: activeIndex * indicatorWidth,
-      duration: 240,
+      duration: TAB_INDICATOR_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
   }, [activeIndex, indicatorTranslateX, indicatorWidth]);
@@ -152,7 +169,7 @@ const BottomNavigationBarComponent: React.FC<BottomNavigationBarProps> = ({
                   accessibilityLabel={disabled ? `${item.title}（后续开放）` : item.title}
                   accessibilityState={{selected, disabled}}
                   disabled={disabled}
-                  onPress={() => item.route && navigation.navigate(item.route)}
+                  onPress={() => navigateToTab(item.route)}
                   activeOpacity={0.75}
                   style={{
                     flex: 1,
