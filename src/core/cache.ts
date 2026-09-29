@@ -2,12 +2,13 @@ import { storage } from './storage';
 
 interface Entry<T> {
   value: T;
-  expireAt: number;
+  expireAt: number | null;
   lastAccess: number;
 }
 
 /** 用于 Promise 去重的挂起请求映射表 */
 const pendingFetchers = new Map<string, Promise<any>>();
+const keyVersions = new Map<string, number>();
 
 class TTLCache {
   private mem = new Map<string, Entry<any>>();
@@ -17,7 +18,7 @@ class TTLCache {
   private getMem<T>(key: string): T | undefined {
     const e = this.mem.get(key);
     if (!e) return undefined;
-    if (e.expireAt < Date.now()) {
+    if (e.expireAt !== null && e.expireAt < Date.now()) {
       this.mem.delete(key);
       return undefined;
     }
@@ -26,7 +27,7 @@ class TTLCache {
   }
 
   /** 内存写入（含 LRU 淘汰）*/
-  private setMem<T>(key: string, value: T, ttl: number) {
+  private setMem<T>(key: string, value: T, ttl: number | null) {
     if (this.mem.size >= this.maxEntries) {
       // 淘汰最久未访问的
       let oldestKey = '';
@@ -41,7 +42,7 @@ class TTLCache {
     }
     this.mem.set(key, {
       value,
-      expireAt: Date.now() + ttl,
+      expireAt: ttl === null ? null : Date.now() + ttl,
       lastAccess: Date.now(),
     });
   }
@@ -54,7 +55,7 @@ class TTLCache {
 
     const persisted = storage.getJSON<Entry<T>>(`cache:${key}`);
     if (!persisted) return undefined;
-    if (persisted.expireAt < Date.now()) {
+    if (persisted.expireAt !== null && persisted.expireAt < Date.now()) {
       storage.delete(`cache:${key}`);
       return undefined;
     }
@@ -64,12 +65,12 @@ class TTLCache {
   }
 
   /** 设置缓存。persist=true 同步写入 MMKV */
-  set<T>(key: string, value: T, ttl: number, persist = false) {
+  set<T>(key: string, value: T, ttl: number | null, persist = false) {
     this.setMem(key, value, ttl);
     if (persist) {
       storage.setJSON(`cache:${key}`, {
         value,
-        expireAt: Date.now() + ttl,
+        expireAt: ttl === null ? null : Date.now() + ttl,
         lastAccess: Date.now(),
       });
     }
@@ -78,6 +79,8 @@ class TTLCache {
   delete(key: string) {
     this.mem.delete(key);
     storage.delete(`cache:${key}`);
+    keyVersions.set(key, (keyVersions.get(key) ?? 0) + 1);
+    pendingFetchers.delete(`__pending:${key}`);
   }
 
   /** 删除所有以 prefix 开头的 key */
@@ -86,6 +89,13 @@ class TTLCache {
       if (k.startsWith(prefix)) this.mem.delete(k);
     }
     storage.deletePrefix(`cache:${prefix}`);
+    for (const pendingKey of Array.from(pendingFetchers.keys())) {
+      if (!pendingKey.startsWith('__pending:')) continue;
+      const key = pendingKey.slice('__pending:'.length);
+      if (!key.startsWith(prefix)) continue;
+      keyVersions.set(key, (keyVersions.get(key) ?? 0) + 1);
+      pendingFetchers.delete(pendingKey);
+    }
   }
 
   /**
@@ -100,7 +110,7 @@ class TTLCache {
    */
   async getOrSet<T>(
     key: string,
-    ttl: number,
+    ttl: number | null,
     fetcher: () => Promise<T>,
     persist = false
   ): Promise<T> {
@@ -112,14 +122,21 @@ class TTLCache {
     const existing = pendingFetchers.get(pendingKey);
     if (existing) return existing as Promise<T>;
 
+    const version = keyVersions.get(key) ?? 0;
     const promise = fetcher()
       .then((value) => {
-        this.set(key, value, ttl, persist);
-        pendingFetchers.delete(pendingKey);
+        if ((keyVersions.get(key) ?? 0) === version) {
+          this.set(key, value, ttl, persist);
+        }
+        if (pendingFetchers.get(pendingKey) === promise) {
+          pendingFetchers.delete(pendingKey);
+        }
         return value;
       })
       .catch((err) => {
-        pendingFetchers.delete(pendingKey);
+        if (pendingFetchers.get(pendingKey) === promise) {
+          pendingFetchers.delete(pendingKey);
+        }
         throw err;
       });
 

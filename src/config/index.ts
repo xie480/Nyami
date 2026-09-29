@@ -12,7 +12,6 @@
   /** 缓存 TTL，单位毫秒 */
   cacheTTL: {
     wbiKeys: 60 * 60 * 1000,         // WBI 密钥 1 小时
-    folders: 10 * 60 * 1000,         // 收藏夹列表 10 分钟
     folderVideos: 5 * 60 * 1000,     // 收藏夹视频 5 分钟
     videoInfo: 24 * 60 * 60 * 1000,  // 视频元信息 1 天
     videoTags: 30 * 24 * 60 * 60 * 1000, // 视频 tag 30 天

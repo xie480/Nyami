@@ -75,7 +75,7 @@ export const importedPlaylistService = {
 
     return cache.getOrSet(
       cacheKey,
-      config.cacheTTL.folders,
+      null,
       async () => {
         const allItems: BiliCollectedPlaylist[] = [];
         let page = 1;

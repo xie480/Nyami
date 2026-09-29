@@ -79,7 +79,7 @@ function cacheFolderSnapshot(uid: string, folders: Parameters<typeof trimFolder>
   cache.set(
     `folders:${uid}`,
     folders.map(trimFolder),
-    config.cacheTTL.folders,
+    null,
     true,
   );
 }
@@ -465,7 +465,7 @@ async function syncSingleFolder(
 export const favoriteService = {
   /**
    * 获取某 UID 的全部收藏夹
-   * 带缓存，10 分钟内不会重复请求
+   * 持久化缓存；仅在数据变更或用户强制刷新时重新请求
    */
   async getFolders(
     uid: string,
@@ -480,7 +480,7 @@ export const favoriteService = {
     if (force) cache.delete(key);
     return cache.getOrSet(
       key,
-      config.cacheTTL.folders,
+      null,
       async () => {
         const data = await biliApi.getFavoriteFolders(uid, signal, undefined, rateLimitPriority);
         return (data.list || []).map(trimFolder);
