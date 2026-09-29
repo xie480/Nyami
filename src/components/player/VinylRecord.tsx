@@ -128,7 +128,12 @@ export const VinylRecord: React.FC<Props> = ({
   const stageSize = recordSize + AUDIO_REACTIVE_RING_OUTSET * 2;
 
   return (
-    <View style={[styles.stage, {width: stageSize, height: stageSize}]}>
+    <Animated.View
+      style={[
+        styles.stage,
+        {width: stageSize, height: stageSize},
+        spinningStyle,
+      ]}>
       <AudioReactiveRing
         artworkSize={recordSize}
         enabled={isVisible}
@@ -136,11 +141,10 @@ export const VinylRecord: React.FC<Props> = ({
         reduceMotion={reduceMotion}
         theme={theme}
       />
-      <Animated.View
+      <View
         style={[
           styles.record,
           {width: recordSize, height: recordSize, borderRadius: recordSize / 2},
-          spinningStyle,
         ]}>
         <View style={[styles.artworkFrame, {borderRadius: recordSize / 2}]}>
           <RNAnimated.View
@@ -185,8 +189,8 @@ export const VinylRecord: React.FC<Props> = ({
           <View style={styles.innerHighlight} pointerEvents="none" />
           <View style={styles.hub} pointerEvents="none" />
         </View>
-      </Animated.View>
-    </View>
+      </View>
+    </Animated.View>
   );
 };
 

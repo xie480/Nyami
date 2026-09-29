@@ -11,11 +11,12 @@ import {AlbumTheme} from '../../utils/albumTheme';
 
 const BAR_COUNT = 64;
 const MIN_BAR_LENGTH = 3;
-const MAX_BAR_LENGTH = 36;
-const AMPLITUDE_RESPONSE_EXPONENT = 0.62;
+const MAX_BAR_LENGTH = 48;
+const AMPLITUDE_RESPONSE_EXPONENT = 1.25;
+const AMPLITUDE_RESPONSE_GAIN = 1.2;
 const RING_INNER_GAP = 2;
 const LEGACY_RING_DIAMETER_GUTTER = 48;
-export const AUDIO_REACTIVE_RING_OUTSET = 44;
+export const AUDIO_REACTIVE_RING_OUTSET = 56;
 export const AUDIO_REACTIVE_RING_LAYOUT_GROWTH =
   AUDIO_REACTIVE_RING_OUTSET * 2 - LEGACY_RING_DIAMETER_GUTTER;
 const EMPTY_SPECTRUM: number[] = [];
@@ -59,8 +60,12 @@ function buildRingPath(
     const binFraction = binPosition - lowerBin;
     const rawAmplitude = lowerValue + (upperValue - lowerValue) * binFraction;
     const normalizedAmplitude = Math.min(1, Math.max(0, rawAmplitude));
-    const amplitude =
-      Math.pow(normalizedAmplitude, AMPLITUDE_RESPONSE_EXPONENT) * intensity;
+    const amplitude = Math.min(
+      1,
+      Math.pow(normalizedAmplitude, AMPLITUDE_RESPONSE_EXPONENT) *
+        AMPLITUDE_RESPONSE_GAIN *
+        intensity,
+    );
     const length = MIN_BAR_LENGTH + amplitude * MAX_BAR_LENGTH;
     const innerX = center + Math.cos(angle) * innerRadius;
     const innerY = center + Math.sin(angle) * innerRadius;
