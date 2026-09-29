@@ -47,6 +47,7 @@ export interface SyncProgressEvent {
 // 内存缓存，用于同步读取全局索引（UI 层渲染时需同步获取）
 let globalIndexCache: FavoriteVideo[] = [];
 let globalIndexRevision = 0;
+let globalIndexFingerprint = '0:1515:ce07';
 let globalIndexMembership: Map<string, string> | null = null;
 let globalIndexLoadPromise: Promise<void> | null = null;
 let globalIndexLoadGeneration = 0;
@@ -121,6 +122,23 @@ function hasGlobalIndexMembershipChanged(
   return false;
 }
 
+function fingerprintGlobalIndexMembership(membership: Map<string, string>): string {
+  const entries = Array.from(membership.entries()).sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  );
+  let firstHash = 5381;
+  let secondHash = 52711;
+  for (const [videoId, sources] of entries) {
+    const value = `${videoId}:${sources};`;
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      firstHash = (firstHash * 31 + code) % 4_294_967_291;
+      secondHash = (secondHash * 37 + code) % 4_294_967_279;
+    }
+  }
+  return `${entries.length}:${firstHash.toString(16)}:${secondHash.toString(16)}`;
+}
+
 function replaceGlobalIndexCache(
   videos: FavoriteVideo[],
   nextMembership = getGlobalIndexMembership(videos),
@@ -129,6 +147,7 @@ function replaceGlobalIndexCache(
   const indexChanged = hasGlobalIndexMembershipChanged(nextMembership);
   globalIndexCache = videos;
   globalIndexMembership = nextMembership;
+  globalIndexFingerprint = fingerprintGlobalIndexMembership(nextMembership);
   visibleGlobalIndexSource = null;
   if (indexChanged) {
     globalIndexRevision += 1;
@@ -318,6 +337,11 @@ export function isGlobalIndexCacheLoaded(): boolean {
 
 export function getGlobalIndexRevision(): number {
   return globalIndexRevision;
+}
+
+/** 跨应用重启稳定的收藏索引内容指纹，用于校验持久化画像快照。 */
+export function getGlobalIndexFingerprint(): string {
+  return globalIndexFingerprint;
 }
 
 export function subscribeGlobalIndexRevision(

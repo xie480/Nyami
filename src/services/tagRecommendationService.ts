@@ -5,7 +5,11 @@ import {
   RateLimitError,
   ResourceUnavailableError,
 } from '../core/errors';
-import {getVideoTagCacheEntries, upsertVideoTagCacheBatch} from '../db/operations';
+import {
+  getVideoTagCacheEntries,
+  getVideoTagCacheRevision,
+  upsertVideoTagCacheBatch,
+} from '../db/operations';
 import {biliApi} from './biliApi';
 import LoggerService from './LoggerService';
 import {trimSearchVideo, trimVideoTags} from './transformers';
@@ -45,6 +49,11 @@ export interface TagRecommendationSearchOptions {
   durationLimitSeconds?: number | null;
   tagBlacklist?: string[];
   maxRecommendations?: number;
+}
+
+/** 当前 tag 缓存对画像计算的持久化修订号。 */
+export function getTagProfileCacheRevision(): number {
+  return getVideoTagCacheRevision();
 }
 
 interface BackgroundBackfillTask {

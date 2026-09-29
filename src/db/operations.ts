@@ -14,6 +14,19 @@ import type {
   VideoTagCacheEntry,
 } from '../types/domain';
 import {forEachInYieldingBatches, throwIfAborted} from '../utils/yielding';
+import {storage} from '../core/storage';
+
+const VIDEO_TAG_CACHE_REVISION_KEY = 'videoTagCacheRevision';
+
+/** 返回画像相关 tag 数据的持久化修订号。 */
+export function getVideoTagCacheRevision(): number {
+  const revision = storage.getNumber(VIDEO_TAG_CACHE_REVISION_KEY);
+  return Number.isSafeInteger(revision) && (revision ?? 0) >= 0 ? revision ?? 0 : 0;
+}
+
+function advanceVideoTagCacheRevision(): void {
+  storage.setNumber(VIDEO_TAG_CACHE_REVISION_KEY, getVideoTagCacheRevision() + 1);
+}
 
 /**
  * 批量插入或更新视频记录（针对特定收藏夹）
@@ -454,15 +467,29 @@ export async function upsertVideoTagCacheBatch(entries: Array<{
       }
     }
 
+    let profileDataChanged = false;
     const operations = uniqueEntries.map(data => {
       const current = existingByVideoId.get(data.videoId);
       if (current) {
+        if (
+          data.tags !== undefined &&
+          current.tagsJson !== JSON.stringify(data.tags)
+        ) {
+          profileDataChanged = true;
+        }
+        if (
+          data.fetchedAt !== undefined &&
+          (data.fetchedAt === null) !== (current.fetchedAt === null)
+        ) {
+          profileDataChanged = true;
+        }
         return current.prepareUpdate(record => {
           if (data.tags !== undefined) record.tagsJson = JSON.stringify(data.tags);
           if (data.fetchedAt !== undefined) record.fetchedAt = data.fetchedAt;
           if (data.retryAfter !== undefined) record.retryAfter = data.retryAfter;
         });
       }
+      if (data.fetchedAt != null) profileDataChanged = true;
       return videoTagCacheCollection.prepareCreate(record => {
         record.videoId = data.videoId;
         record.tagsJson = data.tags === undefined ? null : JSON.stringify(data.tags);
@@ -470,7 +497,11 @@ export async function upsertVideoTagCacheBatch(entries: Array<{
         record.retryAfter = data.retryAfter ?? null;
       });
     });
+    // 先推进版本；若后续数据库批次失败，只会导致安全的额外重算，不会误用旧画像。
+    if (profileDataChanged) advanceVideoTagCacheRevision();
     await writer.batch(...operations);
+    // 写入完成后再推进一次，避免并发画像在版本已变但数据库仍旧时缓存旧结果。
+    if (profileDataChanged) advanceVideoTagCacheRevision();
   });
 }
 
@@ -544,12 +575,15 @@ export async function getRandomVideosBatch(playlistId?: string, limit: number = 
  * 清除所有数据
  */
 export async function clearAllData(): Promise<void> {
+  // 清空标签缓存后，持久化画像必须失效；提前推进版本可避免崩溃时保留旧版本号。
+  advanceVideoTagCacheRevision();
   await database.write(async writer => {
     await playlistMetaCollection.query().markAllAsDeleted();
     await videoMetaCollection.query().markAllAsDeleted();
     await syncJobCollection.query().markAllAsDeleted();
     await videoTagCacheCollection.query().markAllAsDeleted();
   });
+  advanceVideoTagCacheRevision();
 }
 
 /**

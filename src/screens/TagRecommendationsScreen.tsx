@@ -19,6 +19,7 @@ import {TagProfilePipeline, TagProfileRadar} from '../components/TagProfileVisua
 import {
   favoriteService,
   ensureGlobalIndexCacheLoaded,
+  getGlobalIndexFingerprint,
   getGlobalIndexRevision,
   isGlobalIndexCacheLoaded,
   subscribeGlobalIndexRevision,
@@ -26,6 +27,7 @@ import {
 import {prefetchAudioUrl} from '../services/dataPrefetcher';
 import {
   backfillFavoriteTags,
+  getTagProfileCacheRevision,
   loadTagProfile,
   searchTagRecommendations,
   type TagBackfillProgress,
@@ -67,6 +69,62 @@ const TAG_PROFILE_CACHE_LIMIT = 4;
 let cachedProfileUid: string | null = null;
 let cachedProfileIndexRevision: number | null = null;
 const tagProfileSnapshots = new Map<string, TagProfile>();
+
+interface PersistedTagProfileSnapshot {
+  uid: string;
+  scopeKey: string;
+  indexFingerprint: string;
+  tagCacheRevision: number;
+  profile: TagProfile;
+}
+
+function getTagProfileScopeKey(
+  uid: string,
+  hiddenFolderIds: number[],
+  visibleSourceKeys: string[],
+): string {
+  return JSON.stringify([
+    uid,
+    [...new Set(hiddenFolderIds)].sort((left, right) => left - right),
+    [...new Set(visibleSourceKeys)].sort(),
+  ]);
+}
+
+function readPersistedTagProfileSnapshot(
+  uid: string,
+  hiddenFolderIds: number[],
+  visibleSourceKeys: string[],
+): PersistedTagProfileSnapshot | null {
+  const snapshot = storage.getJSON<PersistedTagProfileSnapshot>(
+    `tagProfileSnapshot:v1:${uid}`,
+  );
+  if (
+    snapshot?.uid !== uid ||
+    snapshot.scopeKey !== getTagProfileScopeKey(uid, hiddenFolderIds, visibleSourceKeys) ||
+    !snapshot.profile ||
+    !Array.isArray(snapshot.profile.preferences)
+  ) {
+    return null;
+  }
+  return snapshot;
+}
+
+function persistTagProfileSnapshot(
+  uid: string,
+  hiddenFolderIds: number[],
+  visibleSourceKeys: string[],
+  indexFingerprint: string,
+  tagCacheRevision: number,
+  profile: TagProfile,
+): void {
+  storage.setJSON(`tagProfileSnapshot:v1:${uid}`, {
+    uid,
+    scopeKey: getTagProfileScopeKey(uid, hiddenFolderIds, visibleSourceKeys),
+    indexFingerprint,
+    tagCacheRevision,
+    profile,
+  } satisfies PersistedTagProfileSnapshot);
+}
 
 function getTagProfileSnapshotKey(
   uid: string,
@@ -144,17 +202,12 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   );
   const setQueue = usePlayerStore(state => state.setQueue);
   const cachedScreenSnapshot = useMemo(() => {
-    if (!uid || !isGlobalIndexCacheLoaded()) return null;
-    const indexRevision = getGlobalIndexRevision();
-    const snapshotKey = getTagProfileSnapshotKey(
+    if (!uid || storage.getString('lastUid') !== uid) return null;
+    return readPersistedTagProfileSnapshot(
       uid,
-      indexRevision,
       hiddenFolderIds,
       visibleSourceKeys,
     );
-    const cachedProfile = getCachedTagProfile(uid, indexRevision, snapshotKey);
-    if (!cachedProfile) return null;
-    return {profile: cachedProfile};
   }, [hiddenFolderIds, uid, visibleSourceKeys]);
   const [favorites, setFavorites] = useState<FavoriteVideo[]>([]);
   const [profile, setProfile] = useState<TagProfile | null>(
@@ -165,7 +218,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   );
   const [progress, setProgress] = useState<TagBackfillProgress>(EMPTY_PROGRESS);
   const [stage, setStage] = useState<ScreenStage>('idle');
-  const [initialLoading, setInitialLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(!cachedScreenSnapshot);
   const [failedSearchCount, setFailedSearchCount] = useState(0);
   const [recommendationHasMore, setRecommendationHasMore] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
@@ -174,6 +227,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   const requestController = useRef<AbortController | null>(null);
   const loadedUid = useRef<string | null>(cachedScreenSnapshot ? uid : null);
   const loadedSnapshotKey = useRef<string | null>(null);
+  const loadedTagCacheRevision = useRef<number | null>(null);
   const activeSnapshotKey = useRef<string | null>(null);
   const activeSnapshotController = useRef<AbortController | null>(null);
   const backgroundBackfillWasRunning = useRef(false);
@@ -187,6 +241,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       activeSnapshotController.current = null;
       requestController.current?.abort();
       requestController.current = null;
+      loadedTagCacheRevision.current = null;
       tagProfileSnapshots.clear();
       cachedProfileUid = null;
       cachedProfileIndexRevision = null;
@@ -205,6 +260,18 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       (left, right) => left - right,
     );
     const normalizedVisibleSourceKeys = [...new Set(visibleSourceKeys)].sort();
+    const persistedProfile = readPersistedTagProfileSnapshot(
+      requestUid,
+      normalizedHiddenFolderIds,
+      normalizedVisibleSourceKeys,
+    );
+    if (!refreshProfile && persistedProfile) {
+      setProfile(persistedProfile.profile);
+      setInitialLoading(false);
+    } else if (!refreshProfile) {
+      setProfile(null);
+      setInitialLoading(true);
+    }
     const scopeKey = JSON.stringify([
       requestUid,
       normalizedHiddenFolderIds,
@@ -219,8 +286,13 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         normalizedHiddenFolderIds,
         normalizedVisibleSourceKeys,
       );
-      requestKey = currentSnapshotKey;
-      if (!refreshProfile && loadedSnapshotKey.current === currentSnapshotKey) {
+      const currentTagCacheRevision = getTagProfileCacheRevision();
+      requestKey = JSON.stringify([currentSnapshotKey, currentTagCacheRevision]);
+      if (
+        !refreshProfile &&
+        loadedSnapshotKey.current === currentSnapshotKey &&
+        loadedTagCacheRevision.current === currentTagCacheRevision
+      ) {
         return;
       }
     }
@@ -231,7 +303,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     requestController.current = controller;
     activeSnapshotKey.current = requestKey;
     activeSnapshotController.current = controller;
-    if (!refreshProfile || loadedUid.current !== requestUid || loadedSnapshotKey.current === null) {
+    if (refreshProfile || !persistedProfile) {
       setInitialLoading(true);
     }
     setError(null);
@@ -265,13 +337,27 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         normalizedHiddenFolderIds,
         normalizedVisibleSourceKeys,
       );
+      const indexFingerprint = getGlobalIndexFingerprint();
+      const tagCacheRevision = getTagProfileCacheRevision();
+      const persistedSnapshot = readPersistedTagProfileSnapshot(
+        requestUid,
+        normalizedHiddenFolderIds,
+        normalizedVisibleSourceKeys,
+      );
       if (!refreshProfile) {
-        if (loadedSnapshotKey.current === snapshotKey) return;
-        const cachedProfile = getCachedTagProfile(
-          requestUid,
-          indexRevision,
-          snapshotKey,
-        );
+        if (
+          loadedSnapshotKey.current === snapshotKey &&
+          loadedTagCacheRevision.current === tagCacheRevision
+        ) {
+          return;
+        }
+        const persistedSnapshotIsCurrent =
+          persistedSnapshot?.indexFingerprint === indexFingerprint &&
+          persistedSnapshot.tagCacheRevision === tagCacheRevision;
+        const cachedProfile = persistedSnapshotIsCurrent
+          ? getCachedTagProfile(requestUid, indexRevision, snapshotKey) ??
+            persistedSnapshot.profile
+          : null;
         if (cachedProfile) {
           const cachedFavorites = await favoriteService.getGlobalIndexYielding(
             normalizedHiddenFolderIds,
@@ -281,11 +367,14 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
           if (controller.signal.aborted) return;
           loadedUid.current = requestUid;
           loadedSnapshotKey.current = snapshotKey;
+          loadedTagCacheRevision.current = tagCacheRevision;
           setFavorites(cachedFavorites);
           setProfile(cachedProfile);
+          cacheTagProfile(requestUid, indexRevision, snapshotKey, cachedProfile);
           return;
         }
       }
+      setInitialLoading(true);
       const localFavorites = await favoriteService.getGlobalIndexYielding(
         normalizedHiddenFolderIds,
         normalizedVisibleSourceKeys,
@@ -301,13 +390,24 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         controller.signal.aborted ||
         useAuthStore.getState().userId !== requestUid ||
         storage.getString('lastUid') !== requestUid ||
-        getGlobalIndexRevision() !== indexRevision
+        getGlobalIndexRevision() !== indexRevision ||
+        getGlobalIndexFingerprint() !== indexFingerprint ||
+        getTagProfileCacheRevision() !== tagCacheRevision
       ) {
         return;
       }
       cacheTagProfile(requestUid, indexRevision, snapshotKey, cachedProfile);
+      persistTagProfileSnapshot(
+        requestUid,
+        normalizedHiddenFolderIds,
+        normalizedVisibleSourceKeys,
+        indexFingerprint,
+        tagCacheRevision,
+        cachedProfile,
+      );
       setProfile(cachedProfile);
       loadedSnapshotKey.current = snapshotKey;
+      loadedTagCacheRevision.current = tagCacheRevision;
     } catch (loadError) {
       if (!controller.signal.aborted) {
         setError(
@@ -398,12 +498,15 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       );
       if (
         controller.signal.aborted ||
-        useAuthStore.getState().userId !== requestUid
+        useAuthStore.getState().userId !== requestUid ||
+        storage.getString('lastUid') !== requestUid
       ) {
         return;
       }
       setProfile(result.profile);
       const indexRevision = getGlobalIndexRevision();
+      const indexFingerprint = getGlobalIndexFingerprint();
+      const tagCacheRevision = getTagProfileCacheRevision();
       const snapshotKey = getTagProfileSnapshotKey(
         requestUid,
         indexRevision,
@@ -411,7 +514,16 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
         visibleSourceKeys,
       );
       cacheTagProfile(requestUid, indexRevision, snapshotKey, result.profile);
+      persistTagProfileSnapshot(
+        requestUid,
+        hiddenFolderIds,
+        visibleSourceKeys,
+        indexFingerprint,
+        tagCacheRevision,
+        result.profile,
+      );
       loadedSnapshotKey.current = snapshotKey;
+      loadedTagCacheRevision.current = tagCacheRevision;
 
       if (result.progress.paused) {
         setStage('idle');
@@ -499,8 +611,9 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
               displayedProgress.totalVideoCount) *
               100,
           ),
-        )
+      )
       : 0;
+  const displayedFavoriteCount = profile?.totalVideoCount ?? favorites.length;
   return (
     <View style={{flex: 1, backgroundColor: t.colors.background}}>
       <StatusBar
@@ -556,7 +669,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
           }}
           showsVerticalScrollIndicator={false}>
           <Text style={{color: t.colors.textSub, fontSize: t.fontSize.sm, lineHeight: 22}}>
-            根据本机已同步的 {favorites.length} 个收藏视频统计兴趣标签，再到 B 站音乐区寻找相似内容。
+            根据本机已同步的 {displayedFavoriteCount} 个收藏视频统计兴趣标签，再到 B 站音乐区寻找相似内容。
           </Text>
           <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs, lineHeight: 18, marginTop: t.spacing.xs}}>
             画像在本机计算；查询仅发送视频 BVID 和兴趣标签。离开页面会中断手动生成，已完成缓存会保留。
@@ -725,14 +838,16 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
             style={{marginTop: t.spacing.lg}}
           />
 
-          {favorites.length === 0 && (
+          {favorites.length === 0 &&
+            !initialLoading &&
+            (!profile || profile.totalVideoCount === 0) && (
             <Text
               style={{
                 color: t.colors.textHint,
                 fontSize: t.fontSize.sm,
                 textAlign: 'center',
-                marginTop: t.spacing.md,
-              }}>
+              marginTop: t.spacing.md,
+            }}>
               先同步至少一个收藏夹，再生成标签推荐。
             </Text>
           )}
