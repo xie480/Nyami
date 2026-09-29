@@ -18,6 +18,7 @@ interface RecommendationMinimumFillOptions {
   minimumVideos?: number;
   minimumCollections?: number;
   allowRecentRepeats?: boolean;
+  excludedCollectionIds?: readonly string[];
 }
 
 /** 按账号过滤 7 日内已推荐条目，并原子写入本轮新推荐的 ID 与视频名。 */
@@ -59,6 +60,7 @@ export async function filterAndRecordRecommendations(
     const activeCollectionIds = new Map(
       activeCollectionRecords.map(record => [record.itemId, record] as const),
     );
+    const excludedCollectionIds = new Set(minimumFill.excludedCollectionIds ?? []);
     const filteredVideos: TagRecommendation[] = [];
     const filteredCollections: CollectionRecommendation[] = [];
     const writes: RecommendationFilter[] = [];
@@ -140,7 +142,8 @@ export async function filterAndRecordRecommendations(
       if (
         !itemId ||
         activeCollectionIds.has(itemId) ||
-        selectedCollectionIds.has(itemId)
+        selectedCollectionIds.has(itemId) ||
+        excludedCollectionIds.has(itemId)
       ) {
         continue;
       }
@@ -164,16 +167,21 @@ export async function filterAndRecordRecommendations(
       filteredCollections.length < minimumCollections
     ) {
       for (const collection of collections) {
-        if (filteredCollections.length >= minimumCollections) {
-          break;
-        }
         const itemId = collection.sourceKey.trim();
-        if (!itemId || selectedCollectionIds.has(itemId)) {
+        if (
+          !itemId ||
+          selectedCollectionIds.has(itemId) ||
+          excludedCollectionIds.has(itemId)
+        ) {
           continue;
         }
         const existingRecord = activeCollectionIds.get(itemId);
         if (!existingRecord) {
           continue;
+        }
+        if (filteredCollections.length >= minimumCollections) {
+          collectionsHasMore = true;
+          break;
         }
         selectedCollectionIds.add(itemId);
         filteredCollections.push(collection);

@@ -339,6 +339,7 @@ export async function generateHomeFeed(
 export async function loadMoreRecommendedCollections(
   uid: string,
   signal: AbortSignal,
+  excludedSourceKeys: readonly string[] = [],
 ): Promise<{collections: CollectionRecommendation[]; hasMore: boolean}> {
   if (!uid || useAuthStore.getState().userId !== uid) {
     throw new Error('B 站账号已变化，请刷新推荐');
@@ -357,6 +358,11 @@ export async function loadMoreRecommendedCollections(
     rankCollections(sources, context.profile),
     undefined,
     signal,
+    {
+      minimumCollections: config.recommendations.homeMinimumRecommendationCount,
+      allowRecentRepeats: true,
+      excludedCollectionIds: excludedSourceKeys,
+    },
   );
   if (signal.aborted) throw new Error('合集推荐加载已取消');
   assertCurrentRecommendationAccount(uid);
@@ -370,6 +376,7 @@ export async function loadMoreRecommendedCollections(
 export async function refreshRecommendedCollections(
   uid: string,
   signal: AbortSignal,
+  excludedSourceKeys: readonly string[] = [],
 ): Promise<{collections: CollectionRecommendation[]; hasMore: boolean}> {
   if (!uid || useAuthStore.getState().userId !== uid) {
     throw new Error('B 站账号已变化，请刷新合集推荐');
@@ -393,6 +400,11 @@ export async function refreshRecommendedCollections(
     rankCollections(sources, context.profile),
     undefined,
     signal,
+    {
+      minimumCollections: config.recommendations.homeMinimumRecommendationCount,
+      allowRecentRepeats: true,
+      excludedCollectionIds: excludedSourceKeys,
+    },
   );
   if (signal.aborted) throw new Error('合集推荐更新已取消');
   assertCurrentRecommendationAccount(uid);

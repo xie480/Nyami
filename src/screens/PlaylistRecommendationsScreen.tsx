@@ -44,6 +44,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   );
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshingCollections, setRefreshingCollections] = useState(false);
+  const [checkedNoNewCollections, setCheckedNoNewCollections] = useState(false);
   const loadingMoreRef = useRef(false);
   const refreshingCollectionsRef = useRef(false);
   const loadControllerRef = useRef<AbortController | null>(null);
@@ -57,6 +58,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     refreshingCollectionsRef.current = false;
     setLoadingMore(false);
     setRefreshingCollections(false);
+    setCheckedNoNewCollections(false);
     hasScrolledListRef.current = false;
     canRefreshAtEndRef.current = true;
     setCollections(feed.collections);
@@ -74,6 +76,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     if (!uid || refreshingCollectionsRef.current || loadingMoreRef.current) return;
     refreshingCollectionsRef.current = true;
     setRefreshingCollections(true);
+    setCheckedNoNewCollections(false);
     loadControllerRef.current?.abort();
     loadControllerRef.current = null;
     loadingMoreRef.current = false;
@@ -82,17 +85,22 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     const controller = new AbortController();
     loadControllerRef.current = controller;
     try {
-      const result = await refreshRecommendedCollections(uid, controller.signal);
+      const result = await refreshRecommendedCollections(
+        uid,
+        controller.signal,
+        collections.map(source => source.sourceKey),
+      );
       if (controller.signal.aborted || useAuthStore.getState().userId !== uid) return;
+      const knownSourceKeys = new Set(collections.map(source => source.sourceKey));
+      const nextCollections = result.collections.filter(source => {
+        if (knownSourceKeys.has(source.sourceKey)) return false;
+        knownSourceKeys.add(source.sourceKey);
+        return true;
+      });
       setCollections(current => {
-        const knownSourceKeys = new Set(current.map(source => source.sourceKey));
-        const nextCollections = result.collections.filter(source => {
-          if (knownSourceKeys.has(source.sourceKey)) return false;
-          knownSourceKeys.add(source.sourceKey);
-          return true;
-        });
         return nextCollections.length > 0 ? [...current, ...nextCollections] : current;
       });
+      setCheckedNoNewCollections(nextCollections.length === 0 && !result.hasMore);
       setHasMore(result.hasMore);
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -110,7 +118,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
       refreshingCollectionsRef.current = false;
       setRefreshingCollections(false);
     }
-  }, [uid]);
+  }, [collections, uid]);
 
   const refreshAtEnd = useCallback(() => {
     if (!uid || refreshingCollectionsRef.current || loadingMoreRef.current) return;
@@ -141,10 +149,15 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     if (!uid || refreshingCollectionsRef.current || !hasMore || loadingMoreRef.current) return;
     loadingMoreRef.current = true;
     setLoadingMore(true);
+    setCheckedNoNewCollections(false);
     const controller = new AbortController();
     loadControllerRef.current = controller;
     try {
-      const result = await loadMoreRecommendedCollections(uid, controller.signal);
+      const result = await loadMoreRecommendedCollections(
+        uid,
+        controller.signal,
+        collections.map(source => source.sourceKey),
+      );
       if (controller.signal.aborted || useAuthStore.getState().userId !== uid) return;
 
       const knownSourceKeys = new Set(collections.map(source => source.sourceKey));
@@ -156,6 +169,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
       if (nextCollections.length > 0) {
         setCollections(current => [...current, ...nextCollections]);
       }
+      setCheckedNoNewCollections(nextCollections.length === 0 && !result.hasMore);
       setHasMore(result.hasMore);
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -294,7 +308,11 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
       onPress={() => void refreshCollections()}
       style={{alignItems: 'center', paddingVertical: t.spacing.lg}}>
       <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, textAlign: 'center'}}>
-        {refreshingCollections ? '正在检查新合集…' : '已经到底了 · 点击检查新合集'}
+        {refreshingCollections
+          ? '正在检查新合集…'
+          : checkedNoNewCollections
+            ? '已检查当前来源 · 没有可追加的合集'
+            : '已经到底了 · 点击检查新合集'}
       </Text>
     </TouchableOpacity>
   ) : null;
