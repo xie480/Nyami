@@ -4,28 +4,39 @@ import kotlin.math.*
 import kotlin.concurrent.Volatile
 
 /**
- * FFT 实时频谱分析器 - 增强版
+ * FFT 实时频谱分析器。
  *
- * 核心优化：
- * 1. **自适应增益控制 (AGC)**：动态跟踪频谱能量，自动调节参考电平，
- *    避免低音量时过于稀疏、高音量时满量程饱和。
- * 2. **软膝压缩曲线**：对峰值进行非线性压缩，保留动态起伏的同时防止触顶。
- * 3. **频段权重补偿**：基于等响曲线原理压制低频、适当提升中高频，
- *    使各频段在视觉上表现更均衡。
- * 4. **非对称平滑**：攻击快、释放慢，保留瞬态冲击感的同时减少抖动。
- *
- * 使用 Cooley-Tukey Radix-2 FFT 算法对 PCM Float 缓冲区的
- * 时域信号进行频域变换，输出频段的幅度谱用于可视化渲染。
+ * 将 PCM 变换为经 Hann 窗增益校正的一侧幅度谱，再对相邻 FFT bin 做 RMS 聚合。
+ * 频谱使用固定 dBFS 区间和非线性曲线映射，避免参考电平随当前帧峰值变化。
  */
+private object SpectrumVisualTuning {
+    const val SENSITIVITY = 1.0f
+    const val NOISE_FLOOR_DB = -78f
+    const val MIN_DB = -84f
+    const val MAX_DB = -6f
+    const val GAMMA = 1.8f
+    const val ATTACK = 0.55f
+    const val RELEASE = 0.16f
+    const val PEAK_LIMIT = 0.98f
+}
+
+private const val SPECTRUM_BIN_GROUP_SIZE = 4
+
 class FFTAnalyzer(private val fftSize: Int = 1024) {
 
     private val window = hanningWindow(fftSize)
+    private val oneSidedAmplitudeScale = 2f / window.sum().coerceAtLeast(1e-10f)
+    private val rawBinCount = fftSize / 2
+    private val displayBinCount =
+        (rawBinCount + SPECTRUM_BIN_GROUP_SIZE - 1) / SPECTRUM_BIN_GROUP_SIZE
+    private val noiseFloorAmplitude =
+        10.0.pow(SpectrumVisualTuning.NOISE_FLOOR_DB.toDouble() / 20.0).toFloat()
     private var real = FloatArray(fftSize)
     private var imag = FloatArray(fftSize)
 
     // ====== 频谱输出 ======
     @Volatile
-    var spectrum = FloatArray(fftSize / 2)
+    var spectrum = FloatArray(displayBinCount)
         private set
 
     @Volatile
@@ -37,54 +48,24 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
         private set
 
     // ====== 内部平滑状态 ======
-    private var smoothedSpectrum = FloatArray(fftSize / 2)
-
-    // ====== AGC 状态 ======
-    private var agcEnergy = 0f              // 平滑后的平均能量估计 (dB)
-    private var agcCeiling = -18f           // 动态天花板 (dB)，自动调节
-    private var agcFloor = -72f             // 动态地板 (dB)，跟随天花板偏移
-
-    // ====== AGC 参数 ======
-    private val agcAttackTime = 0.30f       // 攻击速度：能量上升时快速响应
-    private val agcReleaseTime = 0.04f      // 释放速度：能量下降时缓慢释放
-    private val agcTargetHeadroom = 12f      // 目标净空：天花板比峰值高 6dB
-    private val agcCeilingMin = -30f        // 天花板最小值（最灵敏）
-    private val agcCeilingMax = -12f        // 天花板最大值（最不灵敏）
-    private val agcDynamicRange = 48f       // 动态范围：天花板 - 地板
-
-    // ====== 压缩参数 ======
-    private val kneeStart = 0.60f           // 软膝起始点 (归一化值)
-    private val compressionRatio = 5f     // 压缩比 (>1 表示压缩)
-    private val kneeWidth = 0.15f           // 软膝过渡宽度
+    private var smoothedSpectrum = FloatArray(displayBinCount)
 
     // ====== 频段权重 ======
-    // 预计算的等响曲线补偿权重 (简化版 Fletcher-Munson)
-    // 目的：压制过于强势的低频，适当突出中高频细节
+    // 轻微修正频段差异，避免原先对低频的强衰减掩盖鼓点和低音。
     private val bandWeights: FloatArray
 
-    // ====== 平滑参数 ======
-    private var attackSmooth = 0.40f        // 上升平滑因子 (快速)
-    private var releaseSmooth = 0.08f       // 下降平滑因子 (慢速)
-
     init {
-        // 预计算频段权重 (索引 0 ~ fftSize/2-1)
-        bandWeights = FloatArray(fftSize / 2) { i ->
-            val normIdx = i.toFloat() / (fftSize / 2 - 1f) // 0.0 ~ 1.0
+        // 预计算频段权重（索引 0 ~ fftSize/2-1）。
+        bandWeights = FloatArray(rawBinCount) { i ->
+            val normIdx = i.toFloat() / (rawBinCount - 1f)
             when {
-                // 极低频 (0 ~ 0.06): 强烈压制，防止低频驻波淹没画面
-                normIdx < 0.06f -> 0.20f + normIdx / 0.06f * 0.40f
-                // 低频 (0.06 ~ 0.15): 渐进释放
-                normIdx < 0.15f -> 0.60f + (normIdx - 0.06f) / 0.09f * 0.40f
-                // 中低频 (0.15 ~ 0.25): 轻微压制
-                normIdx < 0.25f -> 1.00f - (normIdx - 0.15f) / 0.10f * 0.15f
-                // 中频 (0.25 ~ 0.55): 平坦区，人声主导
-                normIdx < 0.55f -> 0.85f
-                // 中高频 (0.55 ~ 0.75): 轻微提升，增加细节
-                normIdx < 0.75f -> 0.85f + (normIdx - 0.55f) / 0.20f * 0.25f
-                // 高频 (0.75 ~ 0.92): 提升区
-                normIdx < 0.92f -> 1.10f
-                // 极高频 (0.92 ~ 1.0): 自然衰减
-                else -> 1.10f - (normIdx - 0.92f) / 0.08f * 0.40f
+                normIdx < 0.06f -> 0.82f + normIdx / 0.06f * 0.10f
+                normIdx < 0.15f -> 0.92f + (normIdx - 0.06f) / 0.09f * 0.06f
+                normIdx < 0.25f -> 0.98f
+                normIdx < 0.55f -> 0.96f
+                normIdx < 0.75f -> 1.00f
+                normIdx < 0.92f -> 1.02f
+                else -> 1.02f - (normIdx - 0.92f) / 0.08f * 0.10f
             }
         }
     }
@@ -114,95 +95,42 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
         // 执行 FFT
         fft(real, imag)
 
-        // ==========================================
-        // 第 1 步：计算幅度谱并转为 dB
-        // ==========================================
-        val halfSize = fftSize / 2
-        val dBValues = FloatArray(halfSize)
-        var peakDb = -80f
-        var avgEnergy = 0f
-
-        for (i in 0 until halfSize) {
-            val magnitude = sqrt(real[i] * real[i] + imag[i] * imag[i].toDouble()).toFloat()
-            val dB = 20f * log10(magnitude + 1e-10f)
-            dBValues[i] = dB
-            if (dB > peakDb) peakDb = dB
-            avgEnergy += dB
+        // Hann 窗会降低正弦幅度；除以窗函数幅度和可恢复一侧峰值幅度。
+        // 然后在做 dB/曲线映射前，将相邻 bin 合成为 RMS 频段能量。
+        val weightedMagnitudes = FloatArray(rawBinCount)
+        for (i in 0 until rawBinCount) {
+            val magnitude = hypot(real[i].toDouble(), imag[i].toDouble()).toFloat()
+            weightedMagnitudes[i] = magnitude * oneSidedAmplitudeScale * bandWeights[i]
         }
-        avgEnergy /= halfSize
 
-        // ==========================================
-        // 第 2 步：AGC — 自适应动态天花板
-        // ==========================================
-        // 估计当前音频能量水平：使用峰值 + 净空，而不是平均值
-        // 这样天花板会跟随歌曲的整体响度变化
-        val targetCeiling = (peakDb + agcTargetHeadroom).coerceIn(
-            agcCeilingMin, agcCeilingMax
-        )
-
-        // 攻击/释放非对称：能量上升时快速拉高天花板，下降时缓慢降低
-        val agcSpeed = if (targetCeiling > agcEnergy) agcAttackTime else agcReleaseTime
-        agcEnergy = agcEnergy * (1f - agcSpeed) + targetCeiling * agcSpeed
-
-        agcCeiling = agcEnergy
-        agcFloor = agcCeiling - agcDynamicRange
-
-        // ==========================================
-        // 第 3 步：dB 归一化 + 软膝压缩 + 频段权重
-        // ==========================================
-        val dynamicRange = (agcCeiling - agcFloor).coerceAtLeast(24f) // 至少 24dB 范围
-        val newSpectrum = FloatArray(halfSize)
-
-        for (i in 0 until halfSize) {
-            val dB = dBValues[i]
-
-            // (a) 动态归一化：将 dB 映射到 [0, 1]，参考点随 AGC 浮动
-            var normalized = ((dB - agcFloor) / dynamicRange).coerceIn(0f, 1f)
-
-            // (b) 软膝压缩：对高能量频段进行非线性压缩
-            //     在 kneeStart 之前保持线性，之后逐渐压缩
-            if (normalized > kneeStart - kneeWidth / 2f) {
-                val kneeEnd = kneeStart + kneeWidth / 2f
-                if (normalized < kneeStart + kneeWidth / 2f) {
-                    // 软膝过渡区：平滑插值
-                    val t = (normalized - (kneeStart - kneeWidth / 2f)) / kneeWidth
-                    val linearVal = normalized
-                    val compressedVal = kneeStart + (normalized - kneeStart) / compressionRatio
-                    normalized = linearVal * (1f - t) + compressedVal * t
-                } else {
-                    // 完全压缩区
-                    normalized = kneeStart + (normalized - kneeStart) / compressionRatio
+        val newSpectrum = FloatArray(displayBinCount)
+        for (band in 0 until displayBinCount) {
+            val start = band * SPECTRUM_BIN_GROUP_SIZE
+            val end = min(rawBinCount, start + SPECTRUM_BIN_GROUP_SIZE)
+            var squaredEnergy = 0f
+            var includedBinCount = 0
+            for (bin in start until end) {
+                // DC 不代表音乐频段，避免偏置或残余直流抬高第一根柱。
+                if (bin > 0) {
+                    val magnitude = weightedMagnitudes[bin]
+                    squaredEnergy += magnitude * magnitude
+                    includedBinCount += 1
                 }
             }
-
-            // (c) 频段权重补偿
-            val weighted = normalized * bandWeights[i]
-
-            // (d) 噪声门：低于 -72dB (约 normalized < 0.05) 的信号直接归零
-            newSpectrum[i] = if (weighted < 0.02f) {
-                0f
-            } else {
-                weighted.coerceIn(0f, 1f)
-            }
+            val rmsMagnitude = sqrt(squaredEnergy / includedBinCount.coerceAtLeast(1))
+            newSpectrum[band] = mapMagnitudeToLevel(rmsMagnitude)
         }
 
-        // ==========================================
-        // 第 4 步：非对称 EMA 平滑 (攻击快、释放慢)
-        // ==========================================
+        // 非对称 EMA：快速跟踪上升瞬态，下降时缓慢释放。
         for (i in smoothedSpectrum.indices) {
             val current = smoothedSpectrum[i]
             val target = newSpectrum[i]
-
-            if (target > current) {
-                // 上升：快速跟踪瞬态
-                smoothedSpectrum[i] = current * (1f - attackSmooth) + target * attackSmooth
+            val factor = if (target > current) {
+                SpectrumVisualTuning.ATTACK
             } else {
-                // 下降：慢速衰减，产生拖尾余韵
-                // 额外重力因子：高度越高，初始下落越快
-                val gravityBoost = 0.05f + 0.12f * (current * current)
-                val effectiveRelease = (releaseSmooth + gravityBoost).coerceAtMost(0.40f)
-                smoothedSpectrum[i] = current * (1f - effectiveRelease) + target * effectiveRelease
+                SpectrumVisualTuning.RELEASE
             }
+            smoothedSpectrum[i] = current + (target - current) * factor
         }
 
         spectrum = smoothedSpectrum.copyOf()
@@ -234,6 +162,17 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
         }
     }
 
+    private fun mapMagnitudeToLevel(magnitude: Float): Float {
+        val adjustedMagnitude = magnitude * SpectrumVisualTuning.SENSITIVITY
+        if (!adjustedMagnitude.isFinite() || adjustedMagnitude <= noiseFloorAmplitude) return 0f
+
+        val signalMagnitude = adjustedMagnitude - noiseFloorAmplitude
+        val signalDb = 20f * log10(signalMagnitude)
+        val dbRange = (SpectrumVisualTuning.MAX_DB - SpectrumVisualTuning.MIN_DB).coerceAtLeast(1f)
+        val normalized = ((signalDb - SpectrumVisualTuning.MIN_DB) / dbRange).coerceIn(0f, 1f)
+        return normalized.pow(SpectrumVisualTuning.GAMMA).coerceAtMost(SpectrumVisualTuning.PEAK_LIMIT)
+    }
+
     /**
      * 重置分析器状态
      */
@@ -242,9 +181,6 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
         smoothedSpectrum.fill(0f)
         catEarLeft.fill(0f)
         catEarRight.fill(0f)
-        agcEnergy = 0f
-        agcCeiling = -18f
-        agcFloor = -72f
     }
 
     // ======================

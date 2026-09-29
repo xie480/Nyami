@@ -9,12 +9,13 @@ import Animated, {
 import {useSpectrumPoller} from '../../hooks/useSpectrumPoller';
 import {AlbumTheme} from '../../utils/albumTheme';
 
-const BAR_COUNT = 64;
-const MIN_BAR_LENGTH = 3;
-const MAX_BAR_LENGTH = 48;
-const AMPLITUDE_RESPONSE_EXPONENT = 1.25;
-const AMPLITUDE_RESPONSE_GAIN = 1.2;
-const RING_INNER_GAP = 2;
+const SPECTRUM_RING_STYLE = {
+  barCount: 64,
+  minHeight: 3,
+  maxHeight: 48,
+  innerGap: 2,
+  frequencyCurve: 1.45,
+};
 const LEGACY_RING_DIAMETER_GUTTER = 48;
 export const AUDIO_REACTIVE_RING_OUTSET = 56;
 export const AUDIO_REACTIVE_RING_LAYOUT_GROWTH =
@@ -30,7 +31,7 @@ interface Props {
 }
 
 function makeFallbackSpectrum(phase: number): number[] {
-  return Array.from({length: BAR_COUNT}, (_, index) => {
+  return Array.from({length: SPECTRUM_RING_STYLE.barCount}, (_, index) => {
     const low = Math.sin(index * 0.31 + phase) * 0.26;
     const high = Math.sin(index * 0.77 - phase * 0.62) * 0.16;
     return Math.max(0.08, Math.min(0.78, 0.34 + low + high));
@@ -43,15 +44,21 @@ function buildRingPath(
   intensity: number,
 ): string {
   const center = size / 2;
-  const innerRadius = center - MAX_BAR_LENGTH - MIN_BAR_LENGTH - RING_INNER_GAP;
+  const innerRadius =
+    center -
+    SPECTRUM_RING_STYLE.maxHeight -
+    SPECTRUM_RING_STYLE.minHeight -
+    SPECTRUM_RING_STYLE.innerGap;
   const lastBinIndex = Math.max(0, spectrum.length - 1);
   const pathParts: string[] = [];
 
-  for (let index = 0; index < BAR_COUNT; index += 1) {
-    const angle = (index / BAR_COUNT) * Math.PI * 2 - Math.PI / 2;
+  for (let index = 0; index < SPECTRUM_RING_STYLE.barCount; index += 1) {
+    const angle = (index / SPECTRUM_RING_STYLE.barCount) * Math.PI * 2 - Math.PI / 2;
     const binPosition =
       spectrum.length > 1
-        ? (index / (BAR_COUNT - 1)) ** 1.45 * (spectrum.length - 1)
+        ? (index / (SPECTRUM_RING_STYLE.barCount - 1)) **
+          SPECTRUM_RING_STYLE.frequencyCurve *
+          (spectrum.length - 1)
         : 0;
     const lowerBin = Math.floor(binPosition);
     const upperBin = Math.min(lastBinIndex, lowerBin + 1);
@@ -60,13 +67,9 @@ function buildRingPath(
     const binFraction = binPosition - lowerBin;
     const rawAmplitude = lowerValue + (upperValue - lowerValue) * binFraction;
     const normalizedAmplitude = Math.min(1, Math.max(0, rawAmplitude));
-    const amplitude = Math.min(
-      1,
-      Math.pow(normalizedAmplitude, AMPLITUDE_RESPONSE_EXPONENT) *
-        AMPLITUDE_RESPONSE_GAIN *
-        intensity,
-    );
-    const length = MIN_BAR_LENGTH + amplitude * MAX_BAR_LENGTH;
+    // Native FFT 已完成 dBFS 映射和 gamma 曲线；此处只把归一化电平映射到现有 UI 尺寸。
+    const amplitude = normalizedAmplitude * intensity;
+    const length = SPECTRUM_RING_STYLE.minHeight + amplitude * SPECTRUM_RING_STYLE.maxHeight;
     const innerX = center + Math.cos(angle) * innerRadius;
     const innerY = center + Math.sin(angle) * innerRadius;
     const outerX = center + Math.cos(angle) * (innerRadius + length);

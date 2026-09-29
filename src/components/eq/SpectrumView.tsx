@@ -36,7 +36,7 @@ const NativeSpectrumView: React.ComponentType<NativeSpectrumViewProps> | null =
 
 interface Props {
   style?: ViewStyle;
-  /** 频谱数据 (0~1 归一化幅度)，推荐 128 bins */
+  /** 频谱电平 (0~1 归一化值)，推荐 128 bins */
   spectrumData?: number[];
   /** 猫耳左声道数据 (16 bins) */
   catEarLeft?: number[];

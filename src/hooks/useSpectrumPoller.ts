@@ -21,21 +21,17 @@ import { audioDSP } from '../native/AudioDSPModule';
 /** 轮询间隔（毫秒） */
 const POLL_INTERVAL_MS = 80; // ~12.5 fps，平衡性能与流畅度
 
-/**
- * 指数移动平均平滑因子
- *
- * 【重要】原生层 (FFTAnalyzer + SpectrumRenderer) 已实现精密的非对称平滑、
- * AGC 自适应增益控制与重力衰减物理引擎。JS 层的平滑仅作为轮询间隔
- * (80ms) 桥接补偿，大幅降低以避免干扰原生动画手感。
- * 0=不平滑, 0.9=强平滑 — 当前 0.15 仅做最轻量的帧间过渡。
- */
-const SMOOTHING_FACTOR = 0.15;
+/** 平滑系数表示当前样本对输出的权重，分别控制上升与回落速度。 */
+const SPECTRUM_SMOOTHING = {
+  attack: 0.78,
+  release: 0.42,
+};
 
 /** 调试模式：打印频谱数据长度（仅在开发环境生效） */
 const DEBUG = __DEV__;
 
 export interface SpectrumData {
-  /** 128-bin 频谱幅度 (0~1) */
+  /** 128-bin 归一化频段电平 (0~0.98) */
   spectrum: number[];
   /** 猫耳左声道 16-bin */
   catEarLeft: number[];
@@ -46,14 +42,16 @@ export interface SpectrumData {
 const DEBUG_LOG_INTERVAL_MS = 10_000;
 
 /**
- * 对两个等长数组应用 EMA 平滑
+ * 对两个等长数组应用非对称 EMA：上升快速跟随，回落保留更长余韵。
  */
-function smoothArray(prev: number[], next: number[], factor: number): number[] {
+function smoothArray(prev: number[], next: number[]): number[] {
   if (prev.length === 0) return next;
   const len = Math.min(prev.length, next.length);
-  const result = new Array(len);
+  const result = new Array<number>(len);
   for (let i = 0; i < len; i++) {
-    result[i] = prev[i] * factor + next[i] * (1 - factor);
+    const factor =
+      next[i] > prev[i] ? SPECTRUM_SMOOTHING.attack : SPECTRUM_SMOOTHING.release;
+    result[i] = prev[i] + (next[i] - prev[i]) * factor;
   }
   return result;
 }
@@ -96,9 +94,9 @@ export function useSpectrumPoller(enabled: boolean = true): SpectrumData {
         result.spectrum.length > 0
       ) {
         // 应用 EMA 平滑
-        const smoothedSpectrum = smoothArray(smoothRef.current.spectrum, result.spectrum, SMOOTHING_FACTOR);
-        const smoothedLeft = smoothArray(smoothRef.current.catEarLeft, result.catEarLeft ?? [], SMOOTHING_FACTOR);
-        const smoothedRight = smoothArray(smoothRef.current.catEarRight, result.catEarRight ?? [], SMOOTHING_FACTOR);
+        const smoothedSpectrum = smoothArray(smoothRef.current.spectrum, result.spectrum);
+        const smoothedLeft = smoothArray(smoothRef.current.catEarLeft, result.catEarLeft ?? []);
+        const smoothedRight = smoothArray(smoothRef.current.catEarRight, result.catEarRight ?? []);
 
         // 更新平滑缓存
         smoothRef.current = {

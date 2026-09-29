@@ -43,7 +43,7 @@ export interface AudioDSPModuleInterface {
 reset(): void;
 
 /**
- * 获取当前 FFT 频谱数据（供 SpectrumView 使用）
+ * 获取当前 FFT 频谱电平（已按固定 dBFS 范围映射为 0~1）
  * @returns Promise 包含 spectrum, catEarLeft, catEarRight
  */
 getSpectrumData(): Promise<{

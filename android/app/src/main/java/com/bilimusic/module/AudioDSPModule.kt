@@ -3,6 +3,7 @@ package com.bilimusic.module
 import android.util.Log
 import com.bilimusic.audio.DSPAudioProcessor
 import com.facebook.react.bridge.*
+import kotlin.math.sqrt
 
 /**
  * React Native Bridge 模块 — 音频 DSP 控制接口
@@ -76,7 +77,7 @@ class AudioDSPModule(reactContext: ReactApplicationContext) :
      * 获取当前 FFT 频谱数据（供 SpectrumView 可视化使用）
      *
      * @param promise 返回包含频谱数据的 WritableMap
-     *   - spectrum: FloatArray (fftSize/2)
+     *   - spectrum: normalized RMS frequency bands (maximum 128 values, 0..1)
      *   - catEarLeft: FloatArray (16)
      *   - catEarRight: FloatArray (16)
      */
@@ -86,12 +87,20 @@ class AudioDSPModule(reactContext: ReactApplicationContext) :
             val analyzer = dspProcessor.fftAnalyzer
             val map = Arguments.createMap()
 
-            // 频谱数据 (前 128 个 bin，对应 0~22kHz @44100Hz)
+            // 频谱数据最多保留 128 个 bin；高尺寸分析器按频段 RMS 聚合，避免单点峰值支配柱高。
             val spectrumArr = Arguments.createArray()
             val spec = analyzer.spectrum
             val downsampled = if (spec.size > 128) {
-                val step = spec.size / 128
-                FloatArray(128) { i -> spec[i * step] }
+                FloatArray(128) { band ->
+                    val start = band * spec.size / 128
+                    val end = maxOf(start + 1, (band + 1) * spec.size / 128)
+                    var squaredEnergy = 0f
+                    for (bin in start until end) {
+                        val level = spec[bin].coerceIn(0f, 1f)
+                        squaredEnergy += level * level
+                    }
+                    sqrt(squaredEnergy / (end - start))
+                }
             } else {
                 spec
             }
