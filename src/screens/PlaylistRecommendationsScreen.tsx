@@ -19,9 +19,12 @@ import {GlassView} from '../components/GlassView';
 import {Header} from '../components/Header';
 import {SubscribePlaylistButton} from '../components/SubscribePlaylistButton';
 import {config} from '../config';
-import {useHomeRecommendations} from '../hooks/useHomeRecommendations';
-import {loadMoreRecommendedCollections} from '../services/homeRecommendationService';
+import {
+  loadMoreRecommendedCollections,
+  refreshRecommendedCollections,
+} from '../services/homeRecommendationService';
 import {useAuthStore} from '../store/authStore';
+import {useRecommendationStore} from '../store/recommendationStore';
 import {useTheme} from '../theme';
 import type {CollectionRecommendation} from '../types/domain';
 
@@ -29,13 +32,20 @@ import type {CollectionRecommendation} from '../types/domain';
 export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const {uid, feed, refreshing, refresh} = useHomeRecommendations();
+  const uid = useAuthStore(state => state.userId);
+  const feed = useRecommendationStore(state =>
+    uid
+      ? state.feedsByUid[uid] ?? state.getFeed(uid)
+      : state.getFeed(''),
+  );
   const [collections, setCollections] = useState(feed.collections);
   const [hasMore, setHasMore] = useState(
     feed.collectionsHasMore ?? feed.collections.length >= config.recommendations.homePlaylistLimit,
   );
   const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshingCollections, setRefreshingCollections] = useState(false);
   const loadingMoreRef = useRef(false);
+  const refreshingCollectionsRef = useRef(false);
   const loadControllerRef = useRef<AbortController | null>(null);
   const hasScrolledListRef = useRef(false);
   const canRefreshAtEndRef = useRef(true);
@@ -44,7 +54,9 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     loadControllerRef.current?.abort();
     loadControllerRef.current = null;
     loadingMoreRef.current = false;
+    refreshingCollectionsRef.current = false;
     setLoadingMore(false);
+    setRefreshingCollections(false);
     setCollections(feed.collections);
     setHasMore(
       feed.collectionsHasMore ?? feed.collections.length >= config.recommendations.homePlaylistLimit,
@@ -56,13 +68,47 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     loadControllerRef.current = null;
   }, []);
 
-  const refreshRecommendations = useCallback(() => {
+  const refreshCollections = useCallback(async () => {
+    if (!uid || refreshingCollectionsRef.current || loadingMoreRef.current) return;
+    refreshingCollectionsRef.current = true;
+    setRefreshingCollections(true);
     loadControllerRef.current?.abort();
     loadControllerRef.current = null;
     loadingMoreRef.current = false;
     setLoadingMore(false);
-    void refresh('manual');
-  }, [refresh]);
+    canRefreshAtEndRef.current = false;
+    const controller = new AbortController();
+    loadControllerRef.current = controller;
+    try {
+      const result = await refreshRecommendedCollections(uid, controller.signal);
+      if (controller.signal.aborted || useAuthStore.getState().userId !== uid) return;
+      setCollections(current => {
+        const knownSourceKeys = new Set(current.map(source => source.sourceKey));
+        const nextCollections = result.collections.filter(source => {
+          if (knownSourceKeys.has(source.sourceKey)) return false;
+          knownSourceKeys.add(source.sourceKey);
+          return true;
+        });
+        return nextCollections.length > 0 ? [...current, ...nextCollections] : current;
+      });
+      setHasMore(result.hasMore);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        const message = error instanceof Error ? error.message : '更新合集推荐失败';
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(message, ToastAndroid.SHORT);
+        } else {
+          Alert.alert('更新失败', message);
+        }
+      }
+    } finally {
+      if (loadControllerRef.current === controller) {
+        loadControllerRef.current = null;
+      }
+      refreshingCollectionsRef.current = false;
+      setRefreshingCollections(false);
+    }
+  }, [uid]);
 
   const handleListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const {contentOffset, contentSize, layoutMeasurement} = event.nativeEvent;
@@ -76,13 +122,13 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   }, []);
 
   const refreshAtEnd = useCallback(() => {
-    if (!uid || refreshing || loadingMoreRef.current) return;
+    if (!uid || refreshingCollectionsRef.current || loadingMoreRef.current) return;
     canRefreshAtEndRef.current = false;
-    refreshRecommendations();
-  }, [refreshRecommendations, refreshing, uid]);
+    void refreshCollections();
+  }, [refreshCollections, uid]);
 
   const loadMore = useCallback(async () => {
-    if (!uid || refreshing || !hasMore || loadingMoreRef.current) return;
+    if (!uid || refreshingCollectionsRef.current || !hasMore || loadingMoreRef.current) return;
     loadingMoreRef.current = true;
     setLoadingMore(true);
     const controller = new AbortController();
@@ -117,7 +163,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
         setLoadingMore(false);
       }
     }
-  }, [collections, hasMore, refreshing, uid]);
+  }, [collections, hasMore, uid]);
 
   const handleEndReached = useCallback(() => {
     if (hasMore) {
@@ -212,7 +258,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
       <View style={{flexDirection: 'row', alignItems: 'center', marginTop: t.spacing.md}}>
         <Icon name="creation" size={18} color={t.colors.primary} />
         <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginLeft: 6}}>
-          {refreshing ? '正在更新推荐…' : feed.updatedAt ? `推荐已更新 · ${new Date(feed.updatedAt).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}` : '每 5 小时自动更新一次'}
+          {refreshingCollections ? '正在检查新合集…' : feed.updatedAt ? `推荐快照 · ${new Date(feed.updatedAt).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}` : '手动刷新可检查新合集'}
         </Text>
       </View>
       {feed.error && (
@@ -234,11 +280,11 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     <TouchableOpacity
       accessibilityRole="button"
       accessibilityLabel="检查新的合集推荐"
-      disabled={!uid || refreshing}
-      onPress={refreshAtEnd}
+      disabled={!uid || refreshingCollections}
+      onPress={() => void refreshCollections()}
       style={{alignItems: 'center', paddingVertical: t.spacing.lg}}>
       <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, textAlign: 'center'}}>
-        {refreshing ? '正在检查新合集…' : '已经到底了 · 点击检查新合集'}
+        {refreshingCollections ? '正在检查新合集…' : '已经到底了 · 点击检查新合集'}
       </Text>
     </TouchableOpacity>
   ) : null;
@@ -254,10 +300,10 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel="手动刷新合集推荐"
-            disabled={!uid || refreshing || loadingMore}
-            onPress={refreshRecommendations}
-            style={{width: 42, alignItems: 'center', opacity: refreshing || loadingMore ? 0.5 : 1}}>
-            {refreshing || loadingMore ? <ActivityIndicator size="small" color={t.colors.primary} /> : <Icon name="refresh" size={22} color={t.colors.primary} />}
+            disabled={!uid || refreshingCollections || loadingMore}
+            onPress={() => void refreshCollections()}
+            style={{width: 42, alignItems: 'center', opacity: refreshingCollections || loadingMore ? 0.5 : 1}}>
+            {refreshingCollections || loadingMore ? <ActivityIndicator size="small" color={t.colors.primary} /> : <Icon name="refresh" size={22} color={t.colors.primary} />}
           </TouchableOpacity>
         )}
       />
@@ -270,8 +316,8 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
         contentContainerStyle={{paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.md, paddingBottom: Math.max(insets.bottom, t.spacing.xl), flexGrow: collections.length === 0 ? 1 : undefined}}
         refreshControl={(
           <RefreshControl
-            refreshing={refreshing}
-            onRefresh={refreshRecommendations}
+            refreshing={refreshingCollections}
+            onRefresh={() => void refreshCollections()}
             tintColor={t.colors.primary}
           />
         )}

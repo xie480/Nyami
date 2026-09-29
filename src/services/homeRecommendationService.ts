@@ -243,6 +243,42 @@ export async function loadMoreRecommendedCollections(
   };
 }
 
+/** 仅检查合集来源目录并追加新的合集推荐，不刷新首页歌曲推荐或整份首页快照。 */
+export async function refreshRecommendedCollections(
+  uid: string,
+  signal: AbortSignal,
+): Promise<{collections: CollectionRecommendation[]; hasMore: boolean}> {
+  if (!uid || useAuthStore.getState().userId !== uid) {
+    throw new Error('B 站账号已变化，请刷新合集推荐');
+  }
+  const importedSourcesPromise = importedPlaylistService.getCollectedPlaylists(
+    uid,
+    true,
+    signal,
+  );
+  const [context, sources] = await Promise.all([
+    loadPersonalizationContext(uid, signal, importedSourcesPromise),
+    importedSourcesPromise,
+  ]);
+  if (signal.aborted) throw new Error('合集推荐更新已取消');
+  assertCurrentRecommendationAccount(uid);
+
+  useImportedPlaylistStore.getState().setCatalog(uid, sources);
+  const recommendations = await filterAndRecordRecommendations(
+    uid,
+    [],
+    rankCollections(sources, context.profile),
+    undefined,
+    signal,
+  );
+  if (signal.aborted) throw new Error('合集推荐更新已取消');
+  assertCurrentRecommendationAccount(uid);
+  return {
+    collections: recommendations.collections,
+    hasMore: recommendations.collectionsHasMore,
+  };
+}
+
 /** 加载个性化播放队列的下一页；已收藏及队列内的 BVID 会在推荐服务里排除。 */
 export async function loadMorePersonalizedSongs(
   uid: string,
