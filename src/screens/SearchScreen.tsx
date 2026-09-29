@@ -37,6 +37,7 @@ import {prefetchAudioUrl} from '../services/dataPrefetcher';
 import {searchVideoToFavoriteVideo} from '../services/transformers';
 import {useAuthStore} from '../store/authStore';
 import {useImportedPlaylistStore} from '../store/importedPlaylistStore';
+import {useFolderDataStore} from '../store/folderDataStore';
 import {usePlayerStore} from '../store/playerStore';
 import {useProgressStore} from '../store/progressStore';
 import {useSettingsStore} from '../store/settingsStore';
@@ -68,6 +69,10 @@ export const SearchScreen = ({navigation}: any) => {
   const [tagFilter, setTagFilter] = useState('');
   const [onlineResults, setOnlineResults] = useState<OnlineVideoSearchResult[]>([]);
   const [favoriteIndex, setFavoriteIndex] = useState<FavoriteVideo[]>([]);
+  const [localFavoriteState, setLocalFavoriteState] = useState<{
+    uid: string | null;
+    bvids: Set<string>;
+  }>({uid: null, bvids: new Set()});
   const [favoriteSourceKeys, setFavoriteSourceKeys] = useState<string[]>([]);
   const [onlinePage, setOnlinePage] = useState(0);
   const [onlineHasMore, setOnlineHasMore] = useState(false);
@@ -387,6 +392,10 @@ export const SearchScreen = ({navigation}: any) => {
     () => sortOnlineVideoSearchResults(onlineResults, sort),
     [onlineResults, sort],
   );
+  const favoriteBvids = useMemo(
+    () => new Set(favoriteIndex.filter(video => video.folderIds?.length).map(video => video.bvid)),
+    [favoriteIndex],
+  );
 
   const favoriteSearchIndex = useMemo(
     () => favoriteIndex.map(video => ({
@@ -515,9 +524,19 @@ export const SearchScreen = ({navigation}: any) => {
           />
           {isOnline && (
             <IconButton
-              name="heart-outline"
+              name={
+                (localFavoriteState.uid === uid && localFavoriteState.bvids.has(item.bvid)) ||
+                favoriteBvids.has(item.bvid)
+                  ? 'heart'
+                  : 'heart-outline'
+              }
               size={22}
-              color={t.colors.textSub}
+              color={
+                (localFavoriteState.uid === uid && localFavoriteState.bvids.has(item.bvid)) ||
+                favoriteBvids.has(item.bvid)
+                  ? t.colors.primary
+                  : t.colors.textSub
+              }
               onPress={() => {
                 setSelectedVideo(item as OnlineVideoSearchResult);
                 setFavoritePickerVisible(true);
@@ -698,6 +717,29 @@ export const SearchScreen = ({navigation}: any) => {
       <FavoriteFolderPickerSheet
         visible={favoritePickerVisible}
         video={selectedVideo}
+        onSaved={folderIds => {
+          if (!selectedVideo || !uid) return;
+          const video = searchVideoToFavoriteVideo(selectedVideo);
+          const savedVideo = {
+            ...video,
+            folderIds: [...new Set([...(video.folderIds ?? []), ...folderIds])],
+          };
+          setLocalFavoriteState(current => {
+            const bvids = current.uid === uid ? new Set(current.bvids) : new Set<string>();
+            bvids.add(selectedVideo.bvid);
+            return {uid, bvids};
+          });
+          setFavoriteIndex(current => [
+            savedVideo,
+            ...current.filter(item => item.bvid !== savedVideo.bvid),
+          ]);
+          for (const folderId of folderIds) {
+            useFolderDataStore.getState().upsertVideoInCurrentFolder(
+              folderId,
+              {...savedVideo, folderIds: [folderId]},
+            );
+          }
+        }}
         onClose={() => {
           setFavoritePickerVisible(false);
           setSelectedVideo(null);

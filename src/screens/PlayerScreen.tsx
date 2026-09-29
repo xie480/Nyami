@@ -214,6 +214,16 @@ export const PlayerScreen = () => {
     const targetFolderId = currentFolderId;
     favoriteMutationRef.current = true;
     setFolderFavoriteLoading(true);
+    setFolderFavoriteOverride({
+      bvid: targetBvid,
+      folderId: targetFolderId,
+      included: false,
+    });
+    useFolderDataStore.getState().removeVideoFromCurrentFolder(
+      targetFolderId,
+      targetBvid,
+    );
+    updateFavoriteFolderMembership(targetBvid, targetFolderId, false);
     try {
       await favoriteService.removeVideoFromFavoriteFolder(
         uid,
@@ -221,20 +231,15 @@ export const PlayerScreen = () => {
         currentVideo.aid ?? 0,
         targetFolderId,
       );
-      useFolderDataStore.getState().removeVideoFromCurrentFolder(
-        targetFolderId,
-        targetBvid,
-      );
-      updateFavoriteFolderMembership(targetBvid, targetFolderId, false);
-      setFolderFavoriteOverride({
-        bvid: targetBvid,
-        folderId: targetFolderId,
-        included: false,
-      });
       const message = '已从本机取消收藏，正在后台同步到 B 站';
       if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT);
       else Alert.alert('已取消收藏', message);
     } catch (error) {
+      updateFavoriteFolderMembership(targetBvid, targetFolderId, true);
+      useFolderDataStore.getState().upsertVideoInCurrentFolder(
+        targetFolderId,
+        {...currentVideo, folderIds: [...new Set([...(currentVideo.folderIds ?? []), targetFolderId])]},
+      );
       setFolderFavoriteOverride({
         bvid: targetBvid,
         folderId: targetFolderId,
@@ -253,6 +258,10 @@ export const PlayerScreen = () => {
     if (!currentVideo) return;
     for (const folderId of folderIds) {
       updateFavoriteFolderMembership(currentVideo.bvid, folderId, true);
+      useFolderDataStore.getState().upsertVideoInCurrentFolder(
+        folderId,
+        {...currentVideo, folderIds: [...new Set([...(currentVideo.folderIds ?? []), folderId])]},
+      );
     }
     if (currentFolderId !== null && folderIds.includes(currentFolderId)) {
       setFolderFavoriteOverride({

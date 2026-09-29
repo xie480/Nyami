@@ -278,6 +278,15 @@ async function queueLocalFavoriteMutation(
     queued.push(task);
   }
   writeFavoriteMutationQueue(queue);
+  if (useAuthStore.getState().userId === uid) {
+    for (const task of queued) {
+      usePlayerStore.getState().updateFavoriteFolderMembership(
+        video.bvid,
+        task.folderId,
+        desired,
+      );
+    }
+  }
   return queued;
 }
 
@@ -337,9 +346,11 @@ async function applyLocalFavoriteMutationsNow(
       .map(task => applyLocalFavoriteMutation(task, false));
     const results = await Promise.allSettled(localTasks);
     if (useAuthStore.getState().userId === uid) {
-      try {
-        await reloadGlobalIndexCacheAfterMutation();
-      } catch (error) {
+      // The folder write is already durable locally. Rebuilding the whole
+      // global index is useful for other readers, but must not hold the UI
+      // response or delay the queued Bilibili write.
+      globalIndexCacheLoaded = false;
+      void reloadGlobalIndexCacheAfterMutation().catch(error => {
         globalIndexCacheLoaded = false;
         LoggerService.warn(
           'FavoriteMutation',
@@ -347,7 +358,7 @@ async function applyLocalFavoriteMutationsNow(
           '本地收藏已写入，但全局索引快照刷新失败',
           error,
         );
-      }
+      });
     }
     const failedWrite = results.find(
       (result): result is PromiseRejectedResult => result.status === 'rejected',

@@ -31,6 +31,7 @@ interface FolderDataState {
   loadMore: () => Promise<void>;
   setSearchQuery: (query: string) => void;
   setSortOption: (option: SortOption) => void;
+  upsertVideoInCurrentFolder: (folderId: number, video: FavoriteVideo) => void;
   removeVideoFromCurrentFolder: (folderId: number, bvid: string) => void;
   getDisplayedList: () => FavoriteVideo[];
   /**
@@ -234,6 +235,20 @@ export const useFolderDataStore = create<FolderDataState>((set, get) => ({
 
   setSearchQuery: (query: string) => set({ searchQuery: query }),
   setSortOption: (option: SortOption) => set({ sortOption: option }),
+  upsertVideoInCurrentFolder: (folderId, video) => set(state => {
+    if (state.folderId !== folderId) return state;
+    const existing = state.list.find(item => item.bvid === video.bvid);
+    return {
+      list: [
+        {
+          ...(existing ?? {}),
+          ...video,
+          folderIds: Array.from(new Set([...(existing?.folderIds ?? []), folderId])),
+        },
+        ...state.list.filter(item => item.bvid !== video.bvid),
+      ],
+    };
+  }),
   removeVideoFromCurrentFolder: (folderId, bvid) => set(state =>
     state.folderId === folderId
       ? {list: state.list.filter(video => video.bvid !== bvid)}
