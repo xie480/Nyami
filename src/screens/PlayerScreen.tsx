@@ -412,9 +412,6 @@ export const PlayerScreen = () => {
               ]}>
               NOW PLAYING
             </Text>
-            <Text style={[styles.headerLabel, {color: albumTheme.foreground}]}>
-              正在播放
-            </Text>
           </View>
           <View style={styles.headerButton} />
         </View>
@@ -550,7 +547,6 @@ const styles = StyleSheet.create({
   },
   headerCopy: {alignItems: 'center', justifyContent: 'center'},
   headerEyebrow: {fontSize: 9, fontWeight: '700', letterSpacing: 2.4},
-  headerLabel: {fontSize: 12, fontWeight: '600', marginTop: 2},
   recordSlot: {
     flex: 1,
     minHeight: 188,
