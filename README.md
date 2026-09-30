@@ -15,9 +15,29 @@
 <img src="https://img.shields.io/badge/Media3-ExoPlayer-orange?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/License-MIT-purple?style=for-the-badge"/>
 </p>
-<img src="./nyami.jpg" width="300px">
 
 </div>
+
+## 📱 v2.0.0 界面预览
+
+<table align="center">
+  <tr>
+    <td align="center"><strong>首页</strong><br/><img src="./resource/v2.0.0/首页界面.png" width="280" alt="首页界面"/></td>
+    <td align="center"><strong>个性化歌曲推荐</strong><br/><img src="./resource/v2.0.0/个性化歌曲推荐界面.png" width="280" alt="个性化歌曲推荐界面"/></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>用户画像</strong><br/><img src="./resource/v2.0.0/用户画像界面.png" width="280" alt="用户画像界面"/></td>
+    <td align="center"><strong>搜索</strong><br/><img src="./resource/v2.0.0/搜索界面.png" width="280" alt="搜索界面"/></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>收藏夹列表</strong><br/><img src="./resource/v2.0.0/收藏夹列表界面.png" width="280" alt="收藏夹列表界面"/></td>
+    <td align="center"><strong>收藏夹详情</strong><br/><img src="./resource/v2.0.0/收藏夹详细界面.png" width="280" alt="收藏夹详细界面"/></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>播放界面</strong><br/><img src="./resource/v2.0.0/播放界面.png" width="280" alt="播放界面"/></td>
+    <td align="center"><strong>声音实验室</strong><br/><img src="./resource/v2.0.0/声音实验室界面.png" width="280" alt="声音实验室界面"/></td>
+  </tr>
+</table>
 
 ---
 
