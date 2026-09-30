@@ -17,6 +17,11 @@ import {useAuthStore} from '../store/authStore';
 import {useSettingsStore} from '../store/settingsStore';
 import {useTagBackfillStore} from '../store/tagBackfillStore';
 import {
+  beginBackgroundSyncNotification,
+  finishBackgroundSyncNotification,
+  updateBackgroundSyncNotification,
+} from './backgroundSyncNotification';
+import {
   forEachInYieldingBatches,
   UI_FRIENDLY_BATCH_SIZE,
 } from '../utils/yielding';
@@ -267,6 +272,44 @@ function shouldPauseBackfill(error: unknown): boolean {
  * 所有请求复用 biliApi 的全局限速；UID 改变或页面取消时停止后续读取。
  */
 export async function backfillFavoriteTags(
+  expectedUid: string,
+  videos: FavoriteVideo[],
+  signal: AbortSignal,
+  onProgress: (progress: TagBackfillProgress) => void,
+  notificationTaskId: string | null = `manual-favorite-tag-backfill:${expectedUid}`,
+): Promise<{profile: TagProfile; progress: TagBackfillProgress}> {
+  if (notificationTaskId) {
+    beginBackgroundSyncNotification(
+      notificationTaskId,
+      '正在同步收藏标签',
+      videos.length,
+    );
+  }
+  try {
+    return await runFavoriteTagsBackfill(
+      expectedUid,
+      videos,
+      signal,
+      progress => {
+        onProgress(progress);
+        if (notificationTaskId) {
+          updateBackgroundSyncNotification(
+            notificationTaskId,
+            progress.completedVideoCount,
+            progress.totalVideoCount,
+            `标签 ${progress.completedVideoCount}/${progress.totalVideoCount} 个视频`,
+          );
+        }
+      },
+    );
+  } finally {
+    if (notificationTaskId) {
+      finishBackgroundSyncNotification(notificationTaskId);
+    }
+  }
+}
+
+async function runFavoriteTagsBackfill(
   expectedUid: string,
   videos: FavoriteVideo[],
   signal: AbortSignal,
@@ -524,6 +567,12 @@ function enqueueFavoriteTagsBackfill(
         expectedUid,
         currentTask.scheduledVideoIds.size,
       );
+      updateBackgroundSyncNotification(
+        `favorite-tag-backfill:${expectedUid}`,
+        currentTask.completedVideoCount,
+        currentTask.scheduledVideoIds.size,
+        `标签 ${currentTask.completedVideoCount}/${currentTask.scheduledVideoIds.size} 个视频`,
+      );
       return;
     }
 
@@ -553,6 +602,12 @@ function enqueueFavoriteTagsBackfill(
   useTagBackfillStore.getState().begin(expectedUid, task.scheduledVideoIds.size);
 
   task.promise = (async () => {
+    const notificationTaskId = `favorite-tag-backfill:${expectedUid}`;
+    beginBackgroundSyncNotification(
+      notificationTaskId,
+      '正在同步收藏标签',
+      task.scheduledVideoIds.size,
+    );
     try {
       while (!controller.signal.aborted && task.pendingVideos.size > 0) {
         const batch = Array.from(task.pendingVideos.values());
@@ -562,7 +617,7 @@ function enqueueFavoriteTagsBackfill(
           batch,
           controller.signal,
           progress => {
-            useTagBackfillStore.getState().updateProgress(expectedUid, {
+            const cumulativeProgress: TagBackfillProgress = {
               totalVideoCount: task.scheduledVideoIds.size,
               completedVideoCount:
                 task.completedVideoCount + progress.completedVideoCount,
@@ -573,8 +628,19 @@ function enqueueFavoriteTagsBackfill(
               failedVideoCount:
                 task.failedVideoCount + progress.failedVideoCount,
               paused: progress.paused,
-            });
+            };
+            useTagBackfillStore.getState().updateProgress(
+              expectedUid,
+              cumulativeProgress,
+            );
+            updateBackgroundSyncNotification(
+              notificationTaskId,
+              cumulativeProgress.completedVideoCount,
+              cumulativeProgress.totalVideoCount,
+              `标签 ${cumulativeProgress.completedVideoCount}/${cumulativeProgress.totalVideoCount} 个视频`,
+            );
           },
+          null,
         );
 
         task.completedVideoCount += result.progress.completedVideoCount;
@@ -590,6 +656,12 @@ function enqueueFavoriteTagsBackfill(
           failedVideoCount: task.failedVideoCount,
           paused: interrupted,
         });
+        updateBackgroundSyncNotification(
+          notificationTaskId,
+          task.completedVideoCount,
+          task.scheduledVideoIds.size,
+          `标签 ${task.completedVideoCount}/${task.scheduledVideoIds.size} 个视频`,
+        );
 
         if (interrupted) {
           if (taskEpoch === backgroundBackfillEpoch) {
@@ -625,6 +697,7 @@ function enqueueFavoriteTagsBackfill(
       if (backgroundBackfillTask === task) {
         backgroundBackfillTask = null;
       }
+      finishBackgroundSyncNotification(notificationTaskId);
     }
   })();
 }

@@ -224,6 +224,7 @@ function handlePlaybackProgress(
 
 function advanceQueueRevision(): number {
   queueRevision += 1;
+  clearPendingSkipRequests();
   personalizedPageController?.abort();
   personalizedPageController = null;
   usePlayerStore.getState().setQueueLoading(false);
@@ -1138,6 +1139,148 @@ export async function resumePlayback(): Promise<void> {
 
 let lastSkipToastTime = 0;
 let isSkipping = false;
+let skipRequestInFlight = false;
+let skipRequestDrainPromise: Promise<void> | null = null;
+let pendingQueueEndRecoveryIndex: number | null = null;
+
+interface PendingSkipRequest {
+  direction: 'next' | 'previous';
+  pauseRevision: number;
+  resolve: () => void;
+}
+
+const pendingSkipRequests: PendingSkipRequest[] = [];
+
+function clearPendingSkipRequests(): void {
+  for (const request of pendingSkipRequests.splice(0)) {
+    request.resolve();
+  }
+}
+
+function startPendingQueueEndRecovery(): void {
+  if (pendingQueueEndRecoveryIndex === null) return;
+  const endedTrackIndex = pendingQueueEndRecoveryIndex;
+  pendingQueueEndRecoveryIndex = null;
+  void recoverQueueAfterEnd(endedTrackIndex).catch(error => {
+    LoggerService.error(
+      'TrackPlayer',
+      'PlaybackQueueEnded',
+      '延迟恢复队列结束状态失败',
+      error,
+    );
+  });
+}
+
+function scheduleSkipRequestDrain(): void {
+  if (
+    skipRequestDrainPromise ||
+    isSkipping ||
+    pendingSkipRequests.length === 0
+  ) {
+    return;
+  }
+
+  let drainPromise!: Promise<void>;
+  drainPromise = drainSkipRequests().finally(() => {
+    if (skipRequestDrainPromise === drainPromise) {
+      skipRequestDrainPromise = null;
+    }
+    if (!isSkipping && pendingSkipRequests.length > 0) {
+      scheduleSkipRequestDrain();
+    }
+  });
+  skipRequestDrainPromise = drainPromise;
+}
+
+async function drainSkipRequests(): Promise<void> {
+  while (pendingSkipRequests.length > 0) {
+    const recovery = queueEndRecoveryPromise;
+    if (recovery) {
+      await recovery.catch(() => {});
+    }
+    if (isSkipping) return;
+
+    const request = pendingSkipRequests.shift();
+    if (!request) continue;
+    isSkipping = true;
+    skipRequestInFlight = true;
+    try {
+      if (request.direction === 'next') {
+        await performNextSkip(request.pauseRevision);
+      } else {
+        await performPreviousSkip(request.pauseRevision);
+      }
+    } finally {
+      skipRequestInFlight = false;
+      isSkipping = false;
+      request.resolve();
+      startPendingQueueEndRecovery();
+    }
+  }
+}
+
+function enqueueSkipRequest(
+  direction: PendingSkipRequest['direction'],
+  pauseRevision: number,
+): Promise<void> {
+  const queueCapacity = Math.max(1, usePlayerStore.getState().queue.length);
+  const outstandingRequests =
+    pendingSkipRequests.length + (skipRequestInFlight ? 1 : 0);
+  if (outstandingRequests >= queueCapacity) {
+    return Promise.resolve();
+  }
+
+  let resolveRequest!: () => void;
+  const requestPromise = new Promise<void>(resolve => {
+    resolveRequest = resolve;
+  });
+  pendingSkipRequests.push({
+    direction,
+    pauseRevision,
+    resolve: resolveRequest,
+  });
+  scheduleSkipRequestDrain();
+  return requestPromise;
+}
+
+function skipToNextWithPauseRevision(pauseRevision: number): Promise<void> {
+  return enqueueSkipRequest('next', pauseRevision);
+}
+
+async function performNextSkip(pauseRevision: number): Promise<void> {
+  const revision = queueRevision;
+  try {
+    let skipped = await skipNativeQueueToNext(pauseRevision);
+    if (revision !== queueRevision) return;
+    const hasLogicalNext = !skipped && await hasLogicalNextTrack();
+    if (hasLogicalNext) {
+      const buffered = await ensureNextLogicalTrackBuffered(revision);
+      if (buffered && revision === queueRevision) {
+        skipped = await skipNativeQueueToNext(pauseRevision);
+      }
+    }
+
+    if (skipped) {
+      maintainQueueBuffer().catch(() => {});
+    }
+    if (!skipped && hasLogicalNext) {
+      usePlayerStore.getState().setPlaybackError('下一首暂时无法加载，请检查网络后重试');
+      showQueueNotReadyToast();
+    } else if (skipped) {
+      usePlayerStore.getState().setPlaybackError(null);
+    }
+  } catch (e) {
+    LoggerService.error(
+      'TrackPlayer',
+      'skipToNext',
+      'Error skipping to next',
+      e,
+    );
+    usePlayerStore.getState().setPlaybackError('下一首暂时无法加载，请检查网络后重试');
+    showQueueNotReadyToast();
+    maintainQueueBuffer().catch(() => {});
+  }
+}
 
 function showQueueNotReadyToast(message = '下一首暂时无法播放，请检查网络后重试') {
   const now = Date.now();
@@ -1267,62 +1410,16 @@ async function skipNativeQueueToNext(pauseRevision: number): Promise<boolean> {
   });
 }
 
-export async function skipToNext() {
+export function skipToNext() {
   return skipToNextWithPauseRevision(userPauseRevision);
 }
 
-async function skipToNextWithPauseRevision(pauseRevision: number) {
-  if (queueEndRecoveryPromise) {
-    await queueEndRecoveryPromise.catch(() => {});
-    return;
-  }
-  if (isSkipping) {
-    return;
-  }
-  isSkipping = true;
-  const revision = queueRevision;
-  try {
-    let skipped = await skipNativeQueueToNext(pauseRevision);
-    if (revision !== queueRevision) return;
-    const hasLogicalNext = !skipped && await hasLogicalNextTrack();
-    if (hasLogicalNext) {
-      const buffered = await ensureNextLogicalTrackBuffered(revision);
-      if (buffered && revision === queueRevision) {
-        skipped = await skipNativeQueueToNext(pauseRevision);
-      }
-    }
-
-    if (skipped) {
-      maintainQueueBuffer().catch(() => {});
-    }
-    if (!skipped && hasLogicalNext) {
-      usePlayerStore.getState().setPlaybackError('下一首暂时无法加载，请检查网络后重试');
-      showQueueNotReadyToast();
-    } else {
-      if (skipped) {
-        usePlayerStore.getState().setPlaybackError(null);
-      }
-    }
-  } catch (e) {
-    LoggerService.error(
-      'TrackPlayer',
-      'skipToNext',
-      'Error skipping to next',
-      e,
-    );
-    usePlayerStore.getState().setPlaybackError('下一首暂时无法加载，请检查网络后重试');
-    showQueueNotReadyToast();
-    maintainQueueBuffer().catch(() => {});
-  } finally {
-    isSkipping = false;
-  }
+export function skipToPrevious() {
+  return enqueueSkipRequest('previous', userPauseRevision);
 }
 
-export async function skipToPrevious() {
-  if (isSkipping) return;
-  isSkipping = true;
+async function performPreviousSkip(pauseRevision: number): Promise<void> {
   const revision = queueRevision;
-  const pauseRevision = userPauseRevision;
   try {
     const position = await withNativeQueueMutation(async () => {
       if (revision !== queueRevision) return null;
@@ -1435,13 +1532,12 @@ export async function skipToPrevious() {
     );
     usePlayerStore.getState().setPlaybackError('上一首暂时无法加载，请检查网络后重试');
     showQueueNotReadyToast('上一首暂时无法播放，请检查网络后重试');
-  } finally {
-    isSkipping = false;
   }
 }
 
 async function recoverQueueAfterEnd(endedTrackIndex: number): Promise<void> {
   if (isSkipping) {
+    pendingQueueEndRecoveryIndex = endedTrackIndex;
     return;
   }
   if (queueEndRecoveryPromise) {

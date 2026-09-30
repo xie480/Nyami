@@ -16,6 +16,7 @@ import {useAuthStore} from '../store/authStore';
 import {useImportedPlaylistStore} from '../store/importedPlaylistStore';
 import {useSettingsStore} from '../store/settingsStore';
 import {storage} from '../core/storage';
+import {forEachInYieldingBatches} from '../utils/yielding';
 import type {
   CollectionRecommendation,
   FavoriteVideo,
@@ -110,18 +111,33 @@ async function loadPersonalizationContext(
     return cachedPersonalizationContext.context;
   }
 
-  const favorites = favoriteService.getGlobalIndex(
-    hiddenFolderIds,
-    visibleSourceKeys,
+  const [favorites, allFavoriteVideos] = await Promise.all([
+    favoriteService.getGlobalIndexYielding(
+      hiddenFolderIds,
+      visibleSourceKeys,
+      signal,
+    ),
+    favoriteService.getGlobalIndexYielding(
+      [],
+      importedSources.map(source => source.sourceKey),
+      signal,
+    ),
+  ]);
+  if (signal.aborted) throw new Error('推荐刷新已取消');
+
+  const favoriteVideoIds = new Set<string>();
+  const favoriteVideoTitles = new Set<string>();
+  await forEachInYieldingBatches(
+    allFavoriteVideos,
+    video => {
+      favoriteVideoIds.add(video.bvid);
+      const title = normalizeRecommendationTitleKey(video.title);
+      if (title) favoriteVideoTitles.add(title);
+    },
+    signal,
   );
-  const allFavoriteVideos = favoriteService.getGlobalIndex(
-    [],
-    importedSources.map(source => source.sourceKey),
-  );
-  const allFavoriteVideoIds = Array.from(new Set(allFavoriteVideos.map(video => video.bvid)));
-  const allFavoriteVideoTitles = Array.from(new Set(
-    allFavoriteVideos.map(video => normalizeRecommendationTitleKey(video.title)).filter(Boolean),
-  ));
+  const allFavoriteVideoIds = Array.from(favoriteVideoIds);
+  const allFavoriteVideoTitles = Array.from(favoriteVideoTitles);
   let profile = cachedTagProfile?.key === profileCacheKey
     ? cachedTagProfile.profile
     : null;

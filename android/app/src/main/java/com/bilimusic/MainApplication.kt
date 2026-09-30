@@ -2,6 +2,7 @@ package com.bilimusic
 
 import android.app.Application
 import com.bilimusic.module.DSPPackage
+import com.bilimusic.sync.BackgroundSyncPackage
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -20,6 +21,7 @@ class MainApplication : Application(), ReactApplication {
             PackageList(this).packages.apply {
               // DSP 音频引擎与 OpenGL 频谱可视化模块
               add(DSPPackage())
+              add(BackgroundSyncPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

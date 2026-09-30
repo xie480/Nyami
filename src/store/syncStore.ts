@@ -8,6 +8,11 @@ import {
 import {useAuthStore} from './authStore';
 import {useImportedPlaylistStore} from './importedPlaylistStore';
 import {storage} from '../core/storage';
+import {
+  beginBackgroundSyncNotification,
+  finishBackgroundSyncNotification,
+  updateBackgroundSyncNotification,
+} from '../services/backgroundSyncNotification';
 
 // Active sync controller; identity checks prevent an older run from clearing a newer run.
 let syncAbortController: AbortController | null = null;
@@ -51,6 +56,12 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     const controller = new AbortController();
     syncAbortController = controller;
     const abortSignal = controller.signal;
+    const notificationTaskId = 'global-index-sync';
+    beginBackgroundSyncNotification(
+      notificationTaskId,
+      '正在同步全局索引',
+      0,
+    );
     set({ syncStatus: 'syncing', progressData: null, syncError: null });
     try {
       await pauseFavoriteTagsBackfill();
@@ -65,6 +76,12 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       // 先完成索引同步，避免后台标签回填与索引请求和数据库写入争用。
       await favoriteService.syncGlobalIndex(uid, hiddenFolderIds, force, (event) => {
         set({ progressData: event });
+        updateBackgroundSyncNotification(
+          notificationTaskId,
+          event.processedVideos,
+          event.totalVideos,
+          `视频 ${event.processedVideos}/${event.totalVideos} · 列表 ${event.completedTasks}/${event.totalTasks}`,
+        );
       }, abortSignal);
       if (abortSignal.aborted) {
         if (syncAbortController === controller && get().syncStatus === 'syncing') {
@@ -84,25 +101,29 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         queuedRequest = pendingSyncRequest;
         pendingSyncRequest = null;
       }
-      if (queuedRequest && !abortSignal.aborted) {
-        await get().startSync(
-          queuedRequest.uid,
-          queuedRequest.hiddenFolderIds,
-          queuedRequest.force,
-        );
-        return;
-      }
-      if (
-        syncAbortController === null &&
-        get().syncStatus !== 'syncing' &&
-        useAuthStore.getState().userId === uid
-      ) {
-        const visibleSourceKeys =
-          useImportedPlaylistStore.getState().visibleSourceKeysByUid[uid] ?? [];
-        resumeFavoriteTagsBackfill(
-          uid,
-          favoriteService.getGlobalIndexYielding(hiddenFolderIds, visibleSourceKeys),
-        );
+      try {
+        if (queuedRequest && !abortSignal.aborted) {
+          await get().startSync(
+            queuedRequest.uid,
+            queuedRequest.hiddenFolderIds,
+            queuedRequest.force,
+          );
+          return;
+        }
+        if (
+          syncAbortController === null &&
+          get().syncStatus !== 'syncing' &&
+          useAuthStore.getState().userId === uid
+        ) {
+          const visibleSourceKeys =
+            useImportedPlaylistStore.getState().visibleSourceKeysByUid[uid] ?? [];
+          resumeFavoriteTagsBackfill(
+            uid,
+            favoriteService.getGlobalIndexYielding(hiddenFolderIds, visibleSourceKeys),
+          );
+        }
+      } finally {
+        finishBackgroundSyncNotification(notificationTaskId);
       }
     }
   },
