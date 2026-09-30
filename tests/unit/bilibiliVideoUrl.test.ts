@@ -1,4 +1,4 @@
-import {createBilibiliVideoUrl} from '../src/utils/bilibiliVideoUrl';
+import {createBilibiliVideoUrl} from '../../src/utils/bilibiliVideoUrl';
 
 describe('createBilibiliVideoUrl', () => {
   it('creates a fixed HTTPS video URL for a valid BVID', () => {

@@ -1,4 +1,4 @@
-import {createAlbumTheme, interpolateAlbumTheme} from '../src/utils/albumTheme';
+import {createAlbumTheme, interpolateAlbumTheme} from '../../src/utils/albumTheme';
 
 describe('createAlbumTheme', () => {
   it('keeps two cover accents distinct and readable on dark artwork', () => {

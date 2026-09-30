@@ -75,7 +75,7 @@
 				00E356F21AD99517003FC87E /* BiliMusicTests.m */,
 				00E356F01AD99517003FC87E /* Supporting Files */,
 			);
-			path = BiliMusicTests;
+			path = ../tests/ios;
 			sourceTree = "<group>";
 		};
 		00E356F01AD99517003FC87E /* Supporting Files */ = {
@@ -423,7 +423,7 @@
 					"DEBUG=1",
 					"$(inherited)",
 				);
-				INFOPLIST_FILE = BiliMusicTests/Info.plist;
+				INFOPLIST_FILE = ../tests/ios/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 13.4;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -447,7 +447,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COPY_PHASE_STRIP = NO;
-				INFOPLIST_FILE = BiliMusicTests/Info.plist;
+				INFOPLIST_FILE = ../tests/ios/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 13.4;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

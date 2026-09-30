@@ -1,4 +1,4 @@
-import {findFirstValidFavoriteCover} from '../src/utils/favoriteFolderCover';
+import {findFirstValidFavoriteCover} from '../../src/utils/favoriteFolderCover';
 
 describe('findFirstValidFavoriteCover', () => {
   it('returns the first cover from a valid favorite video', () => {

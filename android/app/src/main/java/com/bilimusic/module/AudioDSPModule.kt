@@ -53,6 +53,11 @@ class AudioDSPModule(reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
+    fun setSpectrumEnabled(enabled: Boolean) {
+        dspProcessor.setSpectrumEnabled(enabled)
+    }
+
+    @ReactMethod
     fun setMode(mode: Int) {
         val eqMode = if (mode == 0) DSPAudioProcessor.EQMode.GRAPHIC else DSPAudioProcessor.EQMode.PARAMETRIC
         dspProcessor.setMode(eqMode)
@@ -76,24 +81,24 @@ class AudioDSPModule(reactContext: ReactApplicationContext) :
     /**
      * 获取当前 FFT 频谱数据（供 SpectrumView 可视化使用）
      *
-     * @param promise 返回包含频谱数据的 WritableMap
-     *   - spectrum: normalized RMS frequency bands (maximum 128 values, 0..1)
-     *   - catEarLeft: FloatArray (16)
-     *   - catEarRight: FloatArray (16)
+     * @param maxSpectrumBins 请求的频段数，限制在 1..128
+     * @param includeCatEars 是否附带猫耳数据
+     * @param promise 返回包含归一化频段电平的 WritableMap
      */
     @ReactMethod
-    fun getSpectrumData(promise: Promise) {
+    fun getSpectrumData(maxSpectrumBins: Int, includeCatEars: Boolean, promise: Promise) {
         try {
             val analyzer = dspProcessor.fftAnalyzer
             val map = Arguments.createMap()
 
-            // 频谱数据最多保留 128 个 bin；高尺寸分析器按频段 RMS 聚合，避免单点峰值支配柱高。
+            // 按消费者需要的柱数聚合，减少播放器环形频谱的桥接数据量。
             val spectrumArr = Arguments.createArray()
             val spec = analyzer.spectrum
-            val downsampled = if (spec.size > 128) {
-                FloatArray(128) { band ->
-                    val start = band * spec.size / 128
-                    val end = maxOf(start + 1, (band + 1) * spec.size / 128)
+            val targetBinCount = maxSpectrumBins.coerceIn(1, 128)
+            val downsampled = if (spec.size > targetBinCount) {
+                FloatArray(targetBinCount) { band ->
+                    val start = band * spec.size / targetBinCount
+                    val end = maxOf(start + 1, (band + 1) * spec.size / targetBinCount)
                     var squaredEnergy = 0f
                     for (bin in start until end) {
                         val level = spec[bin].coerceIn(0f, 1f)
@@ -109,18 +114,19 @@ class AudioDSPModule(reactContext: ReactApplicationContext) :
             }
             map.putArray("spectrum", spectrumArr)
 
-            // 猫耳左/右数据
-            val catLeftArr = Arguments.createArray()
-            for (v in analyzer.catEarLeft) {
-                catLeftArr.pushDouble(v.toDouble())
-            }
-            map.putArray("catEarLeft", catLeftArr)
+            if (includeCatEars) {
+                val catLeftArr = Arguments.createArray()
+                for (v in analyzer.catEarLeft) {
+                    catLeftArr.pushDouble(v.toDouble())
+                }
+                map.putArray("catEarLeft", catLeftArr)
 
-            val catRightArr = Arguments.createArray()
-            for (v in analyzer.catEarRight) {
-                catRightArr.pushDouble(v.toDouble())
+                val catRightArr = Arguments.createArray()
+                for (v in analyzer.catEarRight) {
+                    catRightArr.pushDouble(v.toDouble())
+                }
+                map.putArray("catEarRight", catRightArr)
             }
-            map.putArray("catEarRight", catRightArr)
 
             promise.resolve(map)
         } catch (e: Exception) {

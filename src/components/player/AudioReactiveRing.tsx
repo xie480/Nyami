@@ -16,6 +16,7 @@ const SPECTRUM_RING_STYLE = {
   innerGap: 2,
   frequencyCurve: 1.45,
 };
+const SPECTRUM_RING_POLL_INTERVAL_MS = 40;
 const LEGACY_RING_DIAMETER_GUTTER = 48;
 export const AUDIO_REACTIVE_RING_OUTSET = 56;
 export const AUDIO_REACTIVE_RING_LAYOUT_GROWTH =
@@ -38,47 +39,77 @@ function makeFallbackSpectrum(phase: number): number[] {
   });
 }
 
-function buildRingPath(
-  spectrum: number[],
-  size: number,
-  intensity: number,
-): string {
+interface RingBarGeometry {
+  cosine: number;
+  sine: number;
+  lowerBin: number;
+  upperBin: number;
+  binFraction: number;
+}
+
+interface RingGeometry {
+  center: number;
+  innerRadius: number;
+  bars: RingBarGeometry[];
+}
+
+function createRingGeometry(spectrumLength: number, size: number): RingGeometry {
   const center = size / 2;
   const innerRadius =
     center -
     SPECTRUM_RING_STYLE.maxHeight -
     SPECTRUM_RING_STYLE.minHeight -
     SPECTRUM_RING_STYLE.innerGap;
-  const lastBinIndex = Math.max(0, spectrum.length - 1);
-  const pathParts: string[] = [];
+  const lastBinIndex = Math.max(0, spectrumLength - 1);
+  const bars = new Array<RingBarGeometry>(SPECTRUM_RING_STYLE.barCount);
 
   for (let index = 0; index < SPECTRUM_RING_STYLE.barCount; index += 1) {
     const angle = (index / SPECTRUM_RING_STYLE.barCount) * Math.PI * 2 - Math.PI / 2;
     const binPosition =
-      spectrum.length > 1
+      spectrumLength > 1
         ? (index / (SPECTRUM_RING_STYLE.barCount - 1)) **
           SPECTRUM_RING_STYLE.frequencyCurve *
-          (spectrum.length - 1)
+          (spectrumLength - 1)
         : 0;
     const lowerBin = Math.floor(binPosition);
-    const upperBin = Math.min(lastBinIndex, lowerBin + 1);
-    const lowerValue = Number(spectrum[lowerBin]) || 0;
-    const upperValue = Number(spectrum[upperBin]) || 0;
-    const binFraction = binPosition - lowerBin;
-    const rawAmplitude = lowerValue + (upperValue - lowerValue) * binFraction;
+    bars[index] = {
+      cosine: Math.cos(angle),
+      sine: Math.sin(angle),
+      lowerBin,
+      upperBin: Math.min(lastBinIndex, lowerBin + 1),
+      binFraction: binPosition - lowerBin,
+    };
+  }
+
+  return {center, innerRadius, bars};
+}
+
+function buildRingPath(
+  spectrum: number[],
+  intensity: number,
+  geometry: RingGeometry,
+): string {
+  const {center, innerRadius, bars} = geometry;
+  const pathParts = new Array<string>(bars.length);
+
+  for (let index = 0; index < bars.length; index += 1) {
+    const bar = bars[index];
+    const lowerValue = Number(spectrum[bar.lowerBin]) || 0;
+    const upperValue = Number(spectrum[bar.upperBin]) || 0;
+    const rawAmplitude =
+      lowerValue + (upperValue - lowerValue) * bar.binFraction;
     const normalizedAmplitude = Math.min(1, Math.max(0, rawAmplitude));
     // Native FFT 已完成 dBFS 映射和 gamma 曲线；此处只把归一化电平映射到现有 UI 尺寸。
     const amplitude = normalizedAmplitude * intensity;
-    const length = SPECTRUM_RING_STYLE.minHeight + amplitude * SPECTRUM_RING_STYLE.maxHeight;
-    const innerX = center + Math.cos(angle) * innerRadius;
-    const innerY = center + Math.sin(angle) * innerRadius;
-    const outerX = center + Math.cos(angle) * (innerRadius + length);
-    const outerY = center + Math.sin(angle) * (innerRadius + length);
-    pathParts.push(
-      `M${innerX.toFixed(1)},${innerY.toFixed(1)}L${outerX.toFixed(
-        1,
-      )},${outerY.toFixed(1)}`,
-    );
+    const length =
+      SPECTRUM_RING_STYLE.minHeight +
+      amplitude * SPECTRUM_RING_STYLE.maxHeight;
+    const innerX = center + bar.cosine * innerRadius;
+    const innerY = center + bar.sine * innerRadius;
+    const outerX = center + bar.cosine * (innerRadius + length);
+    const outerY = center + bar.sine * (innerRadius + length);
+    pathParts[index] =
+      `M${innerX.toFixed(1)},${innerY.toFixed(1)}L${outerX.toFixed(1)},${outerY.toFixed(1)}`;
   }
 
   return pathParts.join('');
@@ -87,7 +118,12 @@ function buildRingPath(
 export const AudioReactiveRing: React.FC<Props> = React.memo(
   ({artworkSize, enabled, isPlaying, reduceMotion, theme}) => {
     const shouldAnimate = enabled && isPlaying && !reduceMotion;
-    const {spectrum} = useSpectrumPoller(shouldAnimate);
+    const {spectrum} = useSpectrumPoller(
+      shouldAnimate,
+      SPECTRUM_RING_POLL_INTERVAL_MS,
+      SPECTRUM_RING_STYLE.barCount,
+      false,
+    );
     const [fallbackPhase, setFallbackPhase] = useState(0);
     const [intensity, setIntensity] = useState(shouldAnimate ? 1 : 0);
     const intensityRef = React.useRef(intensity);
@@ -150,9 +186,13 @@ export const AudioReactiveRing: React.FC<Props> = React.memo(
       return shouldAnimate ? fallback : EMPTY_SPECTRUM;
     }, [fallback, shouldAnimate, spectrum]);
     const ringSize = artworkSize + AUDIO_REACTIVE_RING_OUTSET * 2;
+    const ringGeometry = useMemo(
+      () => createRingGeometry(displaySpectrum.length, ringSize),
+      [displaySpectrum.length, ringSize],
+    );
     const ringPath = useMemo(
-      () => buildRingPath(displaySpectrum, ringSize, intensity),
-      [displaySpectrum, intensity, ringSize],
+      () => buildRingPath(displaySpectrum, intensity, ringGeometry),
+      [displaySpectrum, intensity, ringGeometry],
     );
     const animatedStyle = useAnimatedStyle(() => ({opacity: opacity.value}));
 

@@ -1,16 +1,16 @@
-import { favoriteService } from '../src/services/favoriteService';
-import { biliApi } from '../src/services/biliApi';
-import * as dbOperations from '../src/db/operations';
+import { favoriteService } from '../../src/services/favoriteService';
+import { biliApi } from '../../src/services/biliApi';
+import * as dbOperations from '../../src/db/operations';
 
 // Mock dependencies
-jest.mock('../src/services/biliApi', () => ({
+jest.mock('../../src/services/biliApi', () => ({
   biliApi: {
     getFavoriteFolders: jest.fn(),
     getFavoriteVideos: jest.fn(),
   }
 }));
 
-jest.mock('../src/core/cache', () => ({
+jest.mock('../../src/core/cache', () => ({
   cache: {
     getOrSet: jest.fn((key, ttl, fetcher) => fetcher()),
     delete: jest.fn(),
@@ -18,7 +18,7 @@ jest.mock('../src/core/cache', () => ({
   }
 }));
 
-jest.mock('../src/db/operations', () => {
+jest.mock('../../src/db/operations', () => {
   let globalVideos: any[] = [];
   const syncMetaMap: Record<string, any> = {};
 

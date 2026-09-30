@@ -3,7 +3,7 @@ jest.mock('react-native-track-player', () => ({
   default: {},
 }));
 
-jest.mock('../src/core/storage', () => ({
+jest.mock('../../src/core/storage', () => ({
   storage: {
     getString: jest.fn(() => null),
     setString: jest.fn(),
@@ -11,13 +11,13 @@ jest.mock('../src/core/storage', () => ({
   },
 }));
 
-jest.mock('../src/store/progressStore', () => ({
+jest.mock('../../src/store/progressStore', () => ({
   useProgressStore: {
     getState: () => ({resetProgress: jest.fn()}),
   },
 }));
 
-jest.mock('../src/services/trackPlayer', () => ({
+jest.mock('../../src/services/trackPlayer', () => ({
   loadQueue: jest.fn(),
   insertNext: jest.fn(),
   removeFromQueue: jest.fn(),
@@ -25,8 +25,8 @@ jest.mock('../src/services/trackPlayer', () => ({
   appendQueue: jest.fn(),
 }));
 
-import {usePlayerStore} from '../src/store/playerStore';
-import {reorderQueue as syncTrackPlayerQueue} from '../src/services/trackPlayer';
+import {usePlayerStore} from '../../src/store/playerStore';
+import {reorderQueue as syncTrackPlayerQueue} from '../../src/services/trackPlayer';
 
 const sourceQueue = [
   {bvid: 'BV1source001'},

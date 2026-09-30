@@ -45,6 +45,9 @@ class EqAudioProcessorAdapter(
      */
     private var conversionBuffer: FloatArray? = null
 
+    /** PCM16 输出在缓冲区被消费后复用，避免每个音频块分配直接内存。 */
+    private var pcm16OutputBuffer: ByteBuffer? = null
+
     // ========================================================================
     // AudioProcessor 接口实现
     // ========================================================================
@@ -155,6 +158,7 @@ class EqAudioProcessorAdapter(
     override fun reset() {
         flush()
         conversionBuffer = null
+        pcm16OutputBuffer = null
         inputSampleRate = 44100
         inputChannelCount = 2
         inputEncoding = C.ENCODING_PCM_FLOAT
@@ -189,8 +193,7 @@ class EqAudioProcessorAdapter(
 
         // Float → Short
         val outputBytes = sampleCount * 2
-        val output = ByteBuffer.allocateDirect(outputBytes)
-        output.order(ByteOrder.LITTLE_ENDIAN)
+        val output = obtainPcm16OutputBuffer(outputBytes)
         for (i in 0 until sampleCount) {
             val clamped = (floatBuffer[i] * 32768f)
                 .toInt()
@@ -198,6 +201,18 @@ class EqAudioProcessorAdapter(
             output.putShort(clamped.toShort())
         }
         output.position(0)
+        return output
+    }
+
+    private fun obtainPcm16OutputBuffer(byteCount: Int): ByteBuffer {
+        val output = pcm16OutputBuffer?.takeIf {
+            it.capacity() >= byteCount && !it.hasRemaining()
+        } ?: ByteBuffer.allocateDirect(byteCount).also {
+            pcm16OutputBuffer = it
+        }
+        output.clear()
+        output.order(ByteOrder.LITTLE_ENDIAN)
+        output.limit(byteCount)
         return output
     }
 

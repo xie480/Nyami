@@ -1,19 +1,19 @@
-import {biliApi} from '../src/services/biliApi';
-import {biliGet, biliPost} from '../src/core/http';
-import {encWbi, getWbiKeys} from '../src/core/wbi';
-import {cookieService} from '../src/services/cookieService';
+import {biliApi} from '../../src/services/biliApi';
+import {biliGet, biliPost} from '../../src/core/http';
+import {encWbi, getWbiKeys} from '../../src/core/wbi';
+import {cookieService} from '../../src/services/cookieService';
 
-jest.mock('../src/core/http', () => ({
+jest.mock('../../src/core/http', () => ({
   biliGet: jest.fn(),
   biliPost: jest.fn(),
 }));
 
-jest.mock('../src/core/wbi', () => ({
+jest.mock('../../src/core/wbi', () => ({
   encWbi: jest.fn(),
   getWbiKeys: jest.fn(),
 }));
 
-jest.mock('../src/services/cookieService', () => ({
+jest.mock('../../src/services/cookieService', () => ({
   cookieService: {
     get: jest.fn(),
     extractUid: jest.fn(),

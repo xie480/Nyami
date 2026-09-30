@@ -18,6 +18,7 @@ private object SpectrumVisualTuning {
     const val ATTACK = 0.55f
     const val RELEASE = 0.16f
     const val PEAK_LIMIT = 0.98f
+    const val MAX_UPDATE_HZ = 30
 }
 
 private const val SPECTRUM_BIN_GROUP_SIZE = 4
@@ -31,8 +32,27 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
         (rawBinCount + SPECTRUM_BIN_GROUP_SIZE - 1) / SPECTRUM_BIN_GROUP_SIZE
     private val noiseFloorAmplitude =
         10.0.pow(SpectrumVisualTuning.NOISE_FLOOR_DB.toDouble() / 20.0).toFloat()
+    private val minimumAnalysisIntervalNs = 1_000_000_000L / SpectrumVisualTuning.MAX_UPDATE_HZ
     private var real = FloatArray(fftSize)
     private var imag = FloatArray(fftSize)
+    private val weightedMagnitudes = FloatArray(rawBinCount)
+    private val newSpectrum = FloatArray(displayBinCount)
+    private val stageTwiddleCos = Array(Integer.numberOfTrailingZeros(fftSize)) { stage ->
+        val halfStep = 1 shl stage
+        val step = halfStep shl 1
+        FloatArray(halfStep) { index ->
+            cos(-2.0 * PI * index / step).toFloat()
+        }
+    }
+    private val stageTwiddleSin = Array(Integer.numberOfTrailingZeros(fftSize)) { stage ->
+        val halfStep = 1 shl stage
+        val step = halfStep shl 1
+        FloatArray(halfStep) { index ->
+            sin(-2.0 * PI * index / step).toFloat()
+        }
+    }
+    @Volatile
+    private var lastAnalysisAtNs = 0L
 
     // ====== 频谱输出 ======
     @Volatile
@@ -77,6 +97,10 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
      * @param channels 声道数 (1=mono, 2=stereo)
      */
     fun analyze(pcmBuffer: FloatArray, channels: Int = 2) {
+        val nowNs = System.nanoTime()
+        if (lastAnalysisAtNs != 0L && nowNs - lastAnalysisAtNs < minimumAnalysisIntervalNs) return
+        lastAnalysisAtNs = nowNs
+
         // 将多声道混合为单声道，填充 FFT 缓冲区
         val step = if (channels >= 2) 2 else 1
         val len = min(pcmBuffer.size / step, fftSize)
@@ -97,13 +121,11 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
 
         // Hann 窗会降低正弦幅度；除以窗函数幅度和可恢复一侧峰值幅度。
         // 然后在做 dB/曲线映射前，将相邻 bin 合成为 RMS 频段能量。
-        val weightedMagnitudes = FloatArray(rawBinCount)
         for (i in 0 until rawBinCount) {
             val magnitude = hypot(real[i].toDouble(), imag[i].toDouble()).toFloat()
             weightedMagnitudes[i] = magnitude * oneSidedAmplitudeScale * bandWeights[i]
         }
 
-        val newSpectrum = FloatArray(displayBinCount)
         for (band in 0 until displayBinCount) {
             val start = band * SPECTRUM_BIN_GROUP_SIZE
             val end = min(rawBinCount, start + SPECTRUM_BIN_GROUP_SIZE)
@@ -181,6 +203,7 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
         smoothedSpectrum.fill(0f)
         catEarLeft.fill(0f)
         catEarRight.fill(0f)
+        lastAnalysisAtNs = 0L
     }
 
     // ======================
@@ -211,16 +234,17 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
 
         // 蝶形运算
         var step = 1
+        var stage = 0
         while (step < n) {
             val halfStep = step
             step = step shl 1
-            val wlen = (-2.0 * PI / step).toFloat()
+            val twiddleCos = stageTwiddleCos[stage]
+            val twiddleSin = stageTwiddleSin[stage]
 
             for (k in 0 until n step step) {
-                var wr = 1f
-                var wi = 0f
-
                 for (m in 0 until halfStep) {
+                    val wr = twiddleCos[m]
+                    val wi = twiddleSin[m]
                     val j = k + m
                     val i2 = j + halfStep
 
@@ -232,12 +256,9 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
                     real[j] += tr
                     imag[j] += ti
 
-                    // 旋转因子更新
-                    val angle = wlen * (m + 1)
-                    wr = cos(angle)
-                    wi = sin(angle)
                 }
             }
+            stage += 1
         }
     }
 

@@ -136,6 +136,11 @@ Nyami
 │   ├── audio-engine/
 │   └── spectrum-renderer/
 │
+├── tests/
+│   ├── unit/       # Jest 单元测试
+│   ├── manual/     # 手动诊断工具
+│   └── ios/        # XCTest 源码与配置
+│
 └── resource/
 ```
 
@@ -182,6 +187,16 @@ npm start
 ```bash
 npm run android
 ```
+
+---
+
+## 测试
+
+```bash
+npm test
+```
+
+Jest 自动测试位于 `tests/unit/`。`tests/manual/` 下的 API 与依赖诊断工具需要单独运行，不属于默认 Jest 测试集。
 
 ---
 

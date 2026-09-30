@@ -35,6 +35,12 @@ class DSPAudioProcessor {
     // FFT 频谱分析器
     val fftAnalyzer = FFTAnalyzer(1024)
 
+    // 频谱只在有前台消费者时计算；PCM 转换缓冲由音频处理线程复用。
+    @Volatile
+    private var spectrumAnalysisEnabled = false
+    private var pcmFloatBuffer: FloatArray? = null
+    private var pcmFloatOutputBuffer: ByteBuffer? = null
+
     // 配置锁，保证线程安全
     private val lock = ReentrantReadWriteLock()
 
@@ -77,6 +83,10 @@ class DSPAudioProcessor {
 
     fun setEnabled(enabled: Boolean) {
         lock.write { this.enabled = enabled }
+    }
+
+    fun setSpectrumEnabled(enabled: Boolean) {
+        spectrumAnalysisEnabled = enabled
     }
 
     fun setMode(mode: EQMode) {
@@ -139,8 +149,8 @@ class DSPAudioProcessor {
      */
     fun process(buffer: FloatArray, channels: Int = 2): FloatArray {
         if (!enabled) {
-            // 即使 EQ 关闭，也继续 FFT 分析用于频谱显示
-            fftAnalyzer.analyze(buffer, channels)
+            // EQ 关闭时保持音频直通；仅在界面有频谱消费者时继续分析。
+            if (spectrumAnalysisEnabled) fftAnalyzer.analyze(buffer, channels)
             return buffer
         }
 
@@ -167,7 +177,7 @@ class DSPAudioProcessor {
         }
 
         // FFT 分析用于频谱可视化
-        fftAnalyzer.analyze(buffer, channels)
+        if (spectrumAnalysisEnabled) fftAnalyzer.analyze(buffer, channels)
 
         return buffer
     }
@@ -178,19 +188,32 @@ class DSPAudioProcessor {
     fun processByteBuffer(inputBuffer: ByteBuffer, channels: Int): ByteBuffer {
         inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
         val floatCount = inputBuffer.remaining() / 4
-        val floatBuffer = FloatArray(floatCount)
+        if (floatCount == 0) return ByteBuffer.allocateDirect(0)
+
+        var floatBuffer = pcmFloatBuffer
+        if (floatBuffer == null || floatBuffer.size < floatCount) {
+            floatBuffer = FloatArray(floatCount)
+            pcmFloatBuffer = floatBuffer
+        }
 
         // ByteBuffer → FloatArray
-        inputBuffer.asFloatBuffer().get(floatBuffer)
+        inputBuffer.asFloatBuffer().get(floatBuffer, 0, floatCount)
 
         // DSP 处理
         process(floatBuffer, channels)
 
         // FloatArray → ByteBuffer
-        val output = ByteBuffer.allocateDirect(floatCount * 4)
+        val outputByteCount = floatCount * 4
+        val output = pcmFloatOutputBuffer?.takeIf {
+            it.capacity() >= outputByteCount && !it.hasRemaining()
+        } ?: ByteBuffer.allocateDirect(outputByteCount).also {
+            pcmFloatOutputBuffer = it
+        }
         output.order(ByteOrder.LITTLE_ENDIAN)
+        output.clear()
+        output.limit(outputByteCount)
         val outFloat = output.asFloatBuffer()
-        outFloat.put(floatBuffer)
+        outFloat.put(floatBuffer, 0, floatCount)
         output.position(0)
 
         return output

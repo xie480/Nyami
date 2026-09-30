@@ -34,6 +34,9 @@ export interface AudioDSPModuleInterface {
   /** EQ 总开关 */
   setEnabled(enabled: boolean): void;
 
+  /** 仅在有可见频谱消费者时启用 FFT 分析 */
+  setSpectrumEnabled(enabled: boolean): void;
+
   /** 切换 EQ 模式：0=Graphic, 1=PEQ */
   setMode(mode: number): void;
 
@@ -46,10 +49,10 @@ reset(): void;
  * 获取当前 FFT 频谱电平（已按固定 dBFS 范围映射为 0~1）
  * @returns Promise 包含 spectrum, catEarLeft, catEarRight
  */
-getSpectrumData(): Promise<{
+getSpectrumData(maxSpectrumBins: number, includeCatEars: boolean): Promise<{
   spectrum: number[];
-  catEarLeft: number[];
-  catEarRight: number[];
+  catEarLeft?: number[];
+  catEarRight?: number[];
 }>;
 }
 
@@ -64,6 +67,7 @@ export const audioDSP: AudioDSPModuleInterface = AudioDSPModule ?? {
   updateGraphicEQ: () => {},
   updatePEQFilter: () => {},
   setEnabled: () => {},
+  setSpectrumEnabled: () => {},
   setMode: () => {},
   applyPreset: () => {},
   reset: () => {},

@@ -1,13 +1,13 @@
-import {BiliApiError} from '../src/core/errors';
+import {BiliApiError} from '../../src/core/errors';
 import {
   favoriteService,
   FavoriteStateReadbackError,
-} from '../src/services/favoriteService';
-import {biliApi} from '../src/services/biliApi';
-import {cookieService} from '../src/services/cookieService';
-import * as dbOperations from '../src/db/operations';
+} from '../../src/services/favoriteService';
+import {biliApi} from '../../src/services/biliApi';
+import {cookieService} from '../../src/services/cookieService';
+import * as dbOperations from '../../src/db/operations';
 
-jest.mock('../src/services/biliApi', () => ({
+jest.mock('../../src/services/biliApi', () => ({
   biliApi: {
     getFavoriteFolders: jest.fn(),
     assertWriteAccount: jest.fn(),
@@ -17,14 +17,14 @@ jest.mock('../src/services/biliApi', () => ({
   },
 }));
 
-jest.mock('../src/services/cookieService', () => ({
+jest.mock('../../src/services/cookieService', () => ({
   cookieService: {
     get: jest.fn(),
     extractUid: jest.fn(),
   },
 }));
 
-jest.mock('../src/core/cache', () => ({
+jest.mock('../../src/core/cache', () => ({
   cache: {
     getOrSet: jest.fn((_key, _ttl, fetcher) => fetcher()),
     set: jest.fn(),
@@ -33,7 +33,7 @@ jest.mock('../src/core/cache', () => ({
   },
 }));
 
-jest.mock('../src/db/operations', () => ({
+jest.mock('../../src/db/operations', () => ({
   upsertPlaylistMeta: jest.fn(),
   getPlaylistMeta: jest.fn(),
   createSyncJob: jest.fn(),
@@ -50,12 +50,12 @@ jest.mock('../src/db/operations', () => ({
   getVideosByPlaylistId: jest.fn(),
 }));
 
-jest.mock('../src/db/database', () => ({
+jest.mock('../../src/db/database', () => ({
   database: {write: jest.fn()},
   videoMetaCollection: {query: jest.fn()},
 }));
 
-jest.mock('../src/services/LoggerService', () => ({
+jest.mock('../../src/services/LoggerService', () => ({
   __esModule: true,
   default: {warn: jest.fn(), error: jest.fn(), info: jest.fn()},
 }));

@@ -179,7 +179,7 @@ jest.mock('react-native-keychain', () => ({
 }));
 
 // Mock GlassBackground to avoid Animated.timing issues in tests
-jest.mock('../src/components/GlassBackground', () => {
+jest.mock('../../src/components/GlassBackground', () => {
   const { View } = require('react-native');
   return {
     GlassBackground: () => <View testID="mock-glass-background" />,
@@ -214,7 +214,7 @@ jest.mock('@nozbe/watermelondb/adapters/sqlite', () => {
   }));
 });
 
-import App from '../App';
+import App from '../../App';
 
 // Note: import explicitly to use the types shipped with jest.
 import {it} from '@jest/globals';

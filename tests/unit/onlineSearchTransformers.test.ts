@@ -2,7 +2,7 @@ import {
   matchesOnlineVideoSearch,
   searchVideoToFavoriteVideo,
   trimSearchVideo,
-} from '../src/services/transformers';
+} from '../../src/services/transformers';
 
 describe('online video search transformers', () => {
   const video = trimSearchVideo({

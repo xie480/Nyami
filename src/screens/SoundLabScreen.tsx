@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {useIsFocused} from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {Header} from '../components/Header';
 import {Switch} from '../components/Switch';
@@ -333,6 +334,7 @@ const BandDetail = memo<BandDetailProps>(({graphicBands}) => {
 
 export const SoundLabScreen = () => {
   const t = useTheme();
+  const isFocused = useIsFocused();
   const mode = useEQStore(state => state.mode);
   const setMode = useEQStore(state => state.setMode);
   const enabled = useEQStore(state => state.enabled);
@@ -343,7 +345,9 @@ export const SoundLabScreen = () => {
   const activePreset = EMOTION_PRESETS.find(
     preset => preset.id === activePresetId,
   );
-  const {spectrum, catEarLeft, catEarRight} = useSpectrumPoller(enabled);
+  const {spectrum, catEarLeft, catEarRight} = useSpectrumPoller(
+    enabled && isFocused,
+  );
 
   return (
     <View style={[styles.safeArea, {backgroundColor: t.colors.background}]}>

@@ -1,4 +1,4 @@
-import {forEachInYieldingBatches} from '../src/utils/yielding';
+import {forEachInYieldingBatches} from '../../src/utils/yielding';
 
 describe('forEachInYieldingBatches', () => {
   it('lets queued event-loop work run between item batches', async () => {
