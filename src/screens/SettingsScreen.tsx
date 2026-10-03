@@ -804,7 +804,7 @@ export const SettingsScreen = ({ navigation }: any) => {
 
         <Text style={s.section}>关于</Text>
         <View style={s.group}>
-          <ListItem title="版本号" right={<Text style={{ color: t.colors.textSub }}>v2.0.0</Text>} />
+          <ListItem title="版本号" right={<Text style={{ color: t.colors.textSub }}>v2.0.1</Text>} />
           <View style={s.sep} />
           <ListItem title="开源协议" subtitle="本应用仅供个人学习使用" />
           <View style={s.sep} />
