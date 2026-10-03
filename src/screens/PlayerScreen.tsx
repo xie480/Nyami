@@ -434,7 +434,7 @@ export const PlayerScreen = () => {
           onFavorite={
             isLocalFavoriteFolderPlayback && currentVideo
               ? handleLocalFolderFavorite
-              : isPersonalized && favoriteTarget
+              : favoriteTarget
                 ? () => setFavoritePickerVisible(true)
                 : undefined
           }

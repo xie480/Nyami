@@ -382,7 +382,8 @@ export const FoldersScreen = ({ navigation }: any) => {
       }
       return;
     }
-    setQueue(shuffled, shuffled[0]?.bvid);
+    // 全局随机队列不属于单个收藏夹，显式清除上一队列的来源上下文。
+    setQueue(shuffled, shuffled[0]?.bvid, {});
     // ======== 【P0防闪烁优化】跳转前清空旧播放上下文 ========
     usePlayerStore.getState().setResolving(true);
     useProgressStore.getState().resetProgress();
@@ -580,7 +581,8 @@ export const FoldersScreen = ({ navigation }: any) => {
                   const queueVideos = filteredVideos.length > MAX_QUEUE
                     ? filteredVideos.slice(0, MAX_QUEUE)
                     : filteredVideos;
-                  setQueue(queueVideos, video.bvid);
+                  // 全收藏夹搜索结果不属于单个收藏夹，避免沿用上一队列上下文。
+                  setQueue(queueVideos, video.bvid, {});
                   // 【P0防闪烁优化】跳转前清空旧播放上下文
                   usePlayerStore.getState().setResolving(true);
                   useProgressStore.getState().resetProgress();
