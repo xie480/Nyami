@@ -1252,6 +1252,7 @@ export const favoriteService = {
     force = false,
     onProgress?: (event: SyncProgressEvent) => void,
     signal?: AbortSignal,
+    refreshLatest = false,
   ): Promise<void> {
     if (!uid) return;
 
@@ -1307,6 +1308,7 @@ export const favoriteService = {
         })),
       ];
       if (syncTargets.length === 0) {
+        if (refreshLatest && selectedSourceKeys.length === 0) return;
         throw new Error(
           selectedSourceKeys.length > 0
             ? '所选外部收藏夹或合集已不在当前账号的来源目录中，请刷新主页播放列表偏好后再同步。'
@@ -1358,6 +1360,7 @@ export const favoriteService = {
 
           // 1. 判断是否需要同步
           const needSync = force || !localMeta ||
+            (refreshLatest && localMeta?.syncCursor == null) ||
             localMeta.remoteVideoCount !== target.mediaCount ||
             localMeta.syncCursor !== null ||
             localMeta.needResync ||
@@ -1403,6 +1406,47 @@ export const favoriteService = {
             if (!force && !remoteCountDecreased) {
               syncedVideoCount = await getPlaylistVideoCount(playlistId);
             }
+            if (
+              refreshLatest &&
+              !force &&
+              !remoteCountDecreased &&
+              localMeta.syncCursor !== null
+            ) {
+              const latestPage = target.kind === 'owned'
+                ? await this.getVideos(target.folder.id, 1, 20, true, signal, 'index')
+                : await importedPlaylistService.getVideos(
+                    target.source,
+                    1,
+                    true,
+                    signal,
+                    'index',
+                  );
+              if (signal?.aborted || fatalAuthError) {
+                await finishSyncJob(jobId, 'cancelled');
+                await upsertPlaylistMeta({
+                  playlistId,
+                  remoteVideoCount: target.mediaCount,
+                  playlistSyncStatus: 'idle',
+                });
+                return;
+              }
+              const latestPageWrite = await syncPlaylistVideosPage(
+                playlistId,
+                latestPage.list,
+                {
+                  force: false,
+                  // 最新页探测不能覆盖尚未完成任务的分页断点。
+                  cursor: localMeta.syncCursor,
+                  previousSyncedCount: syncedVideoCount,
+                },
+              );
+              syncedVideoCount = latestPageWrite.syncedCount;
+              if (latestPageWrite.videosToUpsert.length > 0) {
+                indexMayHaveChanged = true;
+              }
+              updateTargetProgress(targetIndex, syncedVideoCount);
+              reportProgress();
+            }
             while (
               hasMore &&
               !isIncrementalDone &&
@@ -1410,11 +1454,18 @@ export const favoriteService = {
               !fatalAuthError
             ) {
               const pageRes = target.kind === 'owned'
-                ? await this.getVideos(target.folder.id, page, 20, force, signal, 'index')
+                ? await this.getVideos(
+                    target.folder.id,
+                    page,
+                    20,
+                    force || (refreshLatest && page === 1),
+                    signal,
+                    'index',
+                  )
                 : await importedPlaylistService.getVideos(
                     target.source,
                     page,
-                    force,
+                    force || (refreshLatest && page === 1),
                     signal,
                     'index',
                   );

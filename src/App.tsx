@@ -32,7 +32,7 @@ import { PlaylistPanel } from './components/PlaylistPanel';
 import { useUIStore } from './store/uiStore';
 import { LoginModal } from './components/LoginModal';
 import { storage } from './core/storage';
-import { resumePendingIndexSyncRetry } from './store/syncStore';
+import { queueIndexSyncWithRetry } from './store/syncStore';
 import { GlassBackground } from './components/GlassBackground';
 import { BottomNavigationBar } from './components/BottomNavigationBar';
 import { startProgressPolling, stopProgressPolling } from './store/progressStore';
@@ -110,6 +110,7 @@ export default function App() {
   const baseBgColor = isDark ? '#0F0F11' : '#FFFFFF';
   
   const toastRef = useRef<ToastNotificationRef>(null);
+  const startupIndexRefreshUidsRef = useRef<Set<string>>(new Set());
   const [isOnline, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
   const updateCurrentRouteName = useCallback(() => {
@@ -217,7 +218,15 @@ export default function App() {
       }
       if (uid && useAuthStore.getState().userId === uid) {
         void resumePendingBiliMutations(uid);
-        void resumePendingIndexSyncRetry(uid);
+        if (!startupIndexRefreshUidsRef.current.has(uid)) {
+          startupIndexRefreshUidsRef.current.add(uid);
+          // 每个账号在当前应用进程内只触发一次；后台重试由持久化队列负责。
+          queueIndexSyncWithRetry(
+            uid,
+            useSettingsStore.getState().hiddenFolderIds,
+            true,
+          );
+        }
       }
     };
     init();

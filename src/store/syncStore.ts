@@ -21,6 +21,7 @@ interface QueuedSyncRequest {
   uid: string;
   hiddenFolderIds: number[];
   force: boolean;
+  refreshLatest: boolean;
 }
 
 let pendingSyncRequest: QueuedSyncRequest | null = null;
@@ -29,7 +30,12 @@ interface SyncState {
   syncStatus: 'idle' | 'syncing' | 'error' | 'done';
   progressData: SyncProgressEvent | null;
   syncError: string | null;
-  startSync: (uid: string, hiddenFolderIds?: number[], force?: boolean) => Promise<void>;
+  startSync: (
+    uid: string,
+    hiddenFolderIds?: number[],
+    force?: boolean,
+    refreshLatest?: boolean,
+  ) => Promise<void>;
   abortSync: () => void;
   resetSyncState: () => void;
 }
@@ -38,13 +44,19 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   syncStatus: 'idle',
   progressData: null,
   syncError: null,
-  startSync: async (uid: string, hiddenFolderIds: number[] = [], force = false) => {
+  startSync: async (
+    uid: string,
+    hiddenFolderIds: number[] = [],
+    force = false,
+    refreshLatest = false,
+  ) => {
     if (get().syncStatus === 'syncing') {
-      const nextRequest = {uid, hiddenFolderIds: [...hiddenFolderIds], force};
+      const nextRequest = {uid, hiddenFolderIds: [...hiddenFolderIds], force, refreshLatest};
       if (pendingSyncRequest?.uid === uid) {
         pendingSyncRequest = {
           ...nextRequest,
           force: pendingSyncRequest.force || force,
+          refreshLatest: pendingSyncRequest.refreshLatest || refreshLatest,
         };
       } else {
         pendingSyncRequest = nextRequest;
@@ -82,7 +94,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
           event.totalVideos,
           `视频 ${event.processedVideos}/${event.totalVideos} · 列表 ${event.completedTasks}/${event.totalTasks}`,
         );
-      }, abortSignal);
+      }, abortSignal, refreshLatest);
       if (abortSignal.aborted) {
         if (syncAbortController === controller && get().syncStatus === 'syncing') {
           set({ syncStatus: 'idle', progressData: null, syncError: null });
@@ -107,6 +119,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
             queuedRequest.uid,
             queuedRequest.hiddenFolderIds,
             queuedRequest.force,
+            queuedRequest.refreshLatest,
           );
           return;
         }
@@ -143,6 +156,7 @@ interface PendingIndexSyncRetry {
   uid: string;
   revision: number;
   hiddenFolderIds: number[];
+  refreshLatest?: boolean;
   attempts: number;
   nextAttemptAt: number;
 }
@@ -189,7 +203,11 @@ function scheduleIndexSyncRetry(uid: string, retryAt: number): void {
 }
 
 /** 立即启动本地优先的索引同步；错误会以账号隔离状态持久化并退避重试。 */
-export function queueIndexSyncWithRetry(uid: string, hiddenFolderIds: number[]): void {
+export function queueIndexSyncWithRetry(
+  uid: string,
+  hiddenFolderIds: number[],
+  refreshLatest = false,
+): void {
   if (!uid) return;
   const key = `${INDEX_SYNC_RETRY_PREFIX}${uid}`;
   const previous = readPendingIndexSyncRetry(uid);
@@ -197,6 +215,7 @@ export function queueIndexSyncWithRetry(uid: string, hiddenFolderIds: number[]):
     uid,
     revision: (previous?.revision ?? 0) + 1,
     hiddenFolderIds: [...hiddenFolderIds],
+    refreshLatest: refreshLatest || previous?.refreshLatest === true,
     attempts: previous?.attempts ?? 0,
     nextAttemptAt: Date.now(),
   } satisfies PendingIndexSyncRetry);
@@ -224,7 +243,12 @@ export function resumePendingIndexSyncRetry(uid: string): Promise<void> {
     }
     if (useAuthStore.getState().userId !== uid) return;
     if (!await waitForIndexSyncQueueToSettle(uid)) return;
-    await useSyncStore.getState().startSync(uid, pending.hiddenFolderIds, false);
+    await useSyncStore.getState().startSync(
+      uid,
+      pending.hiddenFolderIds,
+      false,
+      pending.refreshLatest ?? false,
+    );
     if (useSyncStore.getState().syncStatus === 'syncing') {
       if (!await waitForIndexSyncQueueToSettle(uid)) return;
     }
