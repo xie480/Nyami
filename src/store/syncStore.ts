@@ -164,6 +164,7 @@ interface PendingIndexSyncRetry {
 const INDEX_SYNC_RETRY_PREFIX = 'pendingGlobalIndexSyncRetry:';
 const indexSyncRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const indexSyncRetryWorkers = new Map<string, Promise<void>>();
+const indexSyncRetryNowRequested = new Set<string>();
 
 function waitForActiveIndexSync(): Promise<void> {
   if (useSyncStore.getState().syncStatus !== 'syncing') return Promise.resolve();
@@ -223,10 +224,20 @@ export function queueIndexSyncWithRetry(
 }
 
 /** 登录恢复时继续处理上次中断或失败的本地索引同步意图。 */
-export function resumePendingIndexSyncRetry(uid: string): Promise<void> {
+export function resumePendingIndexSyncRetry(
+  uid: string,
+  options: {retryNow?: boolean} = {},
+): Promise<void> {
   if (!uid || useAuthStore.getState().userId !== uid) return Promise.resolve();
   const active = indexSyncRetryWorkers.get(uid);
-  if (active) return active;
+  if (active) {
+    if (!options.retryNow) return active;
+    indexSyncRetryNowRequested.add(uid);
+    return active.then(async () => {
+      if (!indexSyncRetryNowRequested.delete(uid)) return;
+      await resumePendingIndexSyncRetry(uid, {retryNow: true});
+    });
+  }
   const timer = indexSyncRetryTimers.get(uid);
   if (timer) {
     clearTimeout(timer);
@@ -237,7 +248,7 @@ export function resumePendingIndexSyncRetry(uid: string): Promise<void> {
   worker = (async () => {
     const pending = readPendingIndexSyncRetry(uid);
     if (!pending) return;
-    if (pending.nextAttemptAt > Date.now()) {
+    if (pending.nextAttemptAt > Date.now() && !options.retryNow) {
       scheduleIndexSyncRetry(uid, pending.nextAttemptAt);
       return;
     }

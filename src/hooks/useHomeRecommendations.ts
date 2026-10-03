@@ -5,6 +5,7 @@ import {generateHomeFeed} from '../services/homeRecommendationService';
 import {useAuthStore} from '../store/authStore';
 import {useRecommendationStore} from '../store/recommendationStore';
 import type {HomeRecommendationFeed} from '../store/recommendationStore';
+import {useNetworkRecoveryRefresh} from './useNetworkRecoveryRefresh';
 
 let activeRecommendationRefresh: {
   uid: string;
@@ -78,6 +79,11 @@ export function useHomeRecommendations() {
     );
     return () => clearTimeout(timer);
   }, [uid, isFocused, lastSuccessfulRefreshAt, refresh]);
+
+  useNetworkRecoveryRefresh(
+    () => refresh('manual'),
+    Boolean(uid && feed.error && !refreshing),
+  );
 
   return {uid, feed, refreshing, refresh};
 }

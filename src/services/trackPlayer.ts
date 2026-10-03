@@ -41,6 +41,11 @@ let queueEndRecoveryPromise: Promise<void> | null = null;
 let nativeQueueMutation: Promise<void> = Promise.resolve();
 let playbackIntent = false;
 let userPauseRevision = 0;
+let pendingNetworkPlaybackRetry: {
+  bvid: string;
+  cid?: number;
+  pauseRevision: number;
+} | null = null;
 let personalizedPageController: AbortController | null = null;
 let audioTransitionRevision = 0;
 let volumeFadeRevision = 0;
@@ -1737,10 +1742,16 @@ async function processPlaybackError(
     return;
   }
   if (!playbackIntent) {
+    pendingNetworkPlaybackRetry = null;
     usePlayerStore.getState().setPlaybackError('播放失败，请检查网络后重试');
     return;
   }
-  if (netStatus.type === 'none') {
+  if (!netStatus.isOnline) {
+    pendingNetworkPlaybackRetry = {
+      bvid,
+      ...(cid != null ? {cid} : {}),
+      pauseRevision,
+    };
     usePlayerStore.getState().setPlaybackError('网络不可用，恢复网络后可重试');
     return;
   }
@@ -1845,6 +1856,7 @@ async function processPlaybackError(
       return;
     }
     if (replacementResult === 'replaced' || replacementResult === 'paused') {
+      pendingNetworkPlaybackRetry = null;
       usePlayerStore.getState().setPlaybackError(null);
       maintainQueueBuffer().catch(() => {});
       return;
@@ -1933,6 +1945,45 @@ export async function retryCurrentTrack(): Promise<void> {
   } catch (error) {
     LoggerService.error('TrackPlayer', 'retryCurrentTrack', '手动重试播放失败', error);
     usePlayerStore.getState().setPlaybackError('重试失败，请稍后再试');
+  }
+}
+
+/** 网络恢复时只重试因离线失败且用户播放意图仍有效的同一曲目。 */
+export async function retryInterruptedPlaybackAfterNetworkRecovery(): Promise<void> {
+  const pending = pendingNetworkPlaybackRetry;
+  if (!pending) return;
+
+  if (
+    !netStatus.isOnline ||
+    !playbackIntent ||
+    pending.pauseRevision !== userPauseRevision ||
+    usePlayerStore.getState().currentBvid !== pending.bvid
+  ) {
+    pendingNetworkPlaybackRetry = null;
+    return;
+  }
+
+  try {
+    const activeTrack = await TrackPlayer.getActiveTrack();
+    if (
+      !playbackIntent ||
+      pending.pauseRevision !== userPauseRevision ||
+      usePlayerStore.getState().currentBvid !== pending.bvid ||
+      activeTrack?.id !== pending.bvid ||
+      (pending.cid != null && (activeTrack as any).cid !== pending.cid)
+    ) {
+      pendingNetworkPlaybackRetry = null;
+      return;
+    }
+    pendingNetworkPlaybackRetry = null;
+    await handlePlaybackError(undefined, true, pending.pauseRevision);
+  } catch (error) {
+    LoggerService.warn(
+      'TrackPlayer',
+      'networkRecovery',
+      '网络恢复后重试当前曲目失败',
+      error,
+    );
   }
 }
 

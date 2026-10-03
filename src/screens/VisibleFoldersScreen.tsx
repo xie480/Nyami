@@ -16,6 +16,7 @@ import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
 import { useTheme } from '../theme';
 import type { FavoriteFolder, ImportedPlaylist } from '../types/domain';
 import {queueIndexSyncWithRetry} from '../store/syncStore';
+import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
 
 type PreferenceItem =
   | { key: string; kind: 'owned'; folder: FavoriteFolder }
@@ -73,6 +74,11 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
     }
     setRefreshing(false);
   }, [uid, setImportedCatalog]);
+
+  useNetworkRecoveryRefresh(() => {
+    setRefreshing(true);
+    return load(true);
+  }, Boolean(uid && (error || sourceError)));
 
   useEffect(() => { load(); }, [load]);
 

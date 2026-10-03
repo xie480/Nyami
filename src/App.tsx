@@ -5,13 +5,14 @@ import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler, PermissionsAndroid, StatusBar } from 'react-native';
+import { AppState, View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler, PermissionsAndroid, StatusBar } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, useTheme } from './theme';
 import LoggerService from './services/LoggerService';
 import ToastNotification, { ToastNotificationRef, ToastConfig } from './components/ToastNotification';
 import { setupPlayer } from './services/trackPlayer';
 import { netStatus } from './services/netStatus';
+import { initializeNetworkRecovery } from './services/networkRecoveryService';
 import { HomeScreen } from './screens/HomeScreen';
 import { FoldersScreen } from './screens/FoldersScreen';
 import { VideosScreen } from './screens/VideosScreen';
@@ -152,17 +153,26 @@ export default function App() {
 
     initAuth();
     setupPlayer();
-    netStatus.init();
-    const unsubscribe = netStatus.onChange((type) => {
-      const nowOnline = type !== 'none';
+    const stopNetworkRecovery = initializeNetworkRecovery();
+    const unsubscribe = netStatus.onStatusChange((status) => {
+      const nowOnline = status.isOnline ?? status.type !== 'none';
       setIsOnline(nowOnline);
-      if (!nowOnline) {
+      if (!nowOnline && status.previousIsOnline !== false) {
         const message = '网络已断开，当前仅可播放本地缓存音频';
         if (Platform.OS === 'android') {
           ToastAndroid.show(message, ToastAndroid.LONG);
         } else {
           Alert.alert('网络断开', message);
         }
+      }
+    });
+    netStatus.init();
+    let previousAppState = AppState.currentState;
+    const appStateSubscription = AppState.addEventListener('change', nextState => {
+      const returnedToForeground = nextState === 'active' && previousAppState !== 'active';
+      previousAppState = nextState;
+      if (returnedToForeground) {
+        void netStatus.refresh().catch(() => {});
       }
     });
 
@@ -190,6 +200,8 @@ export default function App() {
 
     return () => {
       unsubscribe();
+      stopNetworkRecovery();
+      appStateSubscription.remove();
       backHandler.remove();
       stopProgressPolling();
     };

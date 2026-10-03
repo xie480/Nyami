@@ -34,6 +34,7 @@ import { useSyncStore } from '../store/syncStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FavoriteVideo, ImportedPlaylist } from '../types/domain';
 import { useFolderDataStore, SortOption } from '../store/folderDataStore';
+import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
 
 // ========== 精细粒度的 Item 组件（React.memo 消除无关重渲染） ==========
 interface VideoItemProps {
@@ -182,7 +183,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
    * 内置防抖：若已有刷新任务在执行则静默忽略。
    * 刷新完成后通过 Toast（Android）或 Alert（iOS）反馈结果。
    */
-  const handleRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(async (showFeedback = true) => {
     // Step 1: 防抖检测，避免重复触发
     if (refreshLockRef.current || isRefreshing || loading) return;
     refreshLockRef.current = true;
@@ -203,7 +204,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
         addedVideos,
       );
       // Step 2: 组件卸载后跳过 UI 反馈
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || !showFeedback) return;
 
       if (newCount > 0) {
         const msg = `新视频同步完成，共 ${newCount} 个`;
@@ -221,7 +222,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
         }
       }
     } catch (e: any) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || !showFeedback) return;
       const msg = e.message || '刷新失败，请稍后重试';
       if (Platform.OS === 'android') {
         ToastAndroid.show(msg, ToastAndroid.SHORT);
@@ -235,6 +236,15 @@ export const VideosScreen = ({ route, navigation }: any) => {
       }, 500);
     }
   }, [mediaId, source, refreshFolder, refreshImportedSource, isRefreshing, loading]);
+
+  useNetworkRecoveryRefresh(async () => {
+    const state = useFolderDataStore.getState();
+    if (state.list.length === 0 && state.error) {
+      await state.loadMore();
+      return;
+    }
+    await handleRefresh(false);
+  }, Boolean(error));
   // ========== 增量刷新按钮逻辑结束 ==========
 
   useEffect(() => {

@@ -100,6 +100,7 @@ const FAVORITE_FOLDER_ALIAS_PREFIX = 'favoriteFolderAliases:';
 const favoriteFolderUpdateListeners = new Set<(uid: string) => void>();
 const favoriteMutationWorkers = new Map<string, Promise<void>>();
 const favoriteMutationRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const favoriteMutationRetryNowRequested = new Set<string>();
 const favoriteMutationLocalWriteMutex = new Mutex();
 
 class RetryMutationAtError extends Error {
@@ -549,10 +550,19 @@ async function processSetFavorite(task: SetFavoriteMutation): Promise<void> {
   cacheFolderSnapshot(task.uid, response.list ?? []);
 }
 
-export async function resumePendingBiliMutations(uid: string): Promise<void> {
+export async function resumePendingBiliMutations(
+  uid: string,
+  options: {retryNow?: boolean} = {},
+): Promise<void> {
   if (!uid || useAuthStore.getState().userId !== uid) return;
   const active = favoriteMutationWorkers.get(uid);
-  if (active) return active;
+  if (active) {
+    if (!options.retryNow) return active;
+    favoriteMutationRetryNowRequested.add(uid);
+    await active;
+    if (!favoriteMutationRetryNowRequested.delete(uid)) return;
+    return resumePendingBiliMutations(uid, {retryNow: true});
+  }
   const pendingTimer = favoriteMutationRetryTimers.get(uid);
   if (pendingTimer) {
     clearTimeout(pendingTimer);
@@ -561,6 +571,7 @@ export async function resumePendingBiliMutations(uid: string): Promise<void> {
 
   let worker: Promise<void>;
   worker = (async () => {
+    const retriedDuringRecovery = new Set<string>();
     while (useAuthStore.getState().userId === uid) {
       const pending = readFavoriteMutationQueue()
         .filter(mutation => mutation.uid === uid)
@@ -576,7 +587,9 @@ export async function resumePendingBiliMutations(uid: string): Promise<void> {
       );
       const now = Date.now();
       const task = pending.find(mutation =>
-        mutation.nextAttemptAt <= now &&
+        (mutation.nextAttemptAt <= now || (
+          options.retryNow === true && !retriedDuringRecovery.has(mutation.id)
+        )) &&
         !(mutation.kind === 'favorite' &&
           mutation.folderId < 0 &&
           unresolvedTemporaryFolderIds.has(mutation.folderId)),
@@ -588,6 +601,7 @@ export async function resumePendingBiliMutations(uid: string): Promise<void> {
         scheduleFavoriteMutationRetry(uid, Number.isFinite(retryAt) ? retryAt : now + 5_000);
         return;
       }
+      if (options.retryNow) retriedDuringRecovery.add(task.id);
       try {
         if (task.kind === 'favorite' && !task.localApplied) {
           await applyLocalFavoriteMutation(task);

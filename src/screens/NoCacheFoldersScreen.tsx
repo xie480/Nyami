@@ -14,6 +14,7 @@ import { favoriteService } from '../services';
 import {resolveFavoriteFolderId} from '../services/favoriteService';
 import { useTheme } from '../theme';
 import type { FavoriteFolder } from '../types/domain';
+import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
 
 export const NoCacheFoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
@@ -39,6 +40,11 @@ export const NoCacheFoldersScreen = ({ navigation }: any) => {
       setRefreshing(false);
     }
   }, [uid]);
+
+  useNetworkRecoveryRefresh(() => {
+    setRefreshing(true);
+    return load(true);
+  }, Boolean(uid && error));
 
   useEffect(() => { load(); }, [load]);
 

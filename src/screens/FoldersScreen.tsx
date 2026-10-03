@@ -42,6 +42,7 @@ import type {
 } from '../types/domain';
 import FastImage from 'react-native-fast-image';
 import { formatDuration } from '../utils/format';
+import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
 
 interface HomePlaylistItem {
   sourceKey: string;
@@ -250,6 +251,11 @@ export const FoldersScreen = ({ navigation }: any) => {
     },
     [uid, setImportedCatalog]
   );
+
+  useNetworkRecoveryRefresh(() => {
+    setRefreshing(true);
+    return load(true);
+  }, Boolean(uid && (error || importedSyncError)));
 
   const saveFolderCover = useCallback(
     (expectedUid: string, folderId: number, cover: string) => {

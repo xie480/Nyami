@@ -15,6 +15,7 @@ import {
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useFocusEffect} from '@react-navigation/native';
+import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {FavoriteFolderPickerSheet} from '../components/FavoriteFolderPickerSheet';
 import {GlassView} from '../components/GlassView';
@@ -338,6 +339,11 @@ export const SearchScreen = ({navigation}: any) => {
     tagFilter,
     uid,
   ]);
+
+  useNetworkRecoveryRefresh(() => {
+    if (mode === 'bilibili') return refreshOnlineResults();
+    return loadFavorites(true);
+  }, Boolean(error && (mode === 'favorites' ? uid : query.trim() || tagFilter.trim())));
 
   useEffect(() => subscribeOnlineSearchRefresh(snapshot => {
     if (mode !== 'bilibili') return;

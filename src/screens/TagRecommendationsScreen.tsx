@@ -12,6 +12,7 @@ import FastImage from 'react-native-fast-image';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useFocusEffect, useIsFocused} from '@react-navigation/native';
+import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Button} from '../components/Button';
 import {Loading} from '../components/Loading';
@@ -438,6 +439,8 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
       };
     }, [loadSnapshot]),
   );
+
+  useNetworkRecoveryRefresh(() => loadSnapshot(true), Boolean(uid && error));
 
   useEffect(() => {
     if (!uid) return;

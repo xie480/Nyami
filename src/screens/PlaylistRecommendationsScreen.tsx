@@ -27,6 +27,7 @@ import {useAuthStore} from '../store/authStore';
 import {useRecommendationStore} from '../store/recommendationStore';
 import {useTheme} from '../theme';
 import type {CollectionRecommendation} from '../types/domain';
+import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
 
 /** 展示首页个性化筛选出的外部收藏夹与合集，详情沿用现有视频列表路由。 */
 export const PlaylistRecommendationsScreen = ({navigation}: any) => {
@@ -45,6 +46,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshingCollections, setRefreshingCollections] = useState(false);
   const [checkedNoNewCollections, setCheckedNoNewCollections] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const loadingMoreRef = useRef(false);
   const refreshingCollectionsRef = useRef(false);
   const loadControllerRef = useRef<AbortController | null>(null);
@@ -59,6 +61,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
     setLoadingMore(false);
     setRefreshingCollections(false);
     setCheckedNoNewCollections(false);
+    setRefreshFailed(false);
     hasScrolledListRef.current = false;
     canRefreshAtEndRef.current = true;
     setCollections(feed.collections);
@@ -75,6 +78,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
   const refreshCollections = useCallback(async () => {
     if (!uid || refreshingCollectionsRef.current || loadingMoreRef.current) return;
     refreshingCollectionsRef.current = true;
+    setRefreshFailed(false);
     setRefreshingCollections(true);
     setCheckedNoNewCollections(false);
     loadControllerRef.current?.abort();
@@ -91,6 +95,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
         collections.map(source => source.sourceKey),
       );
       if (controller.signal.aborted || useAuthStore.getState().userId !== uid) return;
+      setRefreshFailed(false);
       const knownSourceKeys = new Set(collections.map(source => source.sourceKey));
       const nextCollections = result.collections.filter(source => {
         if (knownSourceKeys.has(source.sourceKey)) return false;
@@ -104,6 +109,7 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
       setHasMore(result.hasMore);
     } catch (error) {
       if (!controller.signal.aborted) {
+        setRefreshFailed(true);
         const message = error instanceof Error ? error.message : '更新合集推荐失败';
         if (Platform.OS === 'android') {
           ToastAndroid.show(message, ToastAndroid.SHORT);
@@ -119,6 +125,8 @@ export const PlaylistRecommendationsScreen = ({navigation}: any) => {
       setRefreshingCollections(false);
     }
   }, [collections, uid]);
+
+  useNetworkRecoveryRefresh(() => refreshCollections(), Boolean(uid && refreshFailed));
 
   const refreshAtEnd = useCallback(() => {
     if (!uid || refreshingCollectionsRef.current || loadingMoreRef.current) return;

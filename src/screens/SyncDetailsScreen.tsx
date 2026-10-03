@@ -12,6 +12,7 @@ import { IconButton } from '../components/IconButton';
 import { Button } from '../components/Button';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
+import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
 
 interface FolderSyncInfo {
   folder: FavoriteFolder;
@@ -44,6 +45,7 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
   const t = useTheme();
   const uid = useAuthStore((s) => s.userId);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [foldersInfo, setFoldersInfo] = useState<FolderSyncInfo[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
@@ -51,6 +53,7 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
   const loadData = useCallback(async () => {
     if (!uid) return;
     setLoading(true);
+    setLoadFailed(false);
     try {
       const folders = await favoriteService.getFolders(uid);
       const playlistMetas = await getAllPlaylistMeta();
@@ -65,11 +68,14 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
       }));
       setFoldersInfo(info);
     } catch (e) {
+      setLoadFailed(true);
       LoggerService.error('SyncDetailsScreen', 'loadData', 'Failed to load sync details', e);
     } finally {
       setLoading(false);
     }
   }, [uid]);
+
+  useNetworkRecoveryRefresh(loadData, Boolean(uid && loadFailed));
 
   useEffect(() => {
     loadData();
