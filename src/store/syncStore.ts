@@ -6,6 +6,7 @@ import {
   resumeFavoriteTagsBackfill,
 } from '../services/tagRecommendationService';
 import {useAuthStore} from './authStore';
+import {useSettingsStore} from './settingsStore';
 import {useImportedPlaylistStore} from './importedPlaylistStore';
 import {storage} from '../core/storage';
 import {
@@ -254,11 +255,14 @@ export function resumePendingIndexSyncRetry(
     }
     if (useAuthStore.getState().userId !== uid) return;
     if (!await waitForIndexSyncQueueToSettle(uid)) return;
+    const refreshLatest =
+      pending.refreshLatest === true &&
+      useSettingsStore.getState().autoRefreshFavoritesOnLaunch;
     await useSyncStore.getState().startSync(
       uid,
       pending.hiddenFolderIds,
       false,
-      pending.refreshLatest ?? false,
+      refreshLatest,
     );
     if (useSyncStore.getState().syncStatus === 'syncing') {
       if (!await waitForIndexSyncQueueToSettle(uid)) return;

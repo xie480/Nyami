@@ -39,6 +39,7 @@ interface Settings {
   cachePersonalizedRecommendations: boolean;
   homeRefreshMode: HomeRefreshMode;
   homeRefreshIntervalHours: number;
+  autoRefreshFavoritesOnLaunch: boolean;
 }
 
 interface SettingsState extends Settings {
@@ -59,6 +60,7 @@ interface SettingsState extends Settings {
   setCachePersonalizedRecommendations: (enabled: boolean) => void;
   setHomeRefreshMode: (mode: HomeRefreshMode) => void;
   setHomeRefreshIntervalHours: (hours: number) => void;
+  setAutoRefreshFavoritesOnLaunch: (enabled: boolean) => void;
 }
 
 function normalizeTagBlacklist(keywords: string[]): string[] {
@@ -96,6 +98,7 @@ export const useSettingsStore = create<SettingsState>()(
       cachePersonalizedRecommendations: false,
       homeRefreshMode: 'automatic',
       homeRefreshIntervalHours: config.recommendations.defaultHomeRefreshIntervalHours,
+      autoRefreshFavoritesOnLaunch: true,
       setQuality: (q) => set({ quality: q }),
       setAutoCacheOnWifi: (v) => set({ autoCacheOnWifi: v }),
       setWifiOnly: (v) => set({ wifiOnly: v }),
@@ -140,6 +143,8 @@ export const useSettingsStore = create<SettingsState>()(
         }
         set({homeRefreshIntervalHours: hours});
       },
+      setAutoRefreshFavoritesOnLaunch: (enabled) =>
+        set({autoRefreshFavoritesOnLaunch: enabled}),
     }),
     {
       name: 'settingsStore',

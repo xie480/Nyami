@@ -254,6 +254,7 @@ export const SettingsScreen = ({ navigation }: any) => {
     recommendationDurationFilterEnabled, recommendationDurationLimitMinutes,
     recommendationTagBlacklist, cachePersonalizedRecommendations,
     homeRefreshMode, homeRefreshIntervalHours,
+    autoRefreshFavoritesOnLaunch,
     setQuality, setAutoCacheOnWifi,
     setWifiOnly, setExpandMultiPart, setThemeMode,
     setCustomBackgroundImage, setGlassBlurAmount,
@@ -261,6 +262,7 @@ export const SettingsScreen = ({ navigation }: any) => {
     setRecommendationDurationFilterEnabled, setRecommendationDurationLimitMinutes,
     setRecommendationTagBlacklist, setCachePersonalizedRecommendations,
     setHomeRefreshMode, setHomeRefreshIntervalHours,
+    setAutoRefreshFavoritesOnLaunch,
   } = useSettingsStore(useShallow(state => ({
     quality: state.quality,
     autoCacheOnWifi: state.autoCacheOnWifi,
@@ -277,6 +279,7 @@ export const SettingsScreen = ({ navigation }: any) => {
     cachePersonalizedRecommendations: state.cachePersonalizedRecommendations,
     homeRefreshMode: state.homeRefreshMode,
     homeRefreshIntervalHours: state.homeRefreshIntervalHours,
+    autoRefreshFavoritesOnLaunch: state.autoRefreshFavoritesOnLaunch,
     setQuality: state.setQuality,
     setAutoCacheOnWifi: state.setAutoCacheOnWifi,
     setWifiOnly: state.setWifiOnly,
@@ -291,6 +294,7 @@ export const SettingsScreen = ({ navigation }: any) => {
     setCachePersonalizedRecommendations: state.setCachePersonalizedRecommendations,
     setHomeRefreshMode: state.setHomeRefreshMode,
     setHomeRefreshIntervalHours: state.setHomeRefreshIntervalHours,
+    setAutoRefreshFavoritesOnLaunch: state.setAutoRefreshFavoritesOnLaunch,
   })));
   // UID management moved to authStore (userId, userInfo)
 
@@ -577,6 +581,21 @@ export const SettingsScreen = ({ navigation }: any) => {
           navigation={navigation}
           showDialog={showDialog}
         />
+
+        <Text style={s.section}>启动与同步</Text>
+        <View style={s.group}>
+          <ListItem
+            title="启动时拉取收藏夹最新视频"
+            subtitle="重新启动应用时增量检查主页可见目录；仍可手动同步"
+            icon="sync"
+            right={
+              <Switch
+                value={autoRefreshFavoritesOnLaunch}
+                onValueChange={setAutoRefreshFavoritesOnLaunch}
+              />
+            }
+          />
+        </View>
 
         <Text style={s.section}>首页刷新</Text>
         <View style={s.group}>

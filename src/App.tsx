@@ -230,7 +230,10 @@ export default function App() {
       }
       if (uid && useAuthStore.getState().userId === uid) {
         void resumePendingBiliMutations(uid);
-        if (!startupIndexRefreshUidsRef.current.has(uid)) {
+        if (
+          useSettingsStore.getState().autoRefreshFavoritesOnLaunch &&
+          !startupIndexRefreshUidsRef.current.has(uid)
+        ) {
           startupIndexRefreshUidsRef.current.add(uid);
           // 每个账号在当前应用进程内只触发一次；后台重试由持久化队列负责。
           queueIndexSyncWithRetry(
