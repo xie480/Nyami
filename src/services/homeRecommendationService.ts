@@ -310,7 +310,11 @@ export async function generateHomeFeed(
   if (!uid || useAuthStore.getState().userId !== uid) {
     throw new Error('B 站账号已变化，请刷新推荐');
   }
-  const importedSourcesPromise = importedPlaylistService.getCollectedPlaylists(uid, true, signal);
+  const importedSourcesPromise = importedPlaylistService.getCollectedPlaylists(
+    uid,
+    false,
+    signal,
+  );
   const [context, sources] = await Promise.all([
     loadPersonalizationContext(uid, signal, importedSourcesPromise),
     importedSourcesPromise,
