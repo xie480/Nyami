@@ -43,7 +43,11 @@ interface RecommendationState {
   refreshingUid: string | null;
   refreshSequence: number;
   getFeed: (uid: string) => HomeRecommendationFeed;
-  tryBeginAutomaticRefresh: (uid: string, now: number) => number | null;
+  tryBeginAutomaticRefresh: (
+    uid: string,
+    now: number,
+    refreshIntervalMs?: number,
+  ) => number | null;
   beginManualRefresh: (uid: string) => number | null;
   finishRefresh: (uid: string, sequence: number, feed: HomeRecommendationFeed) => void;
   failRefresh: (uid: string, sequence: number, error: string) => void;
@@ -57,12 +61,16 @@ export const useRecommendationStore = create<RecommendationState>()(
       refreshingUid: null,
       refreshSequence: 0,
       getFeed: uid => get().feedsByUid[uid] ?? EMPTY_HOME_RECOMMENDATION_FEED,
-      tryBeginAutomaticRefresh: (uid, now) => {
+      tryBeginAutomaticRefresh: (
+        uid,
+        now,
+        refreshIntervalMs = config.recommendations.homeRefreshIntervalMs,
+      ) => {
         const state = get();
         const lastRefreshAt = state.lastSuccessfulRefreshAtByUid[uid] ?? 0;
         if (
           !uid ||
-          now - lastRefreshAt < config.recommendations.homeRefreshIntervalMs ||
+          now - lastRefreshAt < refreshIntervalMs ||
           state.refreshingUid === uid
         ) {
           return null;

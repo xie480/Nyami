@@ -39,6 +39,8 @@
 
   /** 首页推荐和搜索的产品边界值。 */
   recommendations: {
+    homeRefreshIntervalOptionsHours: [1, 3, 5, 8, 12, 24],
+    defaultHomeRefreshIntervalHours: 5,
     homeRefreshIntervalMs: 5 * 60 * 60 * 1000,
     recommendationHistoryTtlMs: 7 * 24 * 60 * 60 * 1000,
     defaultDurationLimitMinutes: 5,

@@ -1,10 +1,10 @@
 import {useCallback, useEffect} from 'react';
 import {useFocusEffect, useIsFocused} from '@react-navigation/native';
-import {config} from '../config';
 import {generateHomeFeed} from '../services/homeRecommendationService';
 import {useAuthStore} from '../store/authStore';
 import {useRecommendationStore} from '../store/recommendationStore';
 import type {HomeRecommendationFeed} from '../store/recommendationStore';
+import {useSettingsStore} from '../store/settingsStore';
 import {useNetworkRecoveryRefresh} from './useNetworkRecoveryRefresh';
 
 let activeRecommendationRefresh: {
@@ -12,10 +12,12 @@ let activeRecommendationRefresh: {
   controller: AbortController;
 } | null = null;
 
-/** 首页与合集页共用同一份 UID 隔离快照、五小时自动刷新闸门和歌曲分页状态。 */
+/** 首页与合集页共用一份 UID 隔离快照、可配置的自动刷新闸门和歌曲分页状态。 */
 export function useHomeRecommendations() {
   const uid = useAuthStore(state => state.userId);
   const isFocused = useIsFocused();
+  const homeRefreshMode = useSettingsStore(state => state.homeRefreshMode);
+  const homeRefreshIntervalHours = useSettingsStore(state => state.homeRefreshIntervalHours);
   const feed: HomeRecommendationFeed = useRecommendationStore(state =>
     uid
       ? state.feedsByUid[uid] ?? state.getFeed(uid)
@@ -30,9 +32,17 @@ export function useHomeRecommendations() {
     if (!uid) {
       return false;
     }
+    const settings = useSettingsStore.getState();
+    if (mode === 'automatic' && settings.homeRefreshMode !== 'automatic') {
+      return false;
+    }
     const store = useRecommendationStore.getState();
     const started = mode === 'automatic'
-      ? store.tryBeginAutomaticRefresh(uid, Date.now())
+      ? store.tryBeginAutomaticRefresh(
+          uid,
+          Date.now(),
+          settings.homeRefreshIntervalHours * 60 * 60 * 1000,
+        )
       : store.beginManualRefresh(uid);
     if (started === null) {
       return false;
@@ -66,24 +76,48 @@ export function useHomeRecommendations() {
 
   useFocusEffect(
     useCallback(() => {
-      void refresh('automatic');
-    }, [refresh]),
+      if (homeRefreshMode === 'automatic') {
+        void refresh('automatic');
+      }
+    }, [homeRefreshMode, refresh]),
   );
 
   useEffect(() => {
-    if (!uid || !isFocused || !lastSuccessfulRefreshAt) return undefined;
-    const refreshDueAt = lastSuccessfulRefreshAt + config.recommendations.homeRefreshIntervalMs;
+    if (
+      !uid ||
+      !isFocused ||
+      homeRefreshMode !== 'automatic' ||
+      !lastSuccessfulRefreshAt
+    ) {
+      return undefined;
+    }
+    const refreshDueAt =
+      lastSuccessfulRefreshAt + homeRefreshIntervalHours * 60 * 60 * 1000;
     const timer = setTimeout(
       () => void refresh('automatic'),
       Math.max(0, refreshDueAt - Date.now()),
     );
     return () => clearTimeout(timer);
-  }, [uid, isFocused, lastSuccessfulRefreshAt, refresh]);
+  }, [
+    uid,
+    isFocused,
+    homeRefreshMode,
+    homeRefreshIntervalHours,
+    lastSuccessfulRefreshAt,
+    refresh,
+  ]);
 
   useNetworkRecoveryRefresh(
-    () => refresh('manual'),
+    () => refresh('automatic'),
     Boolean(uid && feed.error && !refreshing),
   );
 
-  return {uid, feed, refreshing, refresh};
+  return {
+    uid,
+    feed,
+    refreshing,
+    refresh,
+    homeRefreshMode,
+    homeRefreshIntervalHours,
+  };
 }

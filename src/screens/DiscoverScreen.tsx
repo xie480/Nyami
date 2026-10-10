@@ -35,7 +35,14 @@ function updateTimeLabel(timestamp: number | null): string {
 export const DiscoverScreen = ({navigation}: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const {uid, feed, refreshing, refresh} = useHomeRecommendations();
+  const {
+    uid,
+    feed,
+    refreshing,
+    refresh,
+    homeRefreshMode,
+    homeRefreshIntervalHours,
+  } = useHomeRecommendations();
   const biliAvatar = useAuthStore(state => state.userInfo?.avatar ?? '');
   const [failedAvatarUrl, setFailedAvatarUrl] = useState('');
   const setQueue = usePlayerStore(state => state.setQueue);
@@ -191,7 +198,11 @@ export const DiscoverScreen = ({navigation}: any) => {
         <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: t.spacing.md}}>
           <View>
             <Text style={{fontSize: t.fontSize.xxl, fontWeight: '800', color: t.colors.text}}>发现好音乐</Text>
-            <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 3}}>按你的收藏画像，每 5 小时挑一份灵感</Text>
+            <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 3}}>
+              {homeRefreshMode === 'automatic'
+                ? '按你的收藏画像，每 ' + homeRefreshIntervalHours + ' 小时挑一份灵感'
+                : '按你的收藏画像，按需手动刷新'}
+            </Text>
           </View>
           <TouchableOpacity
             accessibilityRole="button"
@@ -238,7 +249,11 @@ export const DiscoverScreen = ({navigation}: any) => {
                 {refreshing ? '正在为你生成推荐' : feed.updatedAt ? `推荐已更新 · ${updateTimeLabel(feed.updatedAt)}` : '首页打开时生成推荐'}
               </Text>
               <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 4}}>
-                {refreshing ? '读取收藏画像与 B 站推荐内容…' : '每 5 小时自动更新，需要时可手动刷新'}
+                {refreshing
+                  ? '读取收藏画像与 B 站推荐内容…'
+                  : homeRefreshMode === 'automatic'
+                    ? '每 ' + homeRefreshIntervalHours + ' 小时自动更新，需要时可手动刷新'
+                    : '手动模式 · 下拉或点击刷新'}
               </Text>
             </View>
             <TouchableOpacity

@@ -5,6 +5,7 @@ import { config } from '../config';
 import type { Quality } from '../types/domain';
 
 export type ThemeMode = 'system' | 'light' | 'dark' | 'glass-light' | 'glass-dark';
+export type HomeRefreshMode = 'automatic' | 'manual';
 
 export const PLAYER_ARTWORK_BLUR = {
   min: 0,
@@ -36,6 +37,8 @@ interface Settings {
   recommendationDurationLimitMinutes: number;
   recommendationTagBlacklist: string[];
   cachePersonalizedRecommendations: boolean;
+  homeRefreshMode: HomeRefreshMode;
+  homeRefreshIntervalHours: number;
 }
 
 interface SettingsState extends Settings {
@@ -54,6 +57,8 @@ interface SettingsState extends Settings {
   setRecommendationDurationLimitMinutes: (minutes: number) => void;
   setRecommendationTagBlacklist: (keywords: string[]) => void;
   setCachePersonalizedRecommendations: (enabled: boolean) => void;
+  setHomeRefreshMode: (mode: HomeRefreshMode) => void;
+  setHomeRefreshIntervalHours: (hours: number) => void;
 }
 
 function normalizeTagBlacklist(keywords: string[]): string[] {
@@ -89,6 +94,8 @@ export const useSettingsStore = create<SettingsState>()(
       recommendationDurationLimitMinutes: config.recommendations.defaultDurationLimitMinutes,
       recommendationTagBlacklist: [],
       cachePersonalizedRecommendations: false,
+      homeRefreshMode: 'automatic',
+      homeRefreshIntervalHours: config.recommendations.defaultHomeRefreshIntervalHours,
       setQuality: (q) => set({ quality: q }),
       setAutoCacheOnWifi: (v) => set({ autoCacheOnWifi: v }),
       setWifiOnly: (v) => set({ wifiOnly: v }),
@@ -126,6 +133,13 @@ export const useSettingsStore = create<SettingsState>()(
         set({recommendationTagBlacklist: normalizeTagBlacklist(keywords)}),
       setCachePersonalizedRecommendations: (enabled) =>
         set({cachePersonalizedRecommendations: enabled}),
+      setHomeRefreshMode: (mode) => set({homeRefreshMode: mode}),
+      setHomeRefreshIntervalHours: (hours) => {
+        if (!config.recommendations.homeRefreshIntervalOptionsHours.includes(hours)) {
+          return;
+        }
+        set({homeRefreshIntervalHours: hours});
+      },
     }),
     {
       name: 'settingsStore',

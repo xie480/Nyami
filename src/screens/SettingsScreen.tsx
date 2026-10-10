@@ -253,12 +253,14 @@ export const SettingsScreen = ({ navigation }: any) => {
     mixWithOthers,
     recommendationDurationFilterEnabled, recommendationDurationLimitMinutes,
     recommendationTagBlacklist, cachePersonalizedRecommendations,
+    homeRefreshMode, homeRefreshIntervalHours,
     setQuality, setAutoCacheOnWifi,
     setWifiOnly, setExpandMultiPart, setThemeMode,
     setCustomBackgroundImage, setGlassBlurAmount,
     setMixWithOthers,
     setRecommendationDurationFilterEnabled, setRecommendationDurationLimitMinutes,
     setRecommendationTagBlacklist, setCachePersonalizedRecommendations,
+    setHomeRefreshMode, setHomeRefreshIntervalHours,
   } = useSettingsStore(useShallow(state => ({
     quality: state.quality,
     autoCacheOnWifi: state.autoCacheOnWifi,
@@ -273,6 +275,8 @@ export const SettingsScreen = ({ navigation }: any) => {
     recommendationDurationLimitMinutes: state.recommendationDurationLimitMinutes,
     recommendationTagBlacklist: state.recommendationTagBlacklist,
     cachePersonalizedRecommendations: state.cachePersonalizedRecommendations,
+    homeRefreshMode: state.homeRefreshMode,
+    homeRefreshIntervalHours: state.homeRefreshIntervalHours,
     setQuality: state.setQuality,
     setAutoCacheOnWifi: state.setAutoCacheOnWifi,
     setWifiOnly: state.setWifiOnly,
@@ -285,6 +289,8 @@ export const SettingsScreen = ({ navigation }: any) => {
     setRecommendationDurationLimitMinutes: state.setRecommendationDurationLimitMinutes,
     setRecommendationTagBlacklist: state.setRecommendationTagBlacklist,
     setCachePersonalizedRecommendations: state.setCachePersonalizedRecommendations,
+    setHomeRefreshMode: state.setHomeRefreshMode,
+    setHomeRefreshIntervalHours: state.setHomeRefreshIntervalHours,
   })));
   // UID management moved to authStore (userId, userInfo)
 
@@ -571,6 +577,62 @@ export const SettingsScreen = ({ navigation }: any) => {
           navigation={navigation}
           showDialog={showDialog}
         />
+
+        <Text style={s.section}>首页刷新</Text>
+        <View style={s.group}>
+          <ListItem
+            title="自动刷新首页推荐"
+            subtitle={
+              homeRefreshMode === 'automatic'
+                ? '首页打开时按设定间隔检查'
+                : '手动模式 · 下拉或点击刷新'
+            }
+            icon="refresh"
+            right={
+              <Switch
+                value={homeRefreshMode === 'automatic'}
+                onValueChange={enabled =>
+                  setHomeRefreshMode(enabled ? 'automatic' : 'manual')
+                }
+              />
+            }
+          />
+          <View style={s.sep} />
+          <View style={{paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md}}>
+            <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginBottom: t.spacing.sm}}>
+              自动刷新间隔
+            </Text>
+            <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.sm}}>
+              {config.recommendations.homeRefreshIntervalOptionsHours.map(hours => {
+                const selected = homeRefreshIntervalHours === hours;
+                return (
+                  <TouchableOpacity
+                    key={hours}
+                    accessibilityRole="button"
+                    accessibilityLabel={'首页自动刷新间隔 ' + hours + ' 小时'}
+                    accessibilityState={{selected}}
+                    onPress={() => setHomeRefreshIntervalHours(hours)}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: selected ? t.colors.primary : t.colors.divider,
+                      backgroundColor: selected ? t.colors.primary : t.colors.surfaceHigh,
+                      borderRadius: t.radius.full,
+                      paddingHorizontal: t.spacing.md,
+                      paddingVertical: t.spacing.sm,
+                    }}>
+                    <Text style={{
+                      fontSize: t.fontSize.sm,
+                      fontWeight: selected ? '700' : '500',
+                      color: selected ? '#FFFFFF' : t.colors.textSub,
+                    }}>
+                      {hours} 小时
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
 
         <Text style={s.section}>推荐</Text>
         <View style={s.group}>
