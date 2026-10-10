@@ -34,7 +34,7 @@ import {
   BILIBILI_REFRESH_PUBLIC_KEY,
   BILIBILI_REFRESH_TOKEN_CAPTURE_HOSTS,
   BILIBILI_REFRESH_TOKEN_PATTERN,
-  BILIBILI_REFRESH_CSRF_SELECTOR,
+  BILIBILI_REFRESH_CSRF_ID,
   BILIBILI_REFRESH_TOKEN_STORAGE_KEY,
   BILIBILI_CSRF_COOKIE_NAME,
   BILIBILI_COOKIE_REFRESH_SOURCE,
@@ -240,7 +240,7 @@ function buildCookieRefreshScript(
     source: BILIBILI_COOKIE_REFRESH_SOURCE,
     apiSuccessCode: BILIBILI_API_STATUS.success,
     csrfCookieName: BILIBILI_CSRF_COOKIE_NAME,
-    refreshCsrfSelector: BILIBILI_REFRESH_CSRF_SELECTOR,
+    refreshCsrfId: BILIBILI_REFRESH_CSRF_ID,
     successMessage: BILIBILI_WEBVIEW_MESSAGE.cookieRefreshSuccess,
     errorMessage: BILIBILI_WEBVIEW_MESSAGE.cookieRefreshError,
   });
@@ -277,7 +277,8 @@ function buildCookieRefreshScript(
       if (!correspondResponse.ok) throw new Error('correspond');
       var correspondHtml = await correspondResponse.text();
       var correspondDoc = new DOMParser().parseFromString(correspondHtml, 'text/html');
-      var refreshCsrf = (correspondDoc.querySelector(protocol.refreshCsrfSelector) || {}).textContent;
+      var refreshCsrfElement = correspondDoc.getElementById(protocol.refreshCsrfId);
+      var refreshCsrf = refreshCsrfElement ? refreshCsrfElement.textContent : '';
       var csrf = readCookie(protocol.csrfCookieName);
       if (!refreshCsrf || !csrf) throw new Error('csrf');
 

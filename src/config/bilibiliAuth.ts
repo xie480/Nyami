@@ -80,7 +80,7 @@ export const BILIBILI_COOKIE_NAMES = {
   sid: 'sid',
 } as const;
 export const BILIBILI_CSRF_COOKIE_NAME = BILIBILI_COOKIE_NAMES.csrf;
-export const BILIBILI_REFRESH_CSRF_SELECTOR = '#1-name';
+export const BILIBILI_REFRESH_CSRF_ID = '1-name';
 
 export const BILIBILI_AUTH_HOSTS = ['bilibili.com', 'biligame.com'] as const;
 export const BILIBILI_MAIN_HOSTS = [
