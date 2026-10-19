@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {FavoriteVideo, OnlineSearchQueueContext} from '../types/domain';
+import type {FavoriteSearchMode} from '../utils/favoriteSearch';
 import { storage } from '../core/storage';
 import { insertNext as tpInsertNext, removeFromQueue as tpRemoveFromQueue, reorderQueue as tpReorderQueue, appendQueue as tpAppendQueue } from '../services/trackPlayer';
 import { useProgressStore } from './progressStore';
@@ -54,7 +55,7 @@ export interface PlayContext {
   refreshKey?: string;
   sortOption?: string;
   searchQuery?: string;
-  favoriteSearch?: {uid: string; keyword: string};
+  favoriteSearch?: {uid: string; keyword: string; mode?: FavoriteSearchMode};
   /** 在线搜索结果队列的分页条件和当前页状态。 */
   onlineSearch?: OnlineSearchQueueContext;
   /** 标识个性化队列，以便独立控制自动缓存与按画像续页。 */

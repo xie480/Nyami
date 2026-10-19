@@ -46,6 +46,12 @@ import {useTheme} from '../theme';
 import {storage} from '../core/storage';
 import {formatDuration} from '../utils/format';
 import {getFavoriteSearchRefreshKey} from '../utils/playbackRefreshKey';
+import {
+  buildFavoriteSearchIndex,
+  filterFavoriteSearchIndex,
+  filterFavoriteVideos,
+} from '../utils/favoriteSearch';
+import type {FavoriteSearchMode} from '../utils/favoriteSearch';
 import type {FavoriteVideo, OnlineVideoSearchResult, OnlineVideoSearchSort} from '../types/domain';
 
 type SearchMode = 'bilibili' | 'favorites';
@@ -65,6 +71,7 @@ export const SearchScreen = ({navigation}: any) => {
   const uid = useAuthStore(state => state.userId);
   const setQueue = usePlayerStore(state => state.setQueue);
   const [mode, setMode] = useState<SearchMode>('bilibili');
+  const [favoriteSearchMode, setFavoriteSearchMode] = useState<FavoriteSearchMode>('keyword');
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const [tagFilter, setTagFilter] = useState('');
@@ -129,13 +136,8 @@ export const SearchScreen = ({navigation}: any) => {
       setFavoriteIndex(refreshedIndex);
 
       const keyword = deferredQuery.trim();
-      const refreshKey = getFavoriteSearchRefreshKey(uid, keyword);
-      const matchingVideos = keyword
-        ? refreshedIndex.filter(video =>
-            video.title.toLocaleLowerCase().includes(keyword.toLocaleLowerCase()) ||
-            (video.upper?.name ?? '').toLocaleLowerCase().includes(keyword.toLocaleLowerCase()),
-          )
-        : [];
+      const refreshKey = getFavoriteSearchRefreshKey(uid, keyword, favoriteSearchMode);
+      const matchingVideos = filterFavoriteVideos(refreshedIndex, keyword, favoriteSearchMode);
       usePlayerStore.getState().replaceQueueFromSearchRefresh(
         refreshKey,
         matchingVideos,
@@ -150,7 +152,7 @@ export const SearchScreen = ({navigation}: any) => {
         setFavoriteLoading(false);
       }
     }
-  }, [deferredQuery, uid]);
+  }, [deferredQuery, favoriteSearchMode, uid]);
 
   useFocusEffect(
     useCallback(() => {
@@ -404,21 +406,14 @@ export const SearchScreen = ({navigation}: any) => {
   );
 
   const favoriteSearchIndex = useMemo(
-    () => favoriteIndex.map(video => ({
-      video,
-      normalizedTitle: video.title.toLocaleLowerCase(),
-      normalizedAuthor: (video.upper?.name ?? '').toLocaleLowerCase(),
-    })),
+    () => buildFavoriteSearchIndex(favoriteIndex),
     [favoriteIndex],
   );
 
-  const filteredFavorites = useMemo(() => {
-    const normalized = deferredQuery.trim().toLocaleLowerCase();
-    if (!normalized) return [];
-    return favoriteSearchIndex
-      .filter(item => item.normalizedTitle.includes(normalized) || item.normalizedAuthor.includes(normalized))
-      .map(item => item.video);
-  }, [deferredQuery, favoriteSearchIndex]);
+  const filteredFavorites = useMemo(
+    () => filterFavoriteSearchIndex(favoriteSearchIndex, deferredQuery, favoriteSearchMode),
+    [deferredQuery, favoriteSearchIndex, favoriteSearchMode],
+  );
 
   const playVideo = useCallback((video: FavoriteVideo) => {
     try {
@@ -448,10 +443,10 @@ export const SearchScreen = ({navigation}: any) => {
           }
         : {
             refreshKey: uid
-              ? getFavoriteSearchRefreshKey(uid, deferredQuery)
+              ? getFavoriteSearchRefreshKey(uid, deferredQuery, favoriteSearchMode)
               : undefined,
             favoriteSearch: uid
-              ? {uid, keyword: deferredQuery.trim()}
+              ? {uid, keyword: deferredQuery.trim(), mode: favoriteSearchMode}
               : undefined,
           };
       if (mode === 'bilibili') usePlayerStore.getState().setPlayMode('sequential');
@@ -481,7 +476,7 @@ export const SearchScreen = ({navigation}: any) => {
       usePlayerStore.getState().setResolving(false);
       Alert.alert('播放失败', playError instanceof Error ? playError.message : '视频暂时无法播放');
     }
-  }, [deferredQuery, filteredFavorites, mode, navigation, onlineHasMore, onlinePage, query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, setQueue, sort, sortedOnlineResults, tagFilter, uid]);
+  }, [deferredQuery, favoriteSearchMode, filteredFavorites, mode, navigation, onlineHasMore, onlinePage, query, recommendationDurationFilterEnabled, recommendationDurationLimitMinutes, setQueue, sort, sortedOnlineResults, tagFilter, uid]);
 
   const glassBackground = t.glass?.colors.glass.bg ?? t.colors.surface;
   const glassBorder = t.glass?.colors.glass.border ?? t.colors.divider;
@@ -591,7 +586,8 @@ export const SearchScreen = ({navigation}: any) => {
               onChangeText={setQuery}
               onSubmitEditing={() => mode === 'bilibili' && void runOnlineSearch(1)}
               returnKeyType="search"
-              placeholder={mode === 'bilibili' ? '搜索视频、番剧、UP 主等全站内容' : '搜索本地已同步的收藏视频'}
+              accessibilityLabel={mode === 'bilibili' ? 'B 站搜索关键词' : favoriteSearchMode === 'keyword' ? '收藏视频关键词' : '收藏视频作者'}
+              placeholder={mode === 'bilibili' ? '搜索视频、番剧、UP 主等全站内容' : favoriteSearchMode === 'keyword' ? '输入视频标题关键词' : '输入 UP 主名称'}
               placeholderTextColor={t.colors.textHint}
               style={{flex: 1, marginHorizontal: t.spacing.sm, paddingVertical: 0, color: t.colors.text, fontSize: t.fontSize.base}}
             />
@@ -639,9 +635,30 @@ export const SearchScreen = ({navigation}: any) => {
             </View>
           </>
         ) : (
-          <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: t.spacing.md, marginBottom: t.spacing.sm}}>
-            搜索范围：本机已同步的全部自有收藏夹及外部来源
-          </Text>
+          <>
+            <View style={{flexDirection: 'row', marginTop: t.spacing.md, gap: t.spacing.sm}}>
+              {([
+                {key: 'keyword', title: '关键词'},
+                {key: 'author', title: '作者'},
+              ] as const).map(option => {
+                const selected = favoriteSearchMode === option.key;
+                return (
+                  <TouchableOpacity
+                    key={option.key}
+                    accessibilityRole="button"
+                    accessibilityLabel={`按${option.title}搜索收藏视频`}
+                    accessibilityState={{selected}}
+                    onPress={() => setFavoriteSearchMode(option.key)}
+                    style={{flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: t.radius.full, borderWidth: 1, borderColor: selected ? t.colors.primary : t.colors.divider, backgroundColor: selected ? t.colors.primaryLight : t.colors.surfaceHigh}}>
+                    <Text style={{fontSize: t.fontSize.sm, color: selected ? t.colors.primary : t.colors.textSub, fontWeight: selected ? '600' : '400'}}>{option.title}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={{fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: t.spacing.sm, marginBottom: t.spacing.sm}}>
+              搜索范围：本机已同步的全部自有收藏夹及外部来源
+            </Text>
+          </>
         )}
 
         {error && <Text style={{fontSize: t.fontSize.xs, color: t.colors.error, marginBottom: t.spacing.sm}}>{error}</Text>}
@@ -683,7 +700,7 @@ export const SearchScreen = ({navigation}: any) => {
               <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, textAlign: 'center', marginTop: t.spacing.md}}>
                 {mode === 'bilibili'
                   ? didSearch ? '没有符合当前 tag 与时长条件的视频' : '输入关键词或 tag，开始搜索 B 站全站内容'
-                  : query.trim() ? '本地收藏中没有匹配内容' : '输入关键词搜索全收藏夹'}
+                  : query.trim() ? '本地收藏中没有匹配内容' : favoriteSearchMode === 'keyword' ? '输入视频标题关键词搜索全收藏夹' : '输入 UP 主名称搜索全收藏夹'}
               </Text>
             </View>
           ) : null}

@@ -23,6 +23,7 @@ import { useAuthStore } from '../store/authStore';
 import {storage} from '../core/storage';
 import { loadMorePersonalizedSongs } from '../services/homeRecommendationService';
 import {getFavoriteSearchRefreshKey} from '../utils/playbackRefreshKey';
+import {filterFavoriteVideos} from '../utils/favoriteSearch';
 
 const QUEUE_LOAD_AHEAD_TRACKS = 5;
 const EMPTY_PLAYLIST_QUEUE: FavoriteVideo[] = [];
@@ -475,7 +476,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
       }
 
       if (playContext.favoriteSearch) {
-        const {uid, keyword} = playContext.favoriteSearch;
+        const {uid, keyword, mode} = playContext.favoriteSearch;
         if (!uid || useAuthStore.getState().userId !== uid) {
           throw new Error('登录账号已变化，请重新进入收藏夹搜索');
         }
@@ -490,17 +491,13 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
           throw new Error('收藏索引正在随账号切换，请稍后重试');
         }
 
-        const normalizedKeyword = keyword.trim().toLocaleLowerCase();
         const refreshedIndex = favoriteService.getGlobalIndex(
           [],
           sources.map(source => source.sourceKey),
         );
-        const results = refreshedIndex.filter(video =>
-          video.title.toLocaleLowerCase().includes(normalizedKeyword) ||
-          (video.upper?.name ?? '').toLocaleLowerCase().includes(normalizedKeyword),
-        );
+        const results = filterFavoriteVideos(refreshedIndex, keyword, mode);
         usePlayerStore.getState().replaceQueueFromSearchRefresh(
-          getFavoriteSearchRefreshKey(uid, keyword),
+          getFavoriteSearchRefreshKey(uid, keyword, mode),
           results,
         );
         return;

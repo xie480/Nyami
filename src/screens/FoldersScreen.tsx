@@ -43,6 +43,8 @@ import type {
 import FastImage from 'react-native-fast-image';
 import { formatDuration } from '../utils/format';
 import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
+import {filterFavoriteVideos} from '../utils/favoriteSearch';
+import type {FavoriteSearchMode} from '../utils/favoriteSearch';
 
 interface HomePlaylistItem {
   sourceKey: string;
@@ -161,6 +163,7 @@ export const FoldersScreen = ({ navigation }: any) => {
 
   // 全局搜索关键字
   const [searchQuery, setSearchQuery] = useState('');
+  const [favoriteSearchMode, setFavoriteSearchMode] = useState<FavoriteSearchMode>('keyword');
   const [searchActive, setSearchActive] = useState(false);
   const [folderTab, setFolderTab] = useState<'all' | 'owned' | 'collected'>('all');
   const [createFolderVisible, setCreateFolderVisible] = useState(false);
@@ -212,15 +215,8 @@ export const FoldersScreen = ({ navigation }: any) => {
     if (!isGlobalSearch) {
       return [];
     }
-    return searchableGlobalIndex.filter(video => {
-      const relatedFolderNames = [
-        ...(video.folderIds ?? []).map(folderId => folders?.find(folder => folder.id === folderId)?.title ?? ''),
-        ...(video.sourceKeys ?? []).map(sourceKey => importedCatalog.find(source => source.sourceKey === sourceKey)?.title ?? ''),
-      ];
-      const searchableText = [video.title, video.upper?.name, ...relatedFolderNames].join(' ');
-      return searchableText.toLowerCase().includes(normalizedSearchQuery);
-    });
-  }, [folders, importedCatalog, isGlobalSearch, normalizedSearchQuery, searchableGlobalIndex]);
+    return filterFavoriteVideos(searchableGlobalIndex, normalizedSearchQuery, favoriteSearchMode);
+  }, [favoriteSearchMode, isGlobalSearch, normalizedSearchQuery, searchableGlobalIndex]);
 
   const load = useCallback(
     async (force = false) => {
@@ -462,7 +458,8 @@ export const FoldersScreen = ({ navigation }: any) => {
             <TextInput
               autoFocus={searchActive}
               style={{flex: 1, marginLeft: t.spacing.sm, color: t.colors.text, fontSize: t.fontSize.base, padding: 0}}
-              placeholder={isSyncing ? '索引同步中，暂不可搜索' : isGlobalIndexEmpty ? '全局索引为空，暂不可搜' : '搜索全收藏夹'}
+              accessibilityLabel={favoriteSearchMode === 'keyword' ? '收藏视频关键词' : '收藏视频作者'}
+              placeholder={isSyncing ? '索引同步中，暂不可搜索' : isGlobalIndexEmpty ? '全局索引为空，暂不可搜' : favoriteSearchMode === 'keyword' ? '输入视频标题关键词' : '输入 UP 主名称'}
               placeholderTextColor={t.colors.textHint}
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -510,6 +507,28 @@ export const FoldersScreen = ({ navigation }: any) => {
         </View>
       )}
 
+      {searchActive && (
+        <View style={{flexDirection: 'row', paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.sm, gap: t.spacing.sm}}>
+          {([
+            {key: 'keyword', title: '关键词'},
+            {key: 'author', title: '作者'},
+          ] as const).map(option => {
+            const selected = favoriteSearchMode === option.key;
+            return (
+              <TouchableOpacity
+                key={option.key}
+                accessibilityRole="button"
+                accessibilityLabel={`按${option.title}搜索收藏视频`}
+                accessibilityState={{selected}}
+                onPress={() => setFavoriteSearchMode(option.key)}
+                style={{flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: t.radius.full, borderWidth: 1, borderColor: selected ? t.colors.primary : t.colors.divider, backgroundColor: selected ? t.colors.primaryLight : t.colors.surfaceHigh}}>
+                <Text style={{fontSize: t.fontSize.sm, color: selected ? t.colors.primary : t.colors.textSub, fontWeight: selected ? '600' : '400'}}>{option.title}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
       {importedSyncError && !isGlobalSearch && (
         <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, textAlign: 'center', paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.sm }}>
           外部收藏来源同步失败，仍显示上次同步目录：{importedSyncError}
@@ -523,7 +542,7 @@ export const FoldersScreen = ({ navigation }: any) => {
       ) : error && playlistItems === null ? (
         <ErrorView message={error} onRetry={() => load(true)} />
       ) : searchActive && normalizedSearchQuery.length === 0 ? (
-        <Empty title="搜索全收藏夹" hint="输入视频名称或 UP 主，查找本机已同步的收藏内容" />
+        <Empty title="搜索全收藏夹" hint={favoriteSearchMode === 'keyword' ? '输入视频标题关键词，查找本机已同步的收藏内容' : '输入 UP 主名称，查找本机已同步的收藏内容'} />
       ) : !isGlobalSearch && visiblePlaylistItems!.length === 0 ? (
         <Empty
           title={folderTab === 'owned' ? '还没有自己创建的收藏夹' : folderTab === 'collected' ? '还没有收藏的合集' : '没有可见的收藏夹'}
@@ -532,7 +551,7 @@ export const FoldersScreen = ({ navigation }: any) => {
       ) : isGlobalSearch && filteredVideos.length === 0 ? (
         <Empty
           title="没有匹配的收藏内容"
-          hint="尝试使用视频名称或 UP 主重新搜索"
+          hint="尝试更换搜索词或切换关键词、作者模式"
         />
       ) : isGlobalSearch ? (
         <FlatList
