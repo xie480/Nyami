@@ -45,6 +45,7 @@ import { formatDuration } from '../utils/format';
 import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
 import {filterFavoriteVideos} from '../utils/favoriteSearch';
 import type {FavoriteSearchMode} from '../utils/favoriteSearch';
+import {getFavoriteSearchRefreshKey} from '../utils/playbackRefreshKey';
 
 interface HomePlaylistItem {
   sourceKey: string;
@@ -579,7 +580,7 @@ export const FoldersScreen = ({ navigation }: any) => {
             </View>
           }
           ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}
-          renderItem={({ item, index }) => {
+          renderItem={({ item }) => {
             const folderTitle = item.folderIds
               ?.map(folderId => folders?.find(folder => folder.id === folderId)?.title)
               .find(Boolean);
@@ -599,24 +600,35 @@ export const FoldersScreen = ({ navigation }: any) => {
                   borderRadius: t.radius.lg,
                 }}
                 onPress={async () => {
-                const video = filteredVideos[index];
-                if (!video) return;
+                const video = item;
+                const playbackContext = {
+                  refreshKey: uid
+                    ? getFavoriteSearchRefreshKey(uid, searchQuery, favoriteSearchMode)
+                    : undefined,
+                  favoriteSearch: uid
+                    ? {uid, keyword: searchQuery.trim(), mode: favoriteSearchMode}
+                    : undefined,
+                };
+                const isCurrentSelection = () =>
+                  usePlayerStore.getState().playContext === playbackContext &&
+                  useAuthStore.getState().userId === uid;
                 try {
-                  const MAX_QUEUE = 100;
-                  const queueVideos = filteredVideos.length > MAX_QUEUE
-                    ? filteredVideos.slice(0, MAX_QUEUE)
-                    : filteredVideos;
-                  // 全收藏夹搜索结果不属于单个收藏夹，避免沿用上一队列上下文。
-                  setQueue(queueVideos, video.bvid, {});
+                  // 完整搜索结果属于逻辑队列，原生音频仍由 TrackPlayer 按需缓冲。
+                  const queueVideos = filteredVideos;
+                  setQueue(queueVideos, video.bvid, playbackContext);
                   // 【P0防闪烁优化】跳转前清空旧播放上下文
                   usePlayerStore.getState().setResolving(true);
                   useProgressStore.getState().resetProgress();
                   prefetchAudioUrl(video.bvid, video.parts?.[0]?.cid).catch(() => {});
                   const version = await loadQueue(queueVideos, video.bvid);
-                  await playWithIntent();
+                  if (!isCurrentSelection()) return;
+                  if (!version) {
+                    throw new Error(usePlayerStore.getState().playbackError || '视频暂时无法播放');
+                  }
                   resolveCurrentTrack(version).catch(() => {});
                   navigation.navigate('Player');
                 } catch (e: any) {
+                  if (!isCurrentSelection()) return;
                   const msg = e.message || '播放失败';
                   if (Platform.OS === 'android') {
                     ToastAndroid.show(msg, ToastAndroid.SHORT);

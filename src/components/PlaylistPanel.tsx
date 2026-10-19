@@ -1,10 +1,12 @@
 // src/components/PlaylistPanel.tsx (refactored)
 import React, { useCallback, memo, useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo, ActivityIndicator, Alert, Platform, ToastAndroid, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo, ActivityIndicator, Alert, Platform, ToastAndroid, RefreshControl, useWindowDimensions } from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../theme';
 import { GlassView } from './GlassView';
 import { usePlayerStore } from '../store/playerStore';
+import type {PlayContext} from '../store/playerStore';
 import { IconButton } from './IconButton';
 import type { FavoriteVideo, OnlineVideoSearchResult } from '../types/domain';
 import { formatDuration } from '../utils/format';
@@ -31,6 +33,23 @@ const QUEUE_ITEM_HEIGHT = 56;
 const QUEUE_ITEM_SPACING = 8;
 const QUEUE_PART_ROW_HEIGHT = 28;
 const QUEUE_PARTS_SPACING = 4;
+
+function getPlaybackSourceIdentity(context: PlayContext | null): string | PlayContext | null {
+  if (context?.refreshKey) {
+    return `refresh:${context.refreshKey}`;
+  }
+  if (context?.sourceKey) {
+    return `source:${context.sourceKey}`;
+  }
+  if (context?.folderId != null) {
+    return `folder:${context.folderId}`;
+  }
+  if (context?.isPersonalized) {
+    return 'personalized';
+  }
+  // Anonymous queues have no stable source key, so only the same context is safe.
+  return context;
+}
 
 function getQueueItemExtraHeight(video: FavoriteVideo | undefined, expandedBvid: string | null): number {
   if (!video || video.bvid !== expandedBvid || !video.parts || video.parts.length <= 1) return 0;
@@ -112,6 +131,12 @@ const PlaylistItem = memo(function PlaylistItem({
  */
 export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => {
   const t = useTheme();
+  const {height: windowHeight} = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const panelBounds = {
+    maxHeight: Math.max(0, windowHeight - insets.top) * 0.8,
+    paddingBottom: Math.max(insets.bottom, 20),
+  };
   // 面板关闭时返回稳定的空值，避免全局队列变化让隐藏的 FlatList 反复重渲染。
   const queue = usePlayerStore((s) => visible ? s.queue : EMPTY_PLAYLIST_QUEUE);
   const currentBvid = usePlayerStore((s) => visible ? s.currentBvid : null);
@@ -132,6 +157,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const refreshControllerRef = useRef<AbortController | null>(null);
   const listEndReachedArmedRef = useRef(false);
   const lastAutoLoadPageRef = useRef<string | null>(null);
+  const trackSelectionRevisionRef = useRef(0);
   // 用于精确判断自动滚动触发时机，拦截分页加载时的无意识滚动
   const prevVisibleRef = useRef(visible);
   const prevBvidRef = useRef(currentBvid);
@@ -147,6 +173,13 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
 
   // 点击歌曲条目：立即跳转播放
   const handlePress = useCallback(async (bvid: string) => {
+    const selectionRevision = ++trackSelectionRevisionRef.current;
+    const selectionSource = getPlaybackSourceIdentity(usePlayerStore.getState().playContext);
+    const selectionUid = useAuthStore.getState().userId;
+    const isSelectionCurrent = () =>
+      selectionRevision === trackSelectionRevisionRef.current &&
+      useAuthStore.getState().userId === selectionUid &&
+      getPlaybackSourceIdentity(usePlayerStore.getState().playContext) === selectionSource;
     // 不等待解析或音量淡出完成，先让播放列表开始收起。
     onClose();
     try {
@@ -156,14 +189,26 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
       } catch {
         played = false;
       }
+      if (!isSelectionCurrent()) {
+        return;
+      }
       if (!played) {
         const q = usePlayerStore.getState().queue;
         if (!q.some(video => video.bvid === bvid)) return;
         const loaded = await loadQueue(q, bvid);
+        if (!isSelectionCurrent()) {
+          return;
+        }
         if (loaded === 0) throw new Error('歌曲暂时无法切换，请稍后重试');
+      }
+      if (!isSelectionCurrent()) {
+        return;
       }
       usePlayerStore.getState().setCurrentBvid(bvid);
     } catch (error) {
+      if (!isSelectionCurrent()) {
+        return;
+      }
       const message = error instanceof Error ? error.message : '切换歌曲失败';
       if (Platform.OS === 'android') {
         ToastAndroid.show(message, ToastAndroid.SHORT);
@@ -609,6 +654,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
       {hasOpened && (
         <FlatList
           ref={listRef}
+          style={styles.queueViewport}
           data={queue}
           keyExtractor={(item) => item.bvid}
           renderItem={renderItem}
@@ -648,11 +694,11 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         {isGlass ? (
-          <GlassView style={{ maxHeight: '80%', borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingBottom: 20 }} borderRadius={12} noShadow noBlur minimal>
+          <GlassView style={StyleSheet.flatten([styles.container, panelBounds])} borderRadius={12} noShadow noBlur minimal constrainContent>
             {playlistContent}
           </GlassView>
         ) : (
-          <View style={[styles.container, { backgroundColor: t.colors.background }]}>{playlistContent}</View>
+          <View style={[styles.container, panelBounds, { backgroundColor: t.colors.background }]}>{playlistContent}</View>
         )}
       </View>
     </Modal>
@@ -666,10 +712,15 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   container: {
-    maxHeight: '80%',
+    flexShrink: 1,
+    minHeight: 0,
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
-    paddingBottom: 20,
+  },
+  queueViewport: {
+    flexGrow: 0,
+    flexShrink: 1,
+    minHeight: 0,
   },
   header: {
     flexDirection: 'row',

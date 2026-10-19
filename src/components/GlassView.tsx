@@ -18,7 +18,11 @@ interface GlassViewProps {
   noBlur?: boolean;
   /** Use a single base/border layer for repeated surfaces in scrolling lists. */
   minimal?: boolean;
+  /** Let scrollable content shrink through every wrapper inside a bounded parent. */
+  constrainContent?: boolean;
 }
+
+const constrainedContentStyle: ViewStyle = {flexShrink: 1, minHeight: 0};
 
 /**
  * Ultra-premium dark frosted glass container — "极致暗黑磨砂玻璃".
@@ -45,6 +49,7 @@ export const GlassView: React.FC<GlassViewProps> = ({
   noShadow = false,
   noBlur = false,
   minimal = false,
+  constrainContent = false,
 }) => {
   const t = useTheme();
   const glassTheme = t.glass;
@@ -61,6 +66,7 @@ export const GlassView: React.FC<GlassViewProps> = ({
   const blurType = t.isDark ? ('dark' as const) : ('light' as const);
 
   const shouldBlur = !noBlur && !minimal;
+  const contentConstraint = constrainContent ? constrainedContentStyle : undefined;
   const [isAnimating, setIsAnimating] = useState(shouldBlur);
 
   useEffect(() => {
@@ -95,9 +101,9 @@ export const GlassView: React.FC<GlassViewProps> = ({
   };
 
   return (
-    <View style={[outerStyle, style]} {...(Platform.OS === 'android' && !minimal ? { collapsable: false as any } : {})}>
+    <View style={[outerStyle, contentConstraint, style]} {...(Platform.OS === 'android' && !minimal ? { collapsable: false as any } : {})}>
       {/* Inner clip region — overflow hidden lives here so outer shadow isn't clipped */}
-      <View style={{ overflow: 'hidden', borderRadius: resolvedBorderRadius }}>
+      <View style={[{ overflow: 'hidden', borderRadius: resolvedBorderRadius }, contentConstraint]}>
         {/* ── Backdrop blur layer ─────────────────────────────────── */}
         {shouldBlur && !isAnimating && (
           <BlurView
@@ -110,13 +116,13 @@ export const GlassView: React.FC<GlassViewProps> = ({
 
         {/* ── Glass base ──────────────────────────────────────────── */}
         <View
-          style={{
+          style={[{
             backgroundColor: resolvedBg,
             borderRadius: resolvedBorderRadius,
             ...(minimal
               ? {borderWidth: StyleSheet.hairlineWidth, borderColor: resolvedBorder}
               : {}),
-          }}
+          }, contentConstraint]}
         >
           {!minimal && <>
           {/* ── 1. Chromatic aberration fringing ─────────────────────
@@ -200,7 +206,7 @@ export const GlassView: React.FC<GlassViewProps> = ({
           </>}
 
           {/* ── Content ───────────────────────────────────────────── */}
-          <View>{children}</View>
+          <View style={contentConstraint}>{children}</View>
         </View>
       </View>
     </View>
