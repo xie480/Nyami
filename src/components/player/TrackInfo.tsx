@@ -11,6 +11,8 @@ interface Props {
   onFavorite?: () => void;
   isFavorited?: boolean;
   favoriteLoading?: boolean;
+  compact?: boolean;
+  favoriteAccessibilityLabel?: string;
 }
 
 export const TrackInfo: React.FC<Props> = ({
@@ -20,16 +22,20 @@ export const TrackInfo: React.FC<Props> = ({
   onFavorite,
   isFavorited = false,
   favoriteLoading = false,
+  compact = false,
+  favoriteAccessibilityLabel = '已收藏，管理当前歌曲的收藏',
 }) => (
-  <View style={styles.row}>
+  <View style={[styles.row, compact && styles.compactRow]}>
     <View style={styles.copy}>
       <Text
-        style={[styles.title, {color: theme.foreground}]}
+        accessibilityLabel={title || '未知歌曲'}
+        style={[styles.title, compact && styles.compactTitle, {color: theme.foreground}]}
         numberOfLines={2}
         ellipsizeMode="tail">
         {title || '未知歌曲'}
       </Text>
       <Text
+        accessibilityLabel={artist || '未知歌手'}
         style={[styles.artist, {color: theme.secondaryForeground}]}
         numberOfLines={1}
         ellipsizeMode="tail">
@@ -40,7 +46,7 @@ export const TrackInfo: React.FC<Props> = ({
       isFavorited ? (
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel="已收藏，点击取消收藏当前歌曲"
+          accessibilityLabel={favoriteAccessibilityLabel}
           accessibilityState={{disabled: favoriteLoading}}
           disabled={favoriteLoading}
           activeOpacity={0.72}
@@ -58,6 +64,7 @@ export const TrackInfo: React.FC<Props> = ({
           size={25}
           color={theme.foreground}
           accessibilityLabel="收藏当前歌曲到收藏夹"
+          disabled={favoriteLoading}
           onPress={onFavorite}
           style={styles.favorite}
         />
@@ -74,6 +81,8 @@ const styles = StyleSheet.create({
     paddingTop: 2,
   },
   copy: {flex: 1, minWidth: 0, paddingRight: 8},
+  compactRow: {minHeight: 58},
+  compactTitle: {fontSize: 20, lineHeight: 25},
   title: {
     fontSize: 23,
     fontWeight: '700',

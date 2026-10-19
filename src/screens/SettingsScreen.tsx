@@ -16,16 +16,14 @@ import type { ThemeMode } from '../store/settingsStore';
 import { useSyncStore } from '../store/syncStore';
 import { Slider } from '../components/Slider';
 import { audioCache } from '../services/audioCache';
-import { favoriteService, cookieService } from '../services';
+import { favoriteService } from '../services';
 import { useAuthStore } from '../store/authStore';
-import { biliApi } from '../services/biliApi';
 import { useUIStore } from '../store/uiStore';
 import { formatBytes } from '../utils/format';
 import { useTheme } from '../theme';
 import { useImportedPlaylistStore } from '../store/importedPlaylistStore';
 import type { Quality } from '../types/domain';
 import ImageCropPicker from 'react-native-image-crop-picker';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RNFS from 'react-native-fs';
 import { config } from '../config';
 import LinearGradient from 'react-native-linear-gradient';
@@ -39,7 +37,7 @@ const QUALITY_OPTIONS: Array<{
   /** 是否需要大会员 */
   requiresVip?: boolean;
 }> = [
-  { key: 'hires', title: 'HI-FES 无损', subtitle: '无损音频 · 最高音质', requiresVip: true },
+  { key: 'hires', title: 'Hi-Res 无损', subtitle: '无损音频 · 需要 B 站大会员', requiresVip: true },
   { key: 'dolby', title: '杜比全景声', subtitle: '沉浸式环绕声体验', requiresVip: true },
   { key: 'high', title: '高音质', subtitle: '192 kbps' },
   { key: 'medium', title: '标准', subtitle: '132 kbps' },
@@ -93,7 +91,8 @@ const GlobalIndexSettingsSection = React.memo(({
     : 0;
   const s = useMemo(() => StyleSheet.create({
     section: {
-      fontSize: t.fontSize.sm,
+      fontSize: t.fontSize.base,
+      fontWeight: '700',
       color: t.colors.textSub,
       marginTop: t.spacing.xl,
       marginBottom: t.spacing.sm,
@@ -104,6 +103,8 @@ const GlobalIndexSettingsSection = React.memo(({
       borderRadius: 22,
       overflow: 'hidden',
       backgroundColor: t.colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.divider,
     },
     separator: {
       height: 0.5,
@@ -181,9 +182,9 @@ const GlobalIndexSettingsSection = React.memo(({
               : `当前已索引 ${globalIndexCount} 个视频`
           }
           onPress={syncStatus === 'syncing' ? undefined : onSyncGlobalIndex}
-          right={
-            <View style={{flexDirection: 'row', alignItems: 'center'}}>
-              <Button title="查看" variant="text" onPress={() => navigation.navigate('SyncDetails')} />
+        />
+        <View style={{flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md}}>
+              <Button title="查看同步详情" variant="text" onPress={() => navigation.navigate('SyncDetails')} />
               {syncStatus === 'syncing' ? (
                 <Button title="取消" variant="text" onPress={abortSync} />
               ) : syncStatus === 'error' ? (
@@ -193,11 +194,9 @@ const GlobalIndexSettingsSection = React.memo(({
                   {!!progressData && progressData.totalTasks > 0 && progressData.skippedTasks === progressData.totalTasks ? '已是最新' : '已完成'}
                 </Text>
               ) : (
-                <Text style={{color: t.colors.primary, fontSize: t.fontSize.base, marginLeft: t.spacing.sm}}>开始同步</Text>
+                <Button title="开始同步" variant="secondary" onPress={onSyncGlobalIndex} />
               )}
-            </View>
-          }
-        />
+        </View>
         {syncStatus === 'error' && syncError && (
           <View style={{paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md}}>
             <Text style={{color: t.colors.error, fontSize: t.fontSize.sm}} numberOfLines={3}>
@@ -234,7 +233,7 @@ const GlobalIndexSettingsSection = React.memo(({
                 </Text>
               </View>
             </View>
-            <Text style={{color: t.colors.textHint, fontSize: 10, marginTop: t.spacing.sm}}>
+            <Text style={{color: t.colors.textHint, fontSize: 12, lineHeight: 18, marginTop: t.spacing.sm}}>
               B 站限流可能延长同步时间；建议在 Wi-Fi 环境完成。
             </Text>
           </View>
@@ -246,7 +245,6 @@ const GlobalIndexSettingsSection = React.memo(({
 
 export const SettingsScreen = ({ navigation }: any) => {
   const t = useTheme();
-  const insets = useSafeAreaInsets();
   const {
     quality, autoCacheOnWifi, wifiOnly, hiddenFolderIds,
     expandMultiPart, themeMode, customBackgroundImage, glassBlurAmount,
@@ -329,7 +327,6 @@ export const SettingsScreen = ({ navigation }: any) => {
   );
   const isVip = useAuthStore((s) => s.isVip);
   const logout = useAuthStore((s) => s.logout);
-  const setUserInfo = useAuthStore((s) => s.setUserInfo);
   const setLoginModalVisible = useUIStore((s) => s.setLoginModalVisible);
 
   useEffect(() => {
@@ -462,7 +459,7 @@ export const SettingsScreen = ({ navigation }: any) => {
   const s = useMemo(() => StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background },
     section: {
-      fontSize: t.fontSize.sm, color: t.colors.textSub,
+      fontSize: t.fontSize.base, fontWeight: '700', color: t.colors.text,
       marginTop: t.spacing.xl, marginBottom: t.spacing.sm,
       marginHorizontal: t.spacing.lg,
     },
@@ -470,13 +467,14 @@ export const SettingsScreen = ({ navigation }: any) => {
       marginHorizontal: t.spacing.lg,
       borderRadius: 22, overflow: 'hidden',
       backgroundColor: t.colors.surface,
+      borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.divider,
     },
     sep: { height: 0.5, backgroundColor: t.colors.divider, marginLeft: t.spacing.lg },
     cookieBox: { padding: t.spacing.lg, backgroundColor: t.colors.surface },
     input: {
       borderWidth: 1, borderColor: t.colors.divider, borderRadius: t.radius.md,
       paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.sm,
-      fontSize: t.fontSize.sm, color: t.colors.text, minHeight: 40,
+      fontSize: t.fontSize.base, color: t.colors.text, minHeight: 48,
     },
     cookieHint: { fontSize: t.fontSize.xs, color: t.colors.textHint, marginTop: t.spacing.sm },
     saveText: {
@@ -484,30 +482,46 @@ export const SettingsScreen = ({ navigation }: any) => {
       fontSize: t.fontSize.base, textAlign: 'right',
     },
     danger: { color: t.colors.error, fontSize: t.fontSize.base },
+    accountRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
+    accountCopy: {flex: 1, minWidth: 0},
+    accountTitle: {fontSize: 18, color: t.colors.text, fontWeight: '700'},
+    accountHint: {fontSize: 13, lineHeight: 20, color: t.colors.textSub, marginTop: 4},
+    accountAction: {minHeight: 48, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 16, backgroundColor: t.colors.primaryLight},
+    themeGrid: {marginHorizontal: t.spacing.lg, flexDirection: 'row', flexWrap: 'wrap', gap: 10},
+    themeOption: {width: '48%', flexGrow: 1, minHeight: 82, borderWidth: 1, borderRadius: 18, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10},
+    themeCopy: {flex: 1, minWidth: 0},
+    themeTitle: {fontSize: 14, fontWeight: '600', lineHeight: 21},
+    themeCaption: {fontSize: 12, lineHeight: 18, color: t.colors.textSub, marginTop: 3},
+    sectionHint: {marginHorizontal: t.spacing.lg, color: t.colors.textSub, fontSize: 13, lineHeight: 20, marginTop: 8},
   }), [t]);
 
   return (
     <View style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title="设置" showBack noBorder />
-      <ScrollView style={{flex: 1}} contentContainerStyle={{paddingBottom: insets.bottom + 132}} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{flex: 1}} contentContainerStyle={{paddingBottom: 28}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       <Text style={s.section}>账户</Text>
       <View style={[s.group, s.cookieBox]}>
         {loggedIn && userInfo ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Image source={{ uri: userInfo.avatar }} style={{ width: 58, height: 58, borderRadius: 29, marginRight: t.spacing.md }} />
-              <View>
-                <Text style={{ fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '600' }}>{userInfo.name}</Text>
-                <Text style={{ fontSize: t.fontSize.sm, color: t.colors.textSub }}>UID: {userInfo.uid}</Text>
+          <View style={s.accountRow}>
+              <Image accessible={false} source={{ uri: userInfo.avatar }} style={{ width: 52, height: 52, borderRadius: 18 }} />
+              <View style={s.accountCopy}>
+                <Text style={s.accountTitle} numberOfLines={2}>{userInfo.name}</Text>
+                <Text style={s.accountHint}>UID: {userInfo.uid}</Text>
               </View>
-            </View>
-            <TouchableOpacity onPress={handleLogout} style={{paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.sm, borderRadius: t.radius.full, backgroundColor: t.colors.primaryLight}}>
-              <Text style={s.saveText}>退出登录</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="退出当前 B 站账号" onPress={handleLogout} style={s.accountAction}>
+              <Text style={{color: t.colors.primary, fontSize: 13, fontWeight: '600'}}>退出</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          <Text style={s.saveText} onPress={triggerLogin}>点击登录</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="登录 B 站账号" onPress={triggerLogin} style={s.accountRow}>
+            <Icon name="account-circle-outline" size={42} color={t.colors.primary} />
+            <View style={s.accountCopy}>
+              <Text style={s.accountTitle}>连接你的音乐收藏</Text>
+              <Text style={s.accountHint}>登录 B 站账号，管理收藏与同步</Text>
+            </View>
+            <Icon name="chevron-right" size={24} color={t.colors.primary} />
+          </TouchableOpacity>
         )}
 
         
@@ -523,7 +537,7 @@ export const SettingsScreen = ({ navigation }: any) => {
                 onPress={handlePickBackground}
                 right={
                   customBackgroundImage ? (
-                    <Text style={{ color: t.colors.primary, fontSize: t.fontSize.sm }} onPress={handleClearBackground}>重置</Text>
+                    <Button title="重置" variant="text" onPress={handleClearBackground} />
                   ) : (
                     <Text style={{ color: t.colors.primary, fontSize: 18 }}>+</Text>
                   )
@@ -533,22 +547,29 @@ export const SettingsScreen = ({ navigation }: any) => {
             <View style={{ height: t.spacing.lg }} />
           </>
         )}
-        <View style={s.group}>
-          {THEME_OPTIONS.map((opt, i) => (
-            <React.Fragment key={opt.key}>
-              {i > 0 && <View style={s.sep} />}
-              <ListItem
-                title={opt.title}
-                icon="theme-light-dark"
+        <View style={s.themeGrid}>
+          {THEME_OPTIONS.map(opt => {
+            const selected = themeMode === opt.key;
+            const glass = opt.key.startsWith('glass');
+            const dark = opt.key.endsWith('dark');
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                accessibilityRole="radio"
+                accessibilityState={{checked: selected}}
+                accessibilityLabel={`${opt.title}主题`}
+                activeOpacity={0.75}
                 onPress={() => setThemeMode(opt.key)}
-                right={
-                  themeMode === opt.key ? (
-                    <Text style={{ color: t.colors.primary, fontSize: 18 }}>✓</Text>
-                  ) : null
-                }
-              />
-            </React.Fragment>
-          ))}
+                style={[s.themeOption, {backgroundColor: selected ? t.colors.primaryLight : t.colors.surface, borderColor: selected ? t.colors.primary : t.colors.divider}, opt.key === 'system' && {width: '100%'}]}>
+                <Icon name={opt.key === 'system' ? 'theme-light-dark' : glass ? 'blur' : dark ? 'weather-night' : 'white-balance-sunny'} size={22} color={selected ? t.colors.primary : t.colors.textSub} />
+                <View style={s.themeCopy}>
+                  <Text style={[s.themeTitle, {color: selected ? t.colors.primary : t.colors.text}]}>{opt.title}</Text>
+                  <Text style={s.themeCaption}>{opt.key === 'system' ? '随设备自动切换明暗' : glass ? '通透层次 · 可自定义背景' : dark ? '低光环境更舒适' : '清晰明亮的日常聆听'}</Text>
+                </View>
+                {selected && <Icon name="check-circle" size={18} color={t.colors.primary} />}
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {isGlass && (
@@ -563,6 +584,7 @@ export const SettingsScreen = ({ navigation }: any) => {
                   value={glassBlurAmount}
                   minimumValue={0}
                   maximumValue={100}
+                  accessibilityLabel="磨砂玻璃背景模糊度"
                   step={1}
                   onValueChange={setGlassBlurAmount}
                   minimumTrackColor={t.colors.primary}
@@ -590,6 +612,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             icon="sync"
             right={
               <Switch
+                accessibilityLabel="启动时拉取收藏夹最新视频"
                 value={autoRefreshFavoritesOnLaunch}
                 onValueChange={setAutoRefreshFavoritesOnLaunch}
               />
@@ -609,6 +632,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             icon="refresh"
             right={
               <Switch
+                accessibilityLabel="自动刷新首页推荐"
                 value={homeRefreshMode === 'automatic'}
                 onValueChange={enabled =>
                   setHomeRefreshMode(enabled ? 'automatic' : 'manual')
@@ -636,13 +660,15 @@ export const SettingsScreen = ({ navigation }: any) => {
                       borderColor: selected ? t.colors.primary : t.colors.divider,
                       backgroundColor: selected ? t.colors.primary : t.colors.surfaceHigh,
                       borderRadius: t.radius.full,
+                      minHeight: 48,
+                      justifyContent: 'center',
                       paddingHorizontal: t.spacing.md,
                       paddingVertical: t.spacing.sm,
                     }}>
                     <Text style={{
                       fontSize: t.fontSize.sm,
                       fontWeight: selected ? '700' : '500',
-                      color: selected ? '#FFFFFF' : t.colors.textSub,
+                      color: selected ? t.colors.onPrimary : t.colors.textSub,
                     }}>
                       {hours} 小时
                     </Text>
@@ -657,11 +683,9 @@ export const SettingsScreen = ({ navigation }: any) => {
         <View style={s.group}>
           <ListItem
             title="推荐视频时长筛选"
-            subtitle="仅推荐时长不超过设置值的视频"
+            subtitle={recommendationDurationFilterEnabled ? `仅推荐 ${recommendationDurationLimitMinutes} 分钟以内的视频` : '启用后可设置推荐视频的最长时长'}
             icon="clock-outline"
-            onPress={() => setRecommendationDurationFilterEnabled(!recommendationDurationFilterEnabled)}
-            right={<Text style={{fontSize: t.fontSize.sm, color: t.colors.primary, fontWeight: '600'}}>{recommendationDurationFilterEnabled ? `≤ ${recommendationDurationLimitMinutes} 分钟` : '已关闭'}</Text>}
-            showArrow
+            right={<Switch accessibilityLabel="推荐视频时长筛选" value={recommendationDurationFilterEnabled} onValueChange={setRecommendationDurationFilterEnabled} />}
           />
           <View style={{height: 0.5, backgroundColor: t.colors.divider, marginLeft: 72}} />
           <View style={{paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md, opacity: recommendationDurationFilterEnabled ? 1 : 0.55}}>
@@ -677,7 +701,7 @@ export const SettingsScreen = ({ navigation }: any) => {
                 editable={recommendationDurationFilterEnabled}
                 style={{
                   width: 72,
-                  minHeight: 40,
+                  minHeight: 48,
                   textAlign: 'center',
                   marginHorizontal: t.spacing.sm,
                   paddingHorizontal: t.spacing.sm,
@@ -692,13 +716,15 @@ export const SettingsScreen = ({ navigation }: any) => {
           <View style={s.sep} />
           <View>
             <ListItem
-              title="推荐视频 tag 黑名单"
-              subtitle="屏蔽 tag 模糊匹配关键词的视频"
+              title="推荐关键词屏蔽"
+              subtitle="屏蔽视频标签中包含这些关键词的推荐"
               icon="tag-outline"
               right={<Text style={{fontSize: t.fontSize.sm, color: t.colors.primary}}>{recommendationTagBlacklist.length} 个关键词</Text>}
             />
             <View style={{paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md}}>
               <TextInput
+                accessibilityLabel="要屏蔽的推荐标签关键词"
+                accessibilityHint="支持换行、逗号、顿号或分号分隔，输入后点击导入关键词"
                 value={blacklistImportInput}
                 onChangeText={setBlacklistImportInput}
                 placeholder="支持换行、逗号、顿号或分号分隔"
@@ -721,9 +747,9 @@ export const SettingsScreen = ({ navigation }: any) => {
                       accessibilityRole="button"
                       accessibilityLabel={`移除黑名单关键词 ${keyword}`}
                       onPress={() => setRecommendationTagBlacklist(recommendationTagBlacklist.filter(item => item !== keyword))}
-                      style={{flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.sm, paddingVertical: t.spacing.xs, borderRadius: t.radius.full, backgroundColor: t.colors.primaryLight}}>
-                      <Text style={{fontSize: t.fontSize.xs, color: t.colors.primary}}>{keyword}</Text>
-                      <Text style={{fontSize: t.fontSize.xs, color: t.colors.primary, marginLeft: 5}}>×</Text>
+                      style={{flexDirection: 'row', alignItems: 'center', minHeight: 48, maxWidth: '100%', paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.sm, borderRadius: t.radius.full, backgroundColor: t.colors.primaryLight}}>
+                      <Text style={{fontSize: t.fontSize.sm, flexShrink: 1, color: t.colors.primary}}>{keyword}</Text>
+                      <Icon name="close" size={16} color={t.colors.primary} style={{marginLeft: 8}} />
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -739,7 +765,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             title="个性化播放缓存"
             subtitle="默认关闭；开启后按现有规则缓存推荐视频"
             icon="play-circle-outline"
-            right={<Switch value={cachePersonalizedRecommendations} onValueChange={setCachePersonalizedRecommendations} />}
+            right={<Switch accessibilityLabel="个性化播放缓存" value={cachePersonalizedRecommendations} onValueChange={setCachePersonalizedRecommendations} />}
           />
         </View>
 
@@ -747,7 +773,8 @@ export const SettingsScreen = ({ navigation }: any) => {
         <View style={s.group}>
           <ListItem
             title="声音实验室"
-            subtitle="双层 EQ 与动态频谱"
+            subtitle="一键声音预设、图形与参数均衡器"
+            icon="tune-vertical"
             onPress={() => navigation.navigate('SoundLab')}
             showArrow
           />
@@ -761,16 +788,16 @@ export const SettingsScreen = ({ navigation }: any) => {
             return (
               <React.Fragment key={opt.key}>
                 {i > 0 && <View style={s.sep} />}
-                <View style={{ opacity: isVipLocked ? 0.45 : 1 }}>
+                <View>
                   <ListItem
                     title={opt.title}
                     subtitle={opt.subtitle}
                     onPress={() => handleQualitySelect(opt)}
                     right={
                       isVipLocked ? (
-                        <Text style={{ fontSize: 16 }}>🔒</Text>
+                        <Icon name="lock-outline" size={22} color={t.colors.textSub} />
                       ) : isSelected ? (
-                        <Text style={{ color: t.colors.primary, fontSize: 18 }}>✓</Text>
+                        <Icon name="check-circle" size={22} color={t.colors.primary} />
                       ) : null
                     }
                   />
@@ -779,31 +806,39 @@ export const SettingsScreen = ({ navigation }: any) => {
             );
           })}
         </View>
+        <Text style={s.sectionHint}>实际播放音质取决于视频音源和 B 站账号权限。</Text>
 
         <Text style={s.section}>流量</Text>
         <View style={s.group}>
           <ListItem
             title="仅 WiFi 下加载"
-            right={<Switch value={wifiOnly} onValueChange={setWifiOnly} />}
+            subtitle="使用移动网络时不加载新的在线音频"
+            icon="wifi"
+            right={<Switch accessibilityLabel="仅 WiFi 下加载音频" value={wifiOnly} onValueChange={setWifiOnly} />}
           />
           <View style={s.sep} />
           <ListItem
             title="WiFi 下自动缓存已播放音频"
-            right={<Switch value={autoCacheOnWifi} onValueChange={setAutoCacheOnWifi} />}
+            subtitle="再次播放时优先使用本机缓存"
+            icon="download-outline"
+            right={<Switch accessibilityLabel="WiFi 下自动缓存已播放音频" value={autoCacheOnWifi} onValueChange={setAutoCacheOnWifi} />}
           />
         </View>
 
         <Text style={s.section}>播放</Text>
         <View style={s.group}>
           <ListItem
-            title="将分P列表加入播放列表"
-            right={<Switch value={expandMultiPart} onValueChange={setExpandMultiPart} />}
+            title="自动展开视频分集"
+            subtitle="将多分集视频的各集加入播放列表"
+            icon="playlist-plus"
+            right={<Switch accessibilityLabel="将视频分集加入播放列表" value={expandMultiPart} onValueChange={setExpandMultiPart} />}
           />
           <View style={s.sep} />
           <ListItem
             title="与其他应用同时播放"
             subtitle="允许与其他应用的音频混合播放"
-            right={<Switch value={mixWithOthers} onValueChange={(v) => { setMixWithOthers(v); ToastAndroid.show('设置已保存，重启应用后生效', ToastAndroid.SHORT); }} />}
+            icon="volume-high"
+            right={<Switch accessibilityLabel="与其他应用同时播放" value={mixWithOthers} onValueChange={(v) => { setMixWithOthers(v); ToastAndroid.show('设置已保存，重启应用后生效', ToastAndroid.SHORT); }} />}
           />
         </View>
 

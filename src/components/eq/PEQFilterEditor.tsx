@@ -22,16 +22,18 @@ import {
 } from 'react-native';
 import { useTheme } from '../../theme';
 import { useEQStore, PEQFilter, FilterType } from '../../store/eqStore';
+import {Switch} from '../Switch';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 /** 滤波器类型选项 */
 const FILTER_TYPE_OPTIONS: Array<{ key: FilterType; label: string }> = [
-  { key: 'Peak', label: 'Peak' },
-  { key: 'LowShelf', label: 'Low Shelf' },
-  { key: 'HighShelf', label: 'High Shelf' },
-  { key: 'LowPass', label: 'Low Pass' },
-  { key: 'HighPass', label: 'High Pass' },
-  { key: 'Notch', label: 'Notch' },
-  { key: 'BandPass', label: 'Band Pass' },
+  { key: 'Peak', label: '峰值 · Peak' },
+  { key: 'LowShelf', label: '低频搁架' },
+  { key: 'HighShelf', label: '高频搁架' },
+  { key: 'LowPass', label: '低通' },
+  { key: 'HighPass', label: '高通' },
+  { key: 'Notch', label: '陷波' },
+  { key: 'BandPass', label: '带通' },
 ];
 
 /** 频率预设快速选择（音乐制作常用频率） */
@@ -94,14 +96,16 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
         <View style={styles.headerActions}>
           {/* 删除按钮 */}
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`删除滤波器 ${filter.id}`}
             onPress={() => { removeFilter(filter.id); onClose(); }}
-            style={[styles.deleteBtn, { backgroundColor: '#FF4757' + '20' }]}
+            style={[styles.deleteBtn, { backgroundColor: t.colors.surface }]}
           >
-            <Text style={[styles.deleteBtnText, { color: '#FF4757' }]}>删除</Text>
+            <Text style={[styles.deleteBtnText, { color: t.colors.error }]}>删除</Text>
           </TouchableOpacity>
           {/* 关闭按钮 */}
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-            <Text style={[styles.closeBtnText, { color: t.colors.textSub }]}>✕</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="关闭滤波器编辑器" onPress={onClose} style={styles.closeBtn}>
+            <Icon name="close" size={22} color={t.colors.textSub} />
           </TouchableOpacity>
         </View>
       </View>
@@ -109,26 +113,7 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
       {/* 启用开关 */}
       <View style={styles.switchRow}>
         <Text style={[styles.label, { color: t.colors.text }]}>启用</Text>
-        <TouchableOpacity
-          activeOpacity={0.7}
-          onPress={() => update({ enabled: !filter.enabled })}
-          style={[
-            styles.toggle,
-            {
-              backgroundColor: filter.enabled ? t.colors.primary : t.colors.divider,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.toggleDot,
-              {
-                transform: [{ translateX: filter.enabled ? 16 : 0 }],
-                backgroundColor: '#fff',
-              },
-            ]}
-          />
-        </TouchableOpacity>
+        <Switch accessibilityLabel={`启用滤波器 ${filter.id}`} value={filter.enabled} onValueChange={enabled => update({enabled})} />
       </View>
 
       {/* 滤波器类型选择 */}
@@ -143,6 +128,8 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
           return (
             <TouchableOpacity
               key={opt.key}
+              accessibilityRole="radio"
+              accessibilityState={{checked: isActive}}
               activeOpacity={0.7}
               onPress={() => update({ type: opt.key })}
               style={[
@@ -170,6 +157,7 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
         频率: {formatFreq(filter.frequency)} Hz
       </Text>
       <DragSlider
+        label="滤波器频率"
         value={Math.log10(filter.frequency)}
         min={Math.log10(20)}
         max={Math.log10(20000)}
@@ -182,6 +170,9 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
         {QUICK_FREQS.map(freq => (
           <TouchableOpacity
             key={freq}
+            accessibilityRole="button"
+            accessibilityLabel={`将滤波器频率设置为 ${freq} 赫兹`}
+            accessibilityState={{selected: filter.frequency === freq}}
             activeOpacity={0.7}
             onPress={() => update({ frequency: freq })}
             style={[
@@ -209,24 +200,27 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
         增益: {filter.gain > 0 ? '+' : ''}{filter.gain.toFixed(1)} dB
       </Text>
       <DragSlider
+        label="滤波器增益，分贝"
         value={filter.gain}
         min={-12}
         max={12}
         step={0.5}
         onChange={v => update({ gain: Math.round(v * 2) / 2 })}
-        color={filter.gain >= 0 ? '#00D2FF' : '#6C5CE7'}
+        color={t.colors.primary}
       />
 
       {/* Q 值控制 */}
       <Text style={[styles.label, { color: t.colors.text, marginTop: 12 }]}>
-        Q: {filter.q.toFixed(2)}
+        带宽 Q: {filter.q.toFixed(2)}
       </Text>
+      <Text style={{fontSize: 12, lineHeight: 18, color: t.colors.textSub}}>Q 值越大，调整的频率范围越窄。</Text>
       <DragSlider
+        label="滤波器带宽 Q 值"
         value={filter.q}
         min={0.1}
         max={20}
         onChange={v => update({ q: Math.round(v * 100) / 100 })}
-        color="#FDCB6E"
+        color={t.colors.primary}
       />
     </Animated.View>
   );
@@ -235,6 +229,7 @@ export const PEQFilterEditor: React.FC<PEQFilterEditorProps> = ({
 // ========== 高性能可拖动滑块组件 ==========
 
 interface DragSliderProps {
+  label: string;
   value: number;
   min: number;
   max: number;
@@ -253,6 +248,7 @@ interface DragSliderProps {
  * 3. 所有热路径参数通过 ref 持有，避免闭包过期
  */
 const DragSlider: React.FC<DragSliderProps> = ({
+  label,
   value,
   min,
   max,
@@ -275,12 +271,20 @@ const DragSlider: React.FC<DragSliderProps> = ({
   const maxRef = useRef(max);
   const stepRef = useRef(step);
   const onChangeRef = useRef(onChange);
+  const valueRef = useRef(value);
 
   // 同步外部 prop 到 ref
   minRef.current = min;
   maxRef.current = max;
   stepRef.current = step;
   onChangeRef.current = onChange;
+  valueRef.current = value;
+
+  React.useEffect(() => {
+    if (!isDraggingRef.current) {
+      lastCommittedValueRef.current = value;
+    }
+  }, [value]);
 
   /** 数值 → 百分比（0~1） */
   const valueToFraction = (v: number): number => {
@@ -309,8 +313,8 @@ const DragSlider: React.FC<DragSliderProps> = ({
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
         isDraggingRef.current = true;
-        startValueRef.current = value;
-        dragValueRef.current = value;
+        startValueRef.current = valueRef.current;
+        dragValueRef.current = valueRef.current;
       },
       onPanResponderMove: (_, gesture) => {
         if (trackWidthRef.current <= 0) return;
@@ -349,6 +353,16 @@ const DragSlider: React.FC<DragSliderProps> = ({
         {formatMinValue(min, max, formatValue)}
       </Text>
       <View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={label}
+        accessibilityValue={{min, max, now: value, text: formatValue ? formatValue(value) : `${value}`}}
+        accessibilityActions={[{name: 'increment', label: '增加'}, {name: 'decrement', label: '减少'}]}
+        onAccessibilityAction={event => {
+          const increment = step || (max - min) / 100;
+          const delta = event.nativeEvent.actionName === 'increment' ? increment : -increment;
+          onChange(Math.max(min, Math.min(max, value + delta)));
+        }}
         style={styles.sliderTrackContainer}
         onLayout={onLayout}
         {...panResponder.panHandlers}
@@ -422,9 +436,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   closeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -432,12 +446,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   deleteBtn: {
+    minHeight: 48,
+    justifyContent: 'center',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 6,
   },
   deleteBtnText: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '600',
   },
   switchRow: {
@@ -466,6 +482,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   typeChip: {
+    minHeight: 48,
+    justifyContent: 'center',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 8,
@@ -484,7 +502,7 @@ const styles = StyleSheet.create({
   },
   sliderTrackContainer: {
     flex: 1,
-    height: 28,
+    height: 48,
     justifyContent: 'center',
     position: 'relative',
   },
@@ -504,7 +522,7 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     borderWidth: 2,
     marginLeft: -9,
-    top: 5,
+    top: 15,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.3,
@@ -512,9 +530,9 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   sliderBound: {
-    fontSize: 9,
+    fontSize: 12,
     fontWeight: '500',
-    width: 24,
+    width: 36,
     textAlign: 'center',
   },
   quickFreqRow: {
@@ -522,12 +540,16 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   quickFreqChip: {
+    minWidth: 48,
+    minHeight: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 6,
     marginRight: 4,
   },
   quickFreqText: {
-    fontSize: 10,
+    fontSize: 12,
   },
 });

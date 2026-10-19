@@ -22,6 +22,7 @@ interface Props {
   onNext: () => void;
   onSetMode: (mode: 'sequential' | 'shuffle') => void;
   modeDisabled?: boolean;
+  compact?: boolean;
 }
 
 interface SmallControlProps {
@@ -30,6 +31,7 @@ interface SmallControlProps {
   color: string;
   onPress: () => void;
   disabled?: boolean;
+  selected?: boolean;
 }
 
 const SmallControl: React.FC<SmallControlProps> = ({
@@ -38,6 +40,7 @@ const SmallControl: React.FC<SmallControlProps> = ({
   color,
   onPress,
   disabled,
+  selected,
 }) => {
   const scale = useSharedValue(1);
   const animatedStyle = useAnimatedStyle(() => ({
@@ -48,6 +51,7 @@ const SmallControl: React.FC<SmallControlProps> = ({
     <AnimatedPressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{disabled: !!disabled, selected}}
       disabled={disabled}
       onPress={onPress}
       onPressIn={() => {
@@ -73,6 +77,7 @@ export const PlaybackControls: React.FC<Props> = ({
   onNext,
   onSetMode,
   modeDisabled = false,
+  compact = false,
 }) => {
   const playScale = useSharedValue(1);
   const playStyle = useAnimatedStyle(() => ({
@@ -81,7 +86,7 @@ export const PlaybackControls: React.FC<Props> = ({
   const isBusy = isBuffering || isResolving;
 
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, compact && styles.compactRow]}>
       <SmallControl
         label={playMode === 'shuffle' ? '随机播放模式' : '切换到随机播放'}
         icon="shuffle-variant"
@@ -92,6 +97,7 @@ export const PlaybackControls: React.FC<Props> = ({
         }
         onPress={() => onSetMode('shuffle')}
         disabled={modeDisabled}
+        selected={playMode === 'shuffle'}
       />
       <SmallControl
         label="上一首"
@@ -102,6 +108,8 @@ export const PlaybackControls: React.FC<Props> = ({
       <AnimatedPressable
         accessibilityRole="button"
         accessibilityLabel={isPlaying ? '暂停' : '播放'}
+        accessibilityState={{busy: isBusy}}
+        accessibilityHint={isBusy ? '正在准备音频' : undefined}
         onPress={onPlayPause}
         onPressIn={() => {
           playScale.value = withTiming(0.95, {duration: 120});
@@ -109,7 +117,7 @@ export const PlaybackControls: React.FC<Props> = ({
         onPressOut={() => {
           playScale.value = withTiming(1, {duration: 150});
         }}
-        style={[styles.playOuter, playStyle]}>
+        style={[styles.playOuter, compact && styles.compactPlay, playStyle]}>
         <LinearGradient
           colors={[theme.primaryAccent, theme.secondaryAccent]}
           start={{x: 0, y: 0}}
@@ -145,6 +153,7 @@ export const PlaybackControls: React.FC<Props> = ({
         }
         onPress={() => onSetMode('sequential')}
         disabled={modeDisabled}
+        selected={playMode === 'sequential'}
       />
     </View>
   );
@@ -160,12 +169,14 @@ const styles = StyleSheet.create({
     marginBottom: 13,
   },
   sideButton: {
-    width: 42,
+    width: 48,
     height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
   disabled: {opacity: 0.48},
+  compactRow: {marginTop: 8, marginBottom: 8},
+  compactPlay: {width: 72, height: 72, borderRadius: 36},
   playOuter: {
     width: 84,
     height: 84,

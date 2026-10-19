@@ -85,8 +85,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   heroControlHint: {
-    fontSize: 11,
-    marginTop: 3,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 4,
   },
   sectionCard: {
     marginTop: 14,
@@ -105,11 +106,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sectionSubtitle: {
-    fontSize: 11,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 20,
     marginTop: 3,
   },
   resetButton: {
+    minHeight: 48,
+    minWidth: 68,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
@@ -117,7 +120,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   resetText: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '700',
     marginLeft: 4,
   },
@@ -140,7 +143,7 @@ const styles = StyleSheet.create({
     marginRight: 5,
   },
   liveText: {
-    fontSize: 9,
+    fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
@@ -175,11 +178,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    minHeight: 38,
+    minHeight: 48,
     borderRadius: 12,
   },
   modeText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
     marginLeft: 6,
   },
@@ -192,21 +195,23 @@ const styles = StyleSheet.create({
   },
   bandGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     marginTop: 13,
     alignItems: 'center',
   },
   bandItem: {
     alignItems: 'center',
-    width: 28,
+    width: '20%',
+    paddingVertical: 8,
   },
   bandFreq: {
-    fontSize: 8,
+    fontSize: 12,
     fontWeight: '600',
     marginBottom: 5,
   },
   bandValue: {
-    fontSize: 8,
+    fontSize: 13,
     fontWeight: '700',
     marginBottom: 5,
   },
@@ -236,6 +241,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   peqFilterChip: {
+    minHeight: 60,
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 12,
@@ -244,17 +250,17 @@ const styles = StyleSheet.create({
     marginRight: 7,
   },
   peqFilterChipText: {
-    fontSize: 10,
+    fontSize: 13,
     fontWeight: '700',
   },
   peqFilterChipSub: {
-    fontSize: 9,
+    fontSize: 12,
     fontWeight: '500',
     marginTop: 3,
   },
   addFilterButton: {
-    width: 38,
-    height: 38,
+    width: 48,
+    height: 48,
     borderRadius: 14,
     borderWidth: 1,
     alignItems: 'center',
@@ -286,7 +292,7 @@ const BandDetail = memo<BandDetailProps>(({graphicBands}) => {
         <Text style={[styles.sectionTitle, {color: t.colors.text}]}>
           频段概览
         </Text>
-        <Text style={{fontSize: 10, color: t.colors.textHint}}>
+        <Text style={{fontSize: 12, color: t.colors.textHint}}>
           10 BAND · dB
         </Text>
       </View>
@@ -399,7 +405,7 @@ export const SoundLabScreen = () => {
                 {enabled ? '音效正在应用到当前播放' : '关闭后恢复原始声音'}
               </Text>
             </View>
-            <Switch value={enabled} onValueChange={setEnabled} />
+            <Switch accessibilityLabel="均衡器总开关" value={enabled} onValueChange={setEnabled} />
           </View>
         </View>
 
@@ -409,7 +415,7 @@ export const SoundLabScreen = () => {
             {backgroundColor: t.colors.surface, borderColor: t.colors.divider},
           ]}>
           <View style={styles.sectionHeadingRow}>
-            <View>
+            <View style={{flex: 1, minWidth: 0, marginRight: 8}}>
               <Text style={[styles.sectionTitle, {color: t.colors.text}]}>
                 声音预设
               </Text>
@@ -443,7 +449,7 @@ export const SoundLabScreen = () => {
             {backgroundColor: t.colors.surface, borderColor: t.colors.divider},
           ]}>
           <View style={styles.spectrumHeader}>
-            <View>
+            <View style={{flex: 1, minWidth: 0, marginRight: 8}}>
               <Text style={[styles.sectionTitle, {color: t.colors.text}]}>
                 实时频谱
               </Text>
@@ -498,12 +504,12 @@ export const SoundLabScreen = () => {
               <Text style={[styles.sectionTitle, {color: t.colors.text}]}>
                 均衡器调节
               </Text>
-              <Text style={{fontSize: 10, color: t.colors.textHint}}>
+              <Text style={{fontSize: 12, color: t.colors.textHint}}>
                 {enabled ? '已启用' : '已关闭'}
               </Text>
             </View>
             <Text style={[styles.sectionSubtitle, {color: t.colors.textHint}]}>
-              拖动控制点调整曲线，变化会同步到播放器。
+              {enabled ? (mode === 'graphic' ? '上下拖动各频段调整音色；向右滑动查看更多频段。' : '点选滤波器后调整频率、增益和带宽。') : '先打开上方均衡器总开关，即可调节并试听效果。'}
             </Text>
           </View>
 
@@ -515,6 +521,7 @@ export const SoundLabScreen = () => {
                 <TouchableOpacity
                   key={option.key}
                   accessibilityRole="tab"
+                  accessibilityLabel={option.label}
                   accessibilityState={{selected: active}}
                   activeOpacity={0.8}
                   onPress={() => setMode(option.key)}
@@ -562,17 +569,13 @@ const GraphicEQSection = memo<GraphicEQSectionProps>(({enabled}) => {
   const graphicBands = useEQStore(state => state.graphicBands);
   return (
     <View style={styles.editorBody}>
-      <View
+        <View
+        accessibilityElementsHidden={!enabled}
+        importantForAccessibility={enabled ? 'auto' : 'no-hide-descendants'}
         pointerEvents={enabled ? 'auto' : 'none'}
         style={{opacity: enabled ? 1 : 0.45}}>
-        <View style={styles.eqScrollArea}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            bounces={false}
-            nestedScrollEnabled>
-            <GraphicEQ />
-          </ScrollView>
+        <View style={{paddingHorizontal: 16}}>
+          <GraphicEQ />
         </View>
         <BandDetail graphicBands={graphicBands} />
       </View>
@@ -606,7 +609,7 @@ const PEQSection = memo<PEQSectionProps>(
 
     return (
       <View style={styles.editorBody}>
-        <View style={[styles.peqSection, {opacity: enabled ? 1 : 0.45}]}>
+        <View pointerEvents={enabled ? 'auto' : 'none'} accessibilityElementsHidden={!enabled} importantForAccessibility={enabled ? 'auto' : 'no-hide-descendants'} style={[styles.peqSection, {opacity: enabled ? 1 : 0.45}]}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -636,6 +639,7 @@ const PEQSection = memo<PEQSectionProps>(
                   <TouchableOpacity
                     key={filter.id}
                     accessibilityRole="button"
+                    accessibilityLabel={`滤波器 ${filter.id}，${frequency} 赫兹，增益 ${filter.gain} 分贝，${filter.enabled ? '已启用' : '已关闭'}`}
                     accessibilityState={{selected}}
                     activeOpacity={0.75}
                     onPress={() => onSelectFilter(selected ? null : filter.id)}
@@ -659,7 +663,7 @@ const PEQSection = memo<PEQSectionProps>(
                             : t.colors.textSub,
                         },
                       ]}>
-                      #{filter.id} · {filter.type}
+                      滤波器 {filter.id} · {filter.enabled ? '开' : '关'}
                     </Text>
                     <Text
                       style={[

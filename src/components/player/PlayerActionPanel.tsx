@@ -15,6 +15,7 @@ interface Props {
   onEffects: () => void;
   onTimer: () => void;
   onMore: () => void;
+  compact?: boolean;
 }
 
 interface ActionProps {
@@ -40,6 +41,7 @@ const Action: React.FC<ActionProps> = ({
       disabled ? `${label}，当前不可用` : accessibilityLabel ?? label
     }
     disabled={disabled}
+    accessibilityState={{disabled: !!disabled}}
     onPress={onPress}
     activeOpacity={0.72}
     style={[styles.action, disabled && styles.disabled]}>
@@ -56,6 +58,7 @@ export const PlayerActionPanel: React.FC<Props> = ({
   onEffects,
   onTimer,
   onMore,
+  compact = false,
 }) => {
   const isFocused = useIsFocused();
   const [timerActive, setTimerActive] = useState(() => {
@@ -80,7 +83,7 @@ export const PlayerActionPanel: React.FC<Props> = ({
   }, [isFocused]);
 
   return (
-    <View style={styles.panel}>
+    <View style={[styles.panel, compact && styles.compactPanel]}>
       <BlurView
         style={StyleSheet.absoluteFill}
         blurType="light"
@@ -89,7 +92,7 @@ export const PlayerActionPanel: React.FC<Props> = ({
       />
       <View style={styles.tone} pointerEvents="none" />
       <Action
-        label="列表"
+        label="播放列表"
         icon="playlist-music"
         color={theme.foreground}
         onPress={onQueue}
@@ -101,7 +104,7 @@ export const PlayerActionPanel: React.FC<Props> = ({
         onPress={onEffects}
       />
       <Action
-        label="定时"
+        label={timerActive ? '定时中' : '定时'}
         icon={timerActive ? 'timer-sand' : 'timer-outline'}
         color={timerActive ? theme.primaryAccent : theme.foreground}
         accessibilityLabel={timerActive ? '查看或取消定时暂停' : '设置定时暂停'}
@@ -132,9 +135,10 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
+  compactPanel: {minHeight: 72, borderRadius: 24},
   action: {
     minWidth: 64,
-    minHeight: 76,
+    minHeight: 64,
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',

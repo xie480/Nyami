@@ -59,6 +59,8 @@ interface EQSliderProps {
 const GAIN_MIN = -12;
 const GAIN_MAX = 12;
 const THROTTLE_MS = 50; // DSP 更新节流间隔
+const VERTICAL_DRAG_THRESHOLD = 6;
+const VERTICAL_DRAG_DOMINANCE = 1.2;
 
 export const EQSlider: React.FC<EQSliderProps> = ({
   value,
@@ -84,6 +86,11 @@ export const EQSlider: React.FC<EQSliderProps> = ({
   // 存储 onValueChange 引用以避免闭包过期
   const onChangeRef = useRef(onValueChange);
   onChangeRef.current = onValueChange;
+  const valueRef = useRef(value);
+  const disabledRef = useRef(disabled);
+  const trackRef = useRef<View>(null);
+  valueRef.current = value;
+  disabledRef.current = disabled;
 
   // ========== 动画值 ==========
   // thumb 垂直偏移（单位 px），正值 = 向下移动
@@ -94,7 +101,9 @@ export const EQSlider: React.FC<EQSliderProps> = ({
   // throttle 包装的回调（稳定引用）
   const throttledOnChange = useRef(
     throttle((val: number) => {
-      onChangeRef.current(val);
+      if (!disabledRef.current) {
+        onChangeRef.current(val);
+      }
     }, THROTTLE_MS),
   ).current;
 
@@ -106,13 +115,7 @@ export const EQSlider: React.FC<EQSliderProps> = ({
       ? '#6C8CFF'
       : t.colors.textHint;
 
-  // 当前 thumb 应该位于的 bottom 位置（基于 prop value）
-  const thumbBottomPx = fraction * trackHeightRef.current;
-
-  // thumb 当前实际底部位置（初始 bottom + 动画偏移）
-  // translateY 正值向下，所以 thumb 的净偏移 = thumbBottomPx - translateY
-  // 简化处理：我们直接在样式中使用 bottom: thumbBottomPx，
-  // translateY 在拖动时叠加偏移量（负值向上）
+  // thumb 的基准位置随最新 prop value 更新，拖动偏移叠加在该位置上。
 
   // ========== 外部 value 变化时同步动画值 ==========
   useEffect(() => {
@@ -147,20 +150,29 @@ export const EQSlider: React.FC<EQSliderProps> = ({
     const newFraction = (val + 12) / 24;
     const newBottom = newFraction * trackHeightRef.current;
     // translateY = 初始bottom - 新bottom（正值向下，负值向上）
-    return thumbBottomPx - newBottom;
+    return ((valueRef.current + 12) / 24) * trackHeightRef.current - newBottom;
   };
 
   // ========== PanResponder ==========
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => !disabled,
-      onMoveShouldSetPanResponder: () => !disabled,
+      // Let the enclosing horizontal frequency list own taps and horizontal swipes.
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_event, gesture) =>
+        !disabledRef.current &&
+        Math.abs(gesture.dy) > VERTICAL_DRAG_THRESHOLD &&
+        Math.abs(gesture.dy) > Math.abs(gesture.dx) * VERTICAL_DRAG_DOMINANCE,
       onStartShouldSetPanResponderCapture: () => false,
       onMoveShouldSetPanResponderCapture: () => false,
 
       onPanResponderGrant: () => {
+        if (disabledRef.current) return;
         isDraggingRef.current = true;
-        dragValueRef.current = value;
+        dragValueRef.current = valueRef.current;
+        trackRef.current?.measureInWindow((_x, y, _width, measuredHeight) => {
+          trackLayoutRef.current = {y, height: measuredHeight};
+          trackHeightRef.current = measuredHeight;
+        });
 
         // 启动拖动视觉反馈
         Animated.parallel([
@@ -179,6 +191,7 @@ export const EQSlider: React.FC<EQSliderProps> = ({
       },
 
       onPanResponderMove: (evt) => {
+        if (!isDraggingRef.current || disabledRef.current) return;
         const newValue = getValueFromTouch(evt.nativeEvent.pageY);
         if (newValue !== dragValueRef.current) {
           dragValueRef.current = newValue;
@@ -191,11 +204,12 @@ export const EQSlider: React.FC<EQSliderProps> = ({
       },
 
       onPanResponderRelease: () => {
+        if (!isDraggingRef.current) return;
         isDraggingRef.current = false;
         const finalValue = dragValueRef.current;
 
         // 提交最终值到 store
-        if (finalValue !== lastCommittedValueRef.current) {
+        if (!disabledRef.current && finalValue !== lastCommittedValueRef.current) {
           lastCommittedValueRef.current = finalValue;
           onChangeRef.current(finalValue);
         }
@@ -223,9 +237,10 @@ export const EQSlider: React.FC<EQSliderProps> = ({
       },
 
       onPanResponderTerminate: () => {
+        if (!isDraggingRef.current) return;
         isDraggingRef.current = false;
         const finalValue = dragValueRef.current;
-        if (finalValue !== lastCommittedValueRef.current) {
+        if (!disabledRef.current && finalValue !== lastCommittedValueRef.current) {
           lastCommittedValueRef.current = finalValue;
           onChangeRef.current(finalValue);
         }
@@ -239,8 +254,8 @@ export const EQSlider: React.FC<EQSliderProps> = ({
   ).current;
 
   // ========== 布局测量 ==========
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
-    e.target?.measureInWindow?.((_x: number, y: number, _w: number, h: number) => {
+  const onLayout = useCallback((_e: LayoutChangeEvent) => {
+    trackRef.current?.measureInWindow((_x: number, y: number, _w: number, h: number) => {
       trackLayoutRef.current = { y, height: h };
       trackHeightRef.current = h;
     });
@@ -254,24 +269,39 @@ export const EQSlider: React.FC<EQSliderProps> = ({
   const thumbSize = 24;
 
   return (
-    <View style={[styles.container, { width, height }]}>
+    <View
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel={`${label} 赫兹频段增益`}
+      accessibilityState={{disabled}}
+      accessibilityValue={{min: GAIN_MIN, max: GAIN_MAX, now: value, text: `${value} 分贝`}}
+      accessibilityActions={[{name: 'increment', label: '增加增益'}, {name: 'decrement', label: '减少增益'}]}
+      onAccessibilityAction={event => {
+        if (!disabled) {
+          const delta = event.nativeEvent.actionName === 'increment' ? 1 : -1;
+          onValueChange(Math.max(GAIN_MIN, Math.min(GAIN_MAX, value + delta)));
+        }
+      }}
+      style={[styles.container, { width: Math.max(48, width), height }]}>
       {/* 频段标签 */}
       <Text style={[styles.label, { color: t.colors.textSub }]}>{label}</Text>
 
       {/* 滑块轨道 */}
       <View
+        ref={trackRef}
         style={[
           styles.track,
           {
-            width: 4,
+            width: 48,
             flex: 1,
-            backgroundColor: t.colors.divider,
+            backgroundColor: 'transparent',
             borderRadius: 2,
           },
         ]}
         onLayout={onLayout}
         {...panResponder.panHandlers}
       >
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, {width: 4, left: 22, borderRadius: 2, backgroundColor: t.colors.divider}]} />
         {/* 填充轨道（从底部向上，基于 prop value） */}
         <View
           style={[
@@ -351,7 +381,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   label: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '600',
     marginBottom: 6,
     textAlign: 'center',
@@ -368,7 +398,7 @@ const styles = StyleSheet.create({
   zeroLine: {
     position: 'absolute',
     top: '50%',
-    left: -3,
+    left: 19,
     width: 10,
     height: 1,
     opacity: 0.65,
@@ -382,7 +412,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   value: {
-    fontSize: 9,
+    fontSize: 12,
     fontWeight: '500',
     marginTop: 6,
     textAlign: 'center',

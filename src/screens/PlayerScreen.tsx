@@ -64,7 +64,8 @@ export const PlayerScreen = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
-  const {width: screenWidth, height: screenHeight} = useWindowDimensions();
+  const {width: screenWidth, height: screenHeight, fontScale} = useWindowDimensions();
+  const [recordSlotHeight, setRecordSlotHeight] = useState(0);
 
   const {
     storeQueue,
@@ -300,11 +301,12 @@ export const PlayerScreen = () => {
     0,
     screenHeight - statusBarHeight - insets.bottom,
   );
-  const reservedHeight = 348 + AUDIO_REACTIVE_RING_LAYOUT_GROWTH;
-  const recordSize = Math.max(
-    154,
-    Math.min(screenWidth * 0.74, (availableHeight - reservedHeight) * 0.73),
-  );
+  const compact = availableHeight < 660 || fontScale > 1.25;
+  // Measure the space left by real controls and scaled text instead of estimating it.
+  const recordSize = Math.max(0, Math.min(
+    screenWidth * 0.74,
+    recordSlotHeight - AUDIO_REACTIVE_RING_LAYOUT_GROWTH,
+  ));
   const seekDuration = progressDuration || duration;
   const hasResetProgressOnFocus = useRef(false);
   useFocusEffect(
@@ -364,6 +366,15 @@ export const PlayerScreen = () => {
           backgroundColor="transparent"
         />
         <ActivityIndicator size="large" color={t.colors.primary} />
+        <Text style={[styles.loadingText, {color: t.colors.textSub}]}>正在准备音频</Text>
+        <IconButton
+          name="chevron-down"
+          size={28}
+          color={t.colors.text}
+          accessibilityLabel="关闭播放详情"
+          onPress={() => navigation.goBack()}
+          style={[styles.loadingBack, {top: statusBarHeight + 8}]}
+        />
       </View>
     );
   }
@@ -416,15 +427,15 @@ export const PlayerScreen = () => {
           <View style={styles.headerButton} />
         </View>
 
-        <View style={styles.recordSlot}>
-          <VinylRecord
+        <View style={styles.recordSlot} onLayout={event => setRecordSlotHeight(event.nativeEvent.layout.height)}>
+          {recordSize >= 64 && <VinylRecord
             artworkUri={artworkUri}
             size={recordSize}
             isPlaying={isPlaying}
             isVisible={isMotionActive}
             reduceMotion={isReduceMotionEnabled}
             theme={albumTheme}
-          />
+          />}
         </View>
 
         <TrackInfo
@@ -440,6 +451,8 @@ export const PlayerScreen = () => {
           }
           isFavorited={isTrackFavorited}
           favoriteLoading={isLocalFavoriteFolderPlayback && folderFavoriteLoading}
+          favoriteAccessibilityLabel={isLocalFavoriteFolderPlayback ? '已收藏，从当前收藏夹移除' : '已收藏，管理当前歌曲的收藏'}
+          compact={compact}
         />
 
         <View style={styles.progressSection}>
@@ -448,7 +461,7 @@ export const PlayerScreen = () => {
             position={progressPosition}
             duration={seekDuration}
             colors={[albumTheme.primaryAccent, albumTheme.secondaryAccent]}
-            trackColor="rgba(255,255,255,0.34)"
+            trackColor={`${albumTheme.foreground}33`}
             thumbColor={albumTheme.primaryAccent}
             timeColor={albumTheme.secondaryForeground}
             onSeekEnd={onSeekEnd}
@@ -460,8 +473,8 @@ export const PlayerScreen = () => {
             accessibilityRole="button"
             accessibilityLabel={`${playbackError}，点击重试`}
             onPress={() => retryCurrentTrack()}
-            style={styles.playbackError}>
-            <Text style={styles.playbackErrorText}>
+            style={[styles.playbackError, {backgroundColor: `${albumTheme.foreground}12`}]}>
+            <Text numberOfLines={2} style={[styles.playbackErrorText, {color: albumTheme.foreground}]}>
               {playbackError} · 点击重试
             </Text>
           </TouchableOpacity>
@@ -478,6 +491,7 @@ export const PlayerScreen = () => {
           onNext={skipToNext}
           onSetMode={onSetPlayMode}
           modeDisabled={syncStatus === 'syncing'}
+          compact={compact}
         />
 
         <PlayerActionPanel
@@ -486,6 +500,7 @@ export const PlayerScreen = () => {
           onEffects={() => navigation.navigate('SoundLab')}
           onTimer={() => setIsSleepTimerSheetVisible(true)}
           onMore={() => setIsMoreSheetVisible(true)}
+          compact={compact}
         />
       </View>
 
@@ -533,27 +548,30 @@ const styles = StyleSheet.create({
   screen: {flex: 1, overflow: 'hidden'},
   content: {flex: 1},
   loading: {flex: 1, alignItems: 'center', justifyContent: 'center'},
+  loadingText: {fontSize: 14, marginTop: 16},
+  loadingBack: {position: 'absolute', left: 20},
   header: {
-    minHeight: 42,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   headerButton: {
     width: 48,
-    height: 44,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerCopy: {alignItems: 'center', justifyContent: 'center'},
-  headerEyebrow: {fontSize: 9, fontWeight: '700', letterSpacing: 2.4},
+  headerEyebrow: {fontSize: 11, fontWeight: '700', letterSpacing: 2},
   recordSlot: {
     flex: 1,
-    minHeight: 188,
+    minHeight: 0,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
   progressSection: {marginTop: 5},
-  playbackError: {paddingVertical: 4, alignItems: 'center'},
-  playbackErrorText: {color: '#FFE0DC', fontSize: 12, textAlign: 'center'},
+  playbackError: {minHeight: 48, paddingHorizontal: 12, borderRadius: 12, justifyContent: 'center', alignItems: 'center'},
+  playbackErrorText: {fontSize: 12, lineHeight: 18, textAlign: 'center'},
 });

@@ -42,7 +42,6 @@ export const PlayerMoreSheet: React.FC<Props> = ({
   parts,
   bvid,
   currentCid,
-  theme,
   onTogglePersonalizedCaching,
   onBlurAmountChange,
   onOpenBilibiliVideo,
@@ -54,10 +53,10 @@ export const PlayerMoreSheet: React.FC<Props> = ({
   const videoUrl = createBilibiliVideoUrl(bvid);
   const sheetStyle = useMemo(
     () => ({
-      backgroundColor: t.isDark ? '#17191E' : '#F6F4EF',
+      backgroundColor: t.colors.surfaceRaised,
       paddingBottom: Math.max(insets.bottom, 16) + 8,
     }),
-    [insets.bottom, t.isDark],
+    [insets.bottom, t.colors.surfaceRaised],
   );
 
   return (
@@ -70,7 +69,7 @@ export const PlayerMoreSheet: React.FC<Props> = ({
         <TouchableWithoutFeedback onPress={onClose}>
           <View style={styles.backdrop} />
         </TouchableWithoutFeedback>
-        <View style={[styles.sheet, sheetStyle]}>
+        <View accessibilityViewIsModal style={[styles.sheet, sheetStyle]}>
           <View style={styles.header}>
             <Text style={[styles.title, {color: t.colors.text}]}>更多</Text>
             <TouchableOpacity
@@ -94,12 +93,12 @@ export const PlayerMoreSheet: React.FC<Props> = ({
                 <View
                   style={[
                     styles.sectionIcon,
-                    {backgroundColor: `${theme.primaryAccent}18`},
+                    {backgroundColor: `${t.colors.primary}18`},
                   ]}>
                   <MaterialCommunityIcons
                     name="creation"
                     size={20}
-                    color={theme.primaryAccent}
+                    color={t.colors.primary}
                   />
                 </View>
                 <View style={styles.sectionCopy}>
@@ -111,6 +110,7 @@ export const PlayerMoreSheet: React.FC<Props> = ({
                   </Text>
                 </View>
                 <Switch
+                  accessibilityLabel="个性化推荐无限预加载"
                   value={cachePersonalizedRecommendations}
                   onValueChange={onTogglePersonalizedCaching}
                 />
@@ -122,7 +122,7 @@ export const PlayerMoreSheet: React.FC<Props> = ({
                 <MaterialCommunityIcons
                   name="blur"
                   size={20}
-                  color={theme.primaryAccent}
+                  color={t.colors.primary}
                 />
               </View>
               <View style={styles.sectionCopy}>
@@ -133,44 +133,25 @@ export const PlayerMoreSheet: React.FC<Props> = ({
                   仅调整播放页封面背景
                 </Text>
               </View>
-              <Text style={[styles.value, {color: theme.primaryAccent}]}>
+              <Text style={[styles.value, {color: t.colors.primary}]}>
                 {blurAmount}
               </Text>
             </View>
 
-            <View
-              accessibilityRole="adjustable"
-              accessibilityLabel="播放页背景模糊度"
-              accessibilityValue={{
-                min: PLAYER_ARTWORK_BLUR.min,
-                max: PLAYER_ARTWORK_BLUR.max,
-                now: blurAmount,
-              }}
-              accessibilityActions={[
-                {name: 'increment', label: '增加模糊度'},
-                {name: 'decrement', label: '降低模糊度'},
-              ]}
-              onAccessibilityAction={event => {
-                const delta =
-                  event.nativeEvent.actionName === 'increment'
-                    ? PLAYER_ARTWORK_BLUR.step
-                    : -PLAYER_ARTWORK_BLUR.step;
-                onBlurAmountChange(blurAmount + delta);
-              }}>
               <Slider
+                accessibilityLabel="播放页背景模糊度"
                 value={blurAmount}
                 minimumValue={PLAYER_ARTWORK_BLUR.min}
                 maximumValue={PLAYER_ARTWORK_BLUR.max}
                 step={PLAYER_ARTWORK_BLUR.step}
                 onValueChange={onBlurAmountChange}
-                minimumTrackColor={theme.primaryAccent}
+                minimumTrackColor={t.colors.primary}
                 maximumTrackColor={t.colors.divider}
-                thumbColor={theme.primaryAccent}
+                thumbColor={t.colors.primary}
                 trackHeight={5}
                 thumbSize={22}
                 style={styles.slider}
               />
-            </View>
             <View style={styles.rangeLabels}>
               <Text style={[styles.caption, {color: t.colors.textHint}]}>
                 清晰
@@ -190,12 +171,12 @@ export const PlayerMoreSheet: React.FC<Props> = ({
                 <View
                   style={[
                     styles.sectionIcon,
-                    {backgroundColor: `${theme.primaryAccent}18`},
+                    {backgroundColor: `${t.colors.primary}18`},
                   ]}>
                   <MaterialCommunityIcons
                     name="open-in-new"
                     size={20}
-                    color={theme.primaryAccent}
+                    color={t.colors.primary}
                   />
                 </View>
                 <View style={styles.sectionCopy}>
@@ -226,6 +207,7 @@ export const PlayerMoreSheet: React.FC<Props> = ({
                       <TouchableOpacity
                         key={part.cid}
                         accessibilityRole="button"
+                        accessibilityLabel={`${part.title}${selected ? '，正在播放' : '，播放此分集'}`}
                         accessibilityState={{selected}}
                         onPress={() => onSelectPart(part)}
                         activeOpacity={0.72}
@@ -233,7 +215,7 @@ export const PlayerMoreSheet: React.FC<Props> = ({
                           styles.partRow,
                           {borderBottomColor: t.colors.divider},
                           selected && {
-                            backgroundColor: `${theme.primaryAccent}18`,
+                            backgroundColor: `${t.colors.primary}18`,
                           },
                         ]}>
                         <Text
@@ -242,7 +224,7 @@ export const PlayerMoreSheet: React.FC<Props> = ({
                             styles.partTitle,
                             {
                               color: selected
-                                ? theme.primaryAccent
+                                ? t.colors.primary
                                 : t.colors.text,
                             },
                           ]}>
@@ -252,7 +234,7 @@ export const PlayerMoreSheet: React.FC<Props> = ({
                           <Text
                             style={[
                               styles.playingLabel,
-                              {color: theme.primaryAccent},
+                              {color: t.colors.primary},
                             ]}>
                             正在播放
                           </Text>
@@ -294,8 +276,8 @@ const styles = StyleSheet.create({
   },
   title: {fontSize: 17, fontWeight: '700'},
   closeButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -322,9 +304,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(128,128,128,0.12)',
   },
-  sectionCopy: {flex: 1, marginLeft: 12},
+  sectionCopy: {flex: 1, minWidth: 0, marginLeft: 12, marginRight: 8},
   sectionTitle: {fontSize: 14, fontWeight: '600'},
-  caption: {fontSize: 12, marginTop: 3},
+  caption: {fontSize: 13, lineHeight: 20, marginTop: 4},
   value: {fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums']},
   slider: {marginTop: 12},
   rangeLabels: {
@@ -352,5 +334,5 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   partTitle: {flex: 1, fontSize: 14, marginRight: 12},
-  playingLabel: {fontSize: 11, fontWeight: '600'},
+  playingLabel: {fontSize: 12, fontWeight: '600'},
 });

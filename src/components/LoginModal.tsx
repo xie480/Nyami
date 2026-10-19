@@ -13,6 +13,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import CookieManager, {
   type Cookie,
@@ -323,6 +324,8 @@ function buildCookieRefreshScript(
 
 export const LoginModal = () => {
   const theme = useTheme();
+  const {width} = useWindowDimensions();
+  const qrSize = Math.max(140, Math.min(204, width - 112));
   const webViewRef = useRef<WebView>(null);
   const refreshTokenRef = useRef<string | null>(null);
   const refreshTokenResolverRef = useRef<
@@ -802,16 +805,16 @@ export const LoginModal = () => {
       borderRadius: 15,
       backgroundColor: theme.colors.primary,
     },
-    brandBadgeText: {color: '#FFFFFF', fontSize: 25, fontWeight: '800'},
+    brandBadgeText: {color: theme.colors.onPrimary, fontSize: 25, fontWeight: '800'},
     headerCopy: {flex: 1, marginLeft: 12},
     title: {color: theme.colors.text, fontSize: 19, fontWeight: '700'},
-    subtitle: {marginTop: 3, color: theme.colors.textSub, fontSize: 12},
+    subtitle: {marginTop: 4, color: theme.colors.textSub, fontSize: 13, lineHeight: 19},
     close: {
-      width: 38,
-      height: 38,
+      width: 48,
+      height: 48,
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: 19,
+      borderRadius: 24,
       backgroundColor: theme.colors.surface,
     },
     closeText: {color: theme.colors.textSub, fontSize: 24, lineHeight: 28},
@@ -825,14 +828,14 @@ export const LoginModal = () => {
     },
     tab: {
       flex: 1,
-      minHeight: 44,
+      minHeight: 48,
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: 11,
     },
     activeTab: {backgroundColor: theme.colors.primary},
     tabText: {color: theme.colors.textSub, fontSize: 14, fontWeight: '500'},
-    activeTabText: {color: '#FFFFFF'},
+    activeTabText: {color: theme.colors.onPrimary},
     qrScroll: {flex: 1},
     qrScrollContent: {
       flexGrow: 1,
@@ -872,8 +875,8 @@ export const LoginModal = () => {
       elevation: 2,
     },
     qrFrame: {
-      width: 236,
-      height: 236,
+      width: qrSize + 32,
+      height: qrSize + 32,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: '#FFFFFF',
@@ -887,7 +890,7 @@ export const LoginModal = () => {
     },
     qrUnavailableText: {
       marginTop: 6,
-      color: theme.colors.textSub,
+      color: '#475569',
       fontSize: 13,
       textAlign: 'center',
     },
@@ -901,7 +904,7 @@ export const LoginModal = () => {
     help: {
       marginTop: 7,
       color: theme.colors.textSub,
-      fontSize: 12,
+      fontSize: 13,
       lineHeight: 20,
       textAlign: 'center',
     },
@@ -929,7 +932,7 @@ export const LoginModal = () => {
     },
     recoveryButton: {
       flex: 1,
-      minHeight: 42,
+      minHeight: 48,
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: 8,
@@ -943,9 +946,11 @@ export const LoginModal = () => {
       fontWeight: '600',
       textAlign: 'center',
     },
-    recoveryButtonTextPrimary: {color: '#FFFFFF'},
+    recoveryButtonTextPrimary: {color: theme.colors.onPrimary},
     action: {
       alignSelf: 'center',
+      minHeight: 48,
+      justifyContent: 'center',
       marginTop: 14,
       paddingVertical: 10,
       paddingHorizontal: 16,
@@ -968,12 +973,12 @@ export const LoginModal = () => {
     },
     passwordHelpText: {
       color: theme.colors.textSub,
-      fontSize: 12,
-      lineHeight: 19,
+      fontSize: 13,
+      lineHeight: 20,
     },
     passwordCheckButton: {
       alignSelf: 'flex-start',
-      minHeight: 42,
+      minHeight: 48,
       justifyContent: 'center',
       marginTop: 10,
       paddingHorizontal: 14,
@@ -986,7 +991,7 @@ export const LoginModal = () => {
       justifyContent: 'center',
       gap: 8,
     },
-    passwordCheckText: {color: '#FFFFFF', fontSize: 13, fontWeight: '600'},
+    passwordCheckText: {color: theme.colors.onPrimary, fontSize: 14, fontWeight: '600'},
     disabledAction: {opacity: 0.7},
     webViewShell: {
       flex: 1,
@@ -1028,13 +1033,15 @@ export const LoginModal = () => {
       textAlign: 'center',
     },
     webViewRetry: {
+      minHeight: 48,
+      justifyContent: 'center',
       marginTop: 18,
       paddingHorizontal: 18,
       paddingVertical: 11,
       borderRadius: 12,
       backgroundColor: theme.colors.primary,
     },
-    webViewRetryText: {color: '#FFFFFF', fontSize: 14, fontWeight: '600'},
+    webViewRetryText: {color: theme.colors.onPrimary, fontSize: 14, fontWeight: '600'},
     ticketPanel: {paddingHorizontal: 20, paddingVertical: 10},
     refreshPanel: {
       flex: 1,
@@ -1085,14 +1092,15 @@ export const LoginModal = () => {
                   <Text style={styles.brandBadgeText}>B</Text>
                 </View>
                 <View style={styles.headerCopy}>
-                  <Text style={styles.title}>登录 BiliMusic</Text>
+                  <Text style={styles.title}>登录 Nyami</Text>
                   <Text style={styles.subtitle}>安全连接哔哩哔哩账号</Text>
                 </View>
               </View>
               <TouchableOpacity
                 onPress={closeLogin}
                 style={styles.close}
-                accessibilityRole="button">
+                accessibilityRole="button"
+                accessibilityLabel="关闭登录">
                 <Text style={styles.closeText}>×</Text>
               </TouchableOpacity>
             </View>
@@ -1101,7 +1109,8 @@ export const LoginModal = () => {
                 onPress={() => selectMode('qr')}
                 disabled={loginChecking}
                 style={[styles.tab, mode === 'qr' && styles.activeTab]}
-                accessibilityRole="button">
+                accessibilityRole="tab"
+                accessibilityState={{selected: mode === 'qr', disabled: loginChecking}}>
                 <Text
                   style={[
                     styles.tabText,
@@ -1114,13 +1123,14 @@ export const LoginModal = () => {
                 onPress={() => selectMode('password')}
                 disabled={loginChecking}
                 style={[styles.tab, mode === 'password' && styles.activeTab]}
-                accessibilityRole="button">
+                accessibilityRole="tab"
+                accessibilityState={{selected: mode === 'password', disabled: loginChecking}}>
                 <Text
                   style={[
                     styles.tabText,
                     mode === 'password' && styles.activeTabText,
                   ]}>
-                  账号密码
+                  网页登录
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1137,7 +1147,7 @@ export const LoginModal = () => {
                   <View style={styles.qrCard}>
                     <View style={styles.qrFrame}>
                       {qrUrl ? (
-                        <QRCode value={qrUrl} size={204} ecl="M" />
+                        <QRCode value={qrUrl} size={qrSize} ecl="M" />
                       ) : qrBusy ? (
                         <ActivityIndicator
                           size="large"
@@ -1159,7 +1169,7 @@ export const LoginModal = () => {
                       登录状态会安全保存在本机。若 B
                       站要求手机号验证，请按页面提示完成。
                     </Text>
-                    <View style={styles.statusRow}>
+                    <View style={styles.statusRow} accessibilityLiveRegion="polite">
                       {qrBusy && (
                         <ActivityIndicator
                           size="small"
@@ -1221,7 +1231,7 @@ export const LoginModal = () => {
                     accessibilityRole="button">
                     <View style={styles.passwordCheckContent}>
                       {loginChecking && (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
+                        <ActivityIndicator size="small" color={theme.colors.onPrimary} />
                       )}
                       <Text style={styles.passwordCheckText}>
                         {loginChecking

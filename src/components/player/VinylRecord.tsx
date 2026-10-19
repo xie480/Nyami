@@ -124,7 +124,7 @@ export const VinylRecord: React.FC<Props> = ({
   const spinningStyle = useAnimatedStyle(() => ({
     transform: [{rotateZ: `${rotationOffset.value + rotation.value * 360}deg`}],
   }));
-  const recordSize = Math.max(154, size);
+  const recordSize = Math.max(96, size);
   const stageSize = recordSize + AUDIO_REACTIVE_RING_OUTSET * 2;
 
   return (

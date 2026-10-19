@@ -36,7 +36,6 @@ function formatRemaining(seconds: number): string {
 
 export const SleepTimerSheet: React.FC<Props> = ({
   visible,
-  theme,
   onStart,
   onClose,
 }) => {
@@ -46,10 +45,10 @@ export const SleepTimerSheet: React.FC<Props> = ({
   const [now, setNow] = useState(Date.now());
   const sheetStyle = useMemo(
     () => ({
-      backgroundColor: t.isDark ? '#17191E' : '#F6F4EF',
+      backgroundColor: t.colors.surfaceRaised,
       paddingBottom: Math.max(insets.bottom, 16) + 8,
     }),
-    [insets.bottom, t.isDark],
+    [insets.bottom, t.colors.surfaceRaised],
   );
 
   useEffect(() => {
@@ -85,7 +84,7 @@ export const SleepTimerSheet: React.FC<Props> = ({
         <TouchableWithoutFeedback onPress={onClose}>
           <View style={styles.backdrop} />
         </TouchableWithoutFeedback>
-        <View style={[styles.sheet, sheetStyle]}>
+        <View accessibilityViewIsModal style={[styles.sheet, sheetStyle]}>
           <View style={styles.handle} />
           <View style={styles.header}>
             <View style={styles.titleBlock}>
@@ -117,17 +116,17 @@ export const SleepTimerSheet: React.FC<Props> = ({
               )}`}
               style={[
                 styles.countdownCard,
-                {backgroundColor: `${theme.primaryAccent}18`},
+                {backgroundColor: `${t.colors.primary}18`},
               ]}>
               <View
                 style={[
                   styles.timerIcon,
-                  {backgroundColor: `${theme.primaryAccent}22`},
+                  {backgroundColor: `${t.colors.primary}22`},
                 ]}>
                 <MaterialCommunityIcons
                   name="timer-sand"
                   size={22}
-                  color={theme.primaryAccent}
+                  color={t.colors.primary}
                 />
               </View>
               <View style={styles.countdownCopy}>
@@ -135,7 +134,7 @@ export const SleepTimerSheet: React.FC<Props> = ({
                   正在倒计时
                 </Text>
                 <Text
-                  style={[styles.countdownValue, {color: theme.primaryAccent}]}
+                  style={[styles.countdownValue, {color: t.colors.primary}]}
                   numberOfLines={1}>
                   {formatRemaining(remainingSeconds)} 后暂停
                 </Text>
@@ -211,10 +210,10 @@ const styles = StyleSheet.create({
   header: {flexDirection: 'row', alignItems: 'center', minHeight: 54},
   titleBlock: {flex: 1},
   title: {fontSize: 18, fontWeight: '700'},
-  subtitle: {fontSize: 12, marginTop: 4},
+  subtitle: {fontSize: 13, lineHeight: 20, marginTop: 4},
   closeButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -261,12 +260,12 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     minWidth: 56,
-    minHeight: 38,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 13,
   },
   cancelLabel: {fontSize: 12, fontWeight: '600'},
-  footnote: {fontSize: 11, textAlign: 'center', marginTop: 16},
+  footnote: {fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 16},
 });

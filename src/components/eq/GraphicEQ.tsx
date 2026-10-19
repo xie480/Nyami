@@ -19,9 +19,9 @@ const styles = StyleSheet.create({
     height: 16,
   },
   scaleLabel: {
-    fontSize: 8,
+    fontSize: 11,
     fontWeight: '500',
-    width: 20,
+    width: 28,
     textAlign: 'center',
   },
   scaleLine: {
@@ -30,7 +30,7 @@ const styles = StyleSheet.create({
   },
   sliderRow: {
     alignItems: 'flex-end',
-    gap: 4,
+    gap: 8,
     paddingLeft: 4,
     paddingRight: 4,
   },
@@ -96,21 +96,13 @@ export const GraphicEQ: React.FC = React.memo(() => {
               value={graphicBands[index]}
               onValueChange={(val) => handleValueChange(index, val)}
               disabled={!enabled}
-              width={36}
+              width={48}
               height={170}
             />
           </View>
         ))}
       </ScrollView>
 
-      {/* 频率标签 */}
-      <View style={styles.freqRow}>
-        {BAND_FREQUENCIES.map(freq => (
-          <Text key={freq} style={[styles.freqLabel, { color: t.colors.textHint }]}>
-            {freq}
-          </Text>
-        ))}
-      </View>
     </View>
   );
 });

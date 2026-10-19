@@ -75,6 +75,9 @@ const PresetChip: React.FC<PresetChipProps> = ({
   return (
     <Animated.View style={{transform: [{scale: scaleAnim}]}}>
       <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={`${preset.name}，${preset.description}`}
+        accessibilityState={{selected: isActive}}
         activeOpacity={0.7}
         onPress={onPress}
         onPressIn={handlePressIn}
@@ -96,7 +99,7 @@ const PresetChip: React.FC<PresetChipProps> = ({
             styles.chipName,
             {color: isActive ? colors.primary : colors.text},
           ]}
-          numberOfLines={1}>
+          >
           {preset.name}
         </Text>
         <Text
@@ -104,7 +107,7 @@ const PresetChip: React.FC<PresetChipProps> = ({
             styles.chipDesc,
             {color: isActive ? colors.textSub : colors.textHint},
           ]}
-          numberOfLines={1}>
+          >
           {preset.description}
         </Text>
       </TouchableOpacity>
@@ -126,18 +129,19 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     borderRadius: 15,
     borderWidth: 1,
-    minWidth: 124,
-    minHeight: 64,
+    width: 164,
+    minHeight: 86,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
   chipName: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
     marginBottom: 2,
   },
   chipDesc: {
-    fontSize: 10,
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '400',
   },
 });

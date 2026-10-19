@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, StatusBar, Image, Platform } from 'react-native';
+import { ActivityIndicator, View, Text, StyleSheet, StatusBar, Image, Platform } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,30 +31,39 @@ export const SplashScreen = ({ navigation }: any) => {
       alignItems: 'center',
       backgroundColor: t.colors.background,
       paddingTop: statusBarHeight,
+      paddingBottom: Math.max(insets.bottom, 24),
+      paddingHorizontal: 28,
     },
     iconWrap: {
-      width: 80, height: 80, borderRadius: 20, backgroundColor: t.colors.primaryLight,
+      width: 112, height: 112, borderRadius: 32, backgroundColor: t.colors.primaryLight,
       alignItems: 'center', justifyContent: 'center',
       marginBottom: t.spacing.xl,
     },
     title: {
-      fontSize: t.fontSize.xxl, fontWeight: 'bold',
+      fontSize: 34, fontWeight: '800', letterSpacing: 1,
       color: t.colors.text, textAlign: 'center',
     },
     subtitle: {
       fontSize: t.fontSize.sm, color: t.colors.textSub,
       textAlign: 'center', marginTop: t.spacing.sm,
+      lineHeight: 22,
     },
+    status: {position: 'absolute', bottom: Math.max(insets.bottom, 24) + 28, flexDirection: 'row', alignItems: 'center', gap: 10},
+    statusText: {fontSize: 13, color: t.colors.textSub},
   });
 
   return (
     <View style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <View style={s.iconWrap}>
-        <Image source={require('../../resource/icon.png')} style={{ width: 100, height: 100 }} />
+        <Image accessible={false} source={require('../../resource/icon.png')} style={{ width: 88, height: 88 }} resizeMode="contain" />
       </View>
       <Text style={s.title}>Nyami</Text>
       <Text style={s.subtitle}>猫在听，你也在听</Text>
+      <View style={s.status} accessibilityLiveRegion="polite">
+        <ActivityIndicator size="small" color={t.colors.primary} />
+        <Text style={s.statusText}>{authReady ? '准备好，开始听歌' : '正在准备你的音乐空间'}</Text>
+      </View>
     </View>
   );
 };
