@@ -167,33 +167,36 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background },
-    list: { padding: t.spacing.lg, gap: t.spacing.md },
+    list: { padding: t.spacing.lg, paddingBottom: t.spacing.xl },
     toolbar: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      paddingHorizontal: t.spacing.lg,
-      paddingVertical: t.spacing.md,
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: t.spacing.sm,
+      padding: t.spacing.sm,
+      marginBottom: t.spacing.sm,
       backgroundColor: t.colors.surface,
-      borderBottomWidth: 0.5,
-      borderColor: t.colors.divider,
+      borderRadius: t.radius.xl,
     },
     sectionHeader: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: t.spacing.lg,
-      paddingVertical: t.spacing.xs,
+      paddingVertical: t.spacing.md,
+      gap: t.spacing.sm,
       backgroundColor: t.colors.background,
       marginTop: t.spacing.sm,
     },
     sectionTitle: {
+      flex: 1,
       color: t.colors.text,
       fontSize: t.fontSize.md,
       fontWeight: '600',
     },
     sectionCount: {
-      color: t.colors.textHint,
-      fontSize: t.fontSize.xs,
+      color: t.colors.textSub,
+      fontSize: t.fontSize.sm,
       paddingHorizontal: t.spacing.sm,
       paddingVertical: 2,
       borderRadius: t.radius.sm,
@@ -228,18 +231,16 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
       marginLeft: t.spacing.md,
     },
     cardTitleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
+      gap: t.spacing.xs,
     },
     cardTitle: {
-      flex: 1,
       flexShrink: 1,
       color: t.colors.text,
       fontSize: t.fontSize.base,
       fontWeight: '600',
     },
     kindBadge: {
-      marginLeft: t.spacing.sm,
       paddingHorizontal: t.spacing.sm,
       paddingVertical: 3,
       borderRadius: t.radius.sm,
@@ -251,26 +252,34 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
     },
     cardMeta: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: t.spacing.xs,
       alignItems: 'center',
       marginTop: t.spacing.xs,
     },
     ownerName: {
-      flex: 1,
+      width: '100%',
       flexShrink: 1,
       color: t.colors.textSub,
       fontSize: t.fontSize.sm,
     },
     videoCount: {
-      color: t.colors.textHint,
-      fontSize: t.fontSize.xs,
-      marginLeft: t.spacing.sm,
+      color: t.colors.textSub,
+      fontSize: t.fontSize.sm,
     },
     videoCountLeading: {
       marginLeft: 0,
     },
     selectionIcon: {
-      marginLeft: t.spacing.md,
+      marginLeft: t.spacing.sm,
     },
+    fill: {flex: 1},
+    saveButton: {minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center'},
+    saveText: {color: t.colors.primary, fontSize: t.fontSize.base, fontWeight: '600'},
+    intro: {padding: t.spacing.lg, marginBottom: t.spacing.lg, borderRadius: t.radius.xl, backgroundColor: t.colors.primaryLight},
+    introTitle: {fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '600', marginTop: t.spacing.sm},
+    introHint: {fontSize: t.fontSize.sm, lineHeight: 21, color: t.colors.textSub, marginTop: t.spacing.sm},
+    toolbarButton: {minHeight: 48, paddingHorizontal: t.spacing.sm, justifyContent: 'center'},
   });
 
   const renderPreferenceItem = ({ item }: { item: PreferenceItem }) => {
@@ -290,7 +299,7 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
     return (
       <TouchableOpacity
         accessibilityRole="checkbox"
-        accessibilityLabel={`${title}，${kindLabel}`}
+        accessibilityLabel={`${title}，${kindLabel}，${mediaCount} 个视频，主页显示`}
         accessibilityState={{ checked: isVisible }}
         activeOpacity={0.82}
         onPress={() => {
@@ -312,7 +321,7 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
         </View>
         <View style={s.cardContent}>
           <View style={s.cardTitleRow}>
-            <Text style={s.cardTitle} numberOfLines={1}>{title}</Text>
+            <Text style={s.cardTitle} numberOfLines={2}>{title}</Text>
             <View style={s.kindBadge}>
               <Text style={s.kindBadgeText} numberOfLines={1}>{kindLabel}</Text>
             </View>
@@ -336,15 +345,17 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
     <View style={s.container}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header
-        title="主页播放列表偏好"
+        title="主页显示内容"
         showBack
-        right={preferenceItems.length > 0 && (
-          <TouchableOpacity onPress={onSave}>
-            <Text style={{ color: t.colors.primary, fontSize: t.fontSize.base, fontWeight: '600' }}>保存</Text>
+        right={uid && preferenceItems.length > 0 && (
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="保存主页显示内容" onPress={onSave} style={s.saveButton}>
+            <Text style={s.saveText}>保存</Text>
           </TouchableOpacity>
         )}
       />
-      {folders === null && !error ? (
+      {!uid ? (
+        <Empty title="登录后选择主页内容" hint="前往设置登录 B 站，管理收藏夹与订阅合集" />
+      ) : folders === null && !error ? (
         <Loading />
       ) : error && preferenceItems.length === 0 ? (
         <ErrorView message={error} onRetry={() => load(true)} />
@@ -357,17 +368,6 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
         <Empty title="没有可选择的播放列表" hint="登录 B 站后会自动导入已收藏的他人收藏夹和订阅合集" />
       ) : (
         <>
-          <View style={s.toolbar}>
-            <TouchableOpacity onPress={onSelectAll}>
-              <Text style={{ color: t.colors.primary, fontSize: t.fontSize.sm }}>全选</Text>
-            </TouchableOpacity>
-            <Text style={{ color: t.colors.textSub, fontSize: t.fontSize.sm }}>
-              已选 {preferenceItems.filter(isItemVisible).length}/{preferenceItems.length} 个
-            </Text>
-            <TouchableOpacity onPress={onDeselectAll}>
-              <Text style={{ color: t.colors.error, fontSize: t.fontSize.sm }}>反选</Text>
-            </TouchableOpacity>
-          </View>
           {sourceError && (
             <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.sm }}>
               外部来源同步失败，保留上次目录：{sourceError}
@@ -379,15 +379,35 @@ export const VisibleFoldersScreen = ({ navigation }: any) => {
             </Text>
           )}
           <SectionList
+            style={s.fill}
             contentContainerStyle={s.list}
             sections={preferenceSections}
             showsVerticalScrollIndicator={false}
             keyExtractor={(it) => it.key}
             extraData={{ localHidden, localVisibleSources }}
+            stickySectionHeadersEnabled={false}
+            ListHeaderComponent={
+              <View>
+                <View style={s.intro}>
+                  <Icon name="playlist-check" size={28} color={t.colors.primary} />
+                  <Text accessibilityRole="header" style={s.introTitle}>让主页只留下喜欢的</Text>
+                  <Text style={s.introHint}>选择要在主页显示的播放列表。这里只调整本机显示，点按“保存”后生效。</Text>
+                </View>
+                <View style={s.toolbar}>
+                  <TouchableOpacity accessibilityRole="button" onPress={onSelectAll} style={s.toolbarButton}>
+                    <Text style={{color: t.colors.primary, fontSize: t.fontSize.sm}}>全选</Text>
+                  </TouchableOpacity>
+                  <Text accessibilityLiveRegion="polite" style={{color: t.colors.textSub, fontSize: t.fontSize.sm}}>已选 {preferenceItems.filter(isItemVisible).length}/{preferenceItems.length} 个</Text>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="清空主页播放列表选择" onPress={onDeselectAll} style={s.toolbarButton}>
+                    <Text style={{color: t.colors.textSub, fontSize: t.fontSize.sm}}>清空</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            }
             renderSectionHeader={({section}) => (
               <View style={s.sectionHeader}>
-                <Text style={s.sectionTitle}>{section.title}</Text>
-                <Text style={s.sectionCount}>{section.data.length}</Text>
+                <Text accessibilityRole="header" style={s.sectionTitle}>{section.title}</Text>
+                <Text style={s.sectionCount}>{section.data.length} 个</Text>
               </View>
             )}
             ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}

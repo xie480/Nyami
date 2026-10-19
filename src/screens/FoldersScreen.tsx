@@ -13,6 +13,9 @@ import {
   StatusBar,
   BackHandler,
   Modal,
+  KeyboardAvoidingView,
+  ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { usePlayerStore } from '../store/playerStore';
@@ -125,6 +128,8 @@ const EMPTY_VISIBLE_SOURCE_KEYS: string[] = [];
 export const FoldersScreen = ({ navigation }: any) => {
   const t = useTheme();
   const isGlass = !!t.glass;
+  const {width, fontScale} = useWindowDimensions();
+  const compactLayout = width < 360 || fontScale > 1.25;
   const uid = useAuthStore((s) => s.userId);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const importedCatalog = useImportedPlaylistStore(s =>
@@ -367,9 +372,13 @@ export const FoldersScreen = ({ navigation }: any) => {
     list: {
       paddingHorizontal: t.spacing.lg,
       paddingTop: t.spacing.md,
-      paddingBottom: insets.bottom + 136,
-      gap: t.spacing.md,
+      paddingBottom: t.spacing.xl,
     },
+    cancelSearch: {minHeight: 48, minWidth: 48, marginLeft: t.spacing.sm, alignItems: 'center', justifyContent: 'center'},
+    headerContent: {flex: 1, minWidth: 0},
+    headerTitle: {fontSize: 28, fontWeight: '700', color: t.colors.text},
+    headerSubtitle: {fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: t.spacing.xs},
+    listTitle: {fontSize: t.fontSize.md, fontWeight: '600', color: t.colors.text, marginTop: t.spacing.xl, marginBottom: t.spacing.sm},
   });
 
   const handleRandomPlayAll = async () => {
@@ -415,11 +424,12 @@ export const FoldersScreen = ({ navigation }: any) => {
           return (
             <TouchableOpacity
               key={tab.key}
-              accessibilityRole="button"
+              accessibilityRole="tab"
+              accessibilityLabel={`${tab.title}，${tab.count} 个播放列表`}
               accessibilityState={{selected}}
               onPress={() => setFolderTab(tab.key)}
-              style={{flex: 1, minHeight: 40, borderRadius: t.radius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? t.colors.primary : 'transparent'}}>
-              <Text style={{color: selected ? t.colors.onPrimary : t.colors.textSub, fontSize: t.fontSize.sm, fontWeight: selected ? '600' : '400'}}>
+              style={{flex: 1, minHeight: 48, paddingHorizontal: 4, paddingVertical: t.spacing.sm, borderRadius: t.radius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? t.colors.primary : 'transparent'}}>
+              <Text style={{color: selected ? t.colors.onPrimary : t.colors.textSub, fontSize: t.fontSize.sm, fontWeight: selected ? '600' : '400', textAlign: 'center'}}>
                 {tab.title} {tab.count}
               </Text>
             </TouchableOpacity>
@@ -470,13 +480,14 @@ export const FoldersScreen = ({ navigation }: any) => {
             {searchQuery.length > 0 && (
               <IconButton
                 name="close-circle"
+                accessibilityLabel="清空搜索内容"
                 size={20}
                 color={t.colors.textHint}
                 onPress={() => setSearchQuery('')}
               />
             )}
           </View>
-          <TouchableOpacity onPress={cancelSearch} style={{paddingLeft: t.spacing.md, paddingVertical: t.spacing.sm}}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="取消搜索" onPress={cancelSearch} style={s.cancelSearch}>
             <Text style={{fontSize: t.fontSize.base, color: t.colors.primary}}>取消</Text>
           </TouchableOpacity>
         </View>
@@ -489,19 +500,26 @@ export const FoldersScreen = ({ navigation }: any) => {
           paddingTop: statusBarHeight + t.spacing.sm,
           paddingBottom: t.spacing.sm,
         }}>
-          <Text style={{fontSize: 27, fontWeight: '700', color: t.colors.text}}>收藏夹</Text>
+          <View style={s.headerContent}>
+            <Text accessibilityRole="header" style={s.headerTitle}>收藏夹</Text>
+            <Text style={s.headerSubtitle}>
+              {playlistItems === null ? '你的音乐收藏，在这里相遇' : `${playlistItems.length} 个播放列表 · 随时听喜欢的`}
+            </Text>
+          </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
             <IconButton
               name="magnify"
+              accessibilityLabel="搜索所有收藏内容"
               size={27}
               color={t.colors.text}
               onPress={() => setSearchActive(true)}
             />
             <IconButton
               name="plus"
+              accessibilityLabel="新建收藏夹"
               size={28}
               color={t.colors.text}
-              style={{marginLeft: t.spacing.sm}}
+              style={{marginLeft: t.spacing.xs}}
               onPress={openCreateFolder}
             />
           </View>
@@ -518,7 +536,7 @@ export const FoldersScreen = ({ navigation }: any) => {
             return (
               <TouchableOpacity
                 key={option.key}
-                accessibilityRole="button"
+                accessibilityRole="tab"
                 accessibilityLabel={`按${option.title}搜索收藏视频`}
                 accessibilityState={{selected}}
                 onPress={() => setFavoriteSearchMode(option.key)}
@@ -531,14 +549,21 @@ export const FoldersScreen = ({ navigation }: any) => {
       )}
 
       {importedSyncError && !isGlobalSearch && (
-        <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, textAlign: 'center', paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.sm }}>
-          外部收藏来源同步失败，仍显示上次同步目录：{importedSyncError}
+        <Text accessibilityLiveRegion="polite" style={{ color: t.colors.textSub, fontSize: t.fontSize.sm, lineHeight: 20, paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.sm }}>
+          {importedCatalog.length > 0 ? '外部来源同步失败，保留上次目录' : '外部来源同步失败，可下拉重试'}：{importedSyncError}
+        </Text>
+      )}
+      {error && playlistItems !== null && !isGlobalSearch && (
+        <Text accessibilityLiveRegion="polite" style={{color: t.colors.error, fontSize: t.fontSize.sm, paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.sm}}>
+          收藏夹刷新失败，当前显示已加载内容：{error}
         </Text>
       )}
 
       {folderTabs}
 
-      {playlistItems === null && !error ? (
+      {!uid ? (
+        <Empty title="登录后，收藏会出现在这里" hint="前往设置登录 B 站，查看收藏夹与订阅合集" />
+      ) : playlistItems === null && !error ? (
         <Loading />
       ) : error && playlistItems === null ? (
         <ErrorView message={error} onRetry={() => load(true)} />
@@ -566,11 +591,8 @@ export const FoldersScreen = ({ navigation }: any) => {
           maxToRenderPerBatch={10}
           windowSize={5}
           initialNumToRender={10}
-          getItemLayout={(_data, index) => ({
-            length: 108,
-            offset: 108 * index,
-            index,
-          })}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           // =================================
           ListHeaderComponent={
             <View style={{paddingHorizontal: t.spacing.xs, paddingBottom: t.spacing.sm}}>
@@ -590,6 +612,8 @@ export const FoldersScreen = ({ navigation }: any) => {
             const collectionTitle = folderTitle || sourceTitle;
             return (
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={`播放 ${item.title}，${item.upper?.name || '未知 UP 主'}`}
                 activeOpacity={0.72}
                 style={{
                   flexDirection: 'row',
@@ -642,20 +666,20 @@ export const FoldersScreen = ({ navigation }: any) => {
                 <View>
                   <FastImage
                     source={{uri: item.cover}}
-                    style={{width: 122, height: 76, borderRadius: 12, backgroundColor: t.colors.surfaceHigh}}
+                    style={{width: compactLayout ? 88 : 112, height: compactLayout ? 64 : 76, borderRadius: 12, backgroundColor: t.colors.surfaceHigh}}
                     resizeMode={FastImage.resizeMode.cover}
                   />
                   <View style={{position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.66)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 7}}>
-                    <Text style={{color: '#fff', fontSize: 10}}>{formatDuration(item.duration)}</Text>
+                    <Text style={{color: '#fff', fontSize: 12}}>{formatDuration(item.duration)}</Text>
                   </View>
                 </View>
-                <View style={{flex: 1, marginLeft: t.spacing.md, justifyContent: 'center'}}>
+                <View style={{flex: 1, minWidth: 0, marginLeft: t.spacing.md, justifyContent: 'center'}}>
                   <Text style={{fontSize: t.fontSize.base, color: t.colors.text, fontWeight: '600', marginBottom: t.spacing.xs}} numberOfLines={2}>
                     {item.title}
                   </Text>
                   <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                    <Icon name="account-outline" size={14} color={t.colors.textHint} />
-                    <Text style={{fontSize: t.fontSize.sm, color: t.colors.textHint, marginLeft: 3, flex: 1}} numberOfLines={1}>
+                    <Icon name="account-outline" size={16} color={t.colors.textSub} />
+                    <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginLeft: 3, flex: 1}} numberOfLines={1}>
                       {item.upper?.name || '未知 UP 主'}
                     </Text>
                   </View>
@@ -681,7 +705,7 @@ export const FoldersScreen = ({ navigation }: any) => {
           ListHeaderComponent={
             <View style={{marginBottom: t.spacing.xs}}>
               <View style={{flexDirection: 'row', alignItems: 'center', marginTop: t.spacing.md, padding: t.spacing.md, borderRadius: 22, backgroundColor: t.colors.primaryLight}}>
-                <TouchableOpacity activeOpacity={0.75} onPress={handleRandomPlayAll} style={{flex: 1, flexDirection: 'row', alignItems: 'center'}}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`随机播放全部收藏，${visibleGlobalIndex.length} 个已同步视频`} activeOpacity={0.75} onPress={handleRandomPlayAll} style={{flex: 1, minHeight: 56, flexDirection: 'row', alignItems: 'center'}}>
                   <View style={{width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.primary}}>
                     <Icon name="play" size={25} color={t.colors.onPrimary} />
                   </View>
@@ -692,6 +716,9 @@ export const FoldersScreen = ({ navigation }: any) => {
                   <Icon name="shuffle-variant" size={24} color={t.colors.primary} />
                 </TouchableOpacity>
               </View>
+              <Text accessibilityRole="header" style={s.listTitle}>
+                {folderTab === 'all' ? '全部播放列表' : folderTab === 'owned' ? '我创建的收藏夹' : '我收藏的播放列表'}
+              </Text>
             </View>
           }
           keyExtractor={(it) => it.sourceKey}
@@ -715,6 +742,9 @@ export const FoldersScreen = ({ navigation }: any) => {
             const itemKind = item.origin === 'owned' ? '我创建' : item.origin === 'collectedFavorite' ? '他人收藏夹' : '订阅合集';
             return (
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={`${item.title}，${itemKind}，${item.mediaCount} 个视频${item.syncState ? '，同步尚未完成' : ''}`}
+                accessibilityHint="打开播放列表"
                 activeOpacity={0.72}
                 onPress={() => {
                   if (item.syncState) {
@@ -742,8 +772,8 @@ export const FoldersScreen = ({ navigation }: any) => {
                   padding: t.spacing.sm,
                   backgroundColor: t.colors.surface,
                   borderRadius: 20,
-                  borderWidth: isGlass ? 0.5 : 0,
-                  borderColor: isGlass ? (t.isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.6)') : 'transparent',
+                  borderWidth: 1,
+                  borderColor: t.colors.divider,
                   ...Platform.select({
                     ios: {shadowColor: '#15122A', shadowOffset: {width: 0, height: 2}, shadowOpacity: isGlass ? 0.04 : 0.06, shadowRadius: 8},
                     android: {elevation: isGlass ? 0 : 2},
@@ -756,8 +786,8 @@ export const FoldersScreen = ({ navigation }: any) => {
                 uid={uid}
                 onCoverResolved={saveFolderCover}
               />
-              <View style={{flex: 1, minHeight: 60, justifyContent: 'center'}}>
-                <Text style={{fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '600'}} numberOfLines={1}>{item.title}</Text>
+              <View style={{flex: 1, minWidth: 0, minHeight: 68, justifyContent: 'center'}}>
+                <Text style={{fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '600'}} numberOfLines={2}>{item.title}</Text>
                 <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 5}} numberOfLines={1}>
                   {item.syncState
                     ? item.syncState === 'retrying' ? 'B 站同步重试中' : '正在同步到 B 站'
@@ -781,35 +811,41 @@ export const FoldersScreen = ({ navigation }: any) => {
           }
         }}
       >
-        <View style={{flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)'}}>
-          <View style={{
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{flex: 1, justifyContent: 'flex-end', backgroundColor: t.colors.overlay}}>
+          <ScrollView keyboardShouldPersistTaps="handled" style={{
+            flexGrow: 0,
             maxHeight: '80%',
-            padding: t.spacing.lg,
-            paddingBottom: Math.max(insets.bottom, t.spacing.lg),
-            backgroundColor: t.colors.surface,
+            backgroundColor: t.colors.surfaceRaised,
             borderTopLeftRadius: 22,
             borderTopRightRadius: 22,
-          }}>
+          }} contentContainerStyle={{padding: t.spacing.lg, paddingBottom: Math.max(insets.bottom, t.spacing.lg)}}>
             <View style={{width: 40, height: 4, alignSelf: 'center', borderRadius: 2, backgroundColor: t.colors.divider, marginBottom: t.spacing.md}} />
-            <Text style={{fontSize: t.fontSize.lg, color: t.colors.text, fontWeight: '700'}}>新建收藏夹</Text>
+            <Text accessibilityRole="header" style={{fontSize: t.fontSize.lg, color: t.colors.text, fontWeight: '700'}}>新建收藏夹</Text>
+            <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: t.spacing.sm}}>给喜欢的内容一个专属位置</Text>
+            <Text style={{fontSize: t.fontSize.sm, color: t.colors.text, marginTop: t.spacing.lg, marginBottom: t.spacing.sm}}>收藏夹名称</Text>
             <TextInput
+              accessibilityLabel="收藏夹名称"
               value={newFolderTitle}
               onChangeText={setNewFolderTitle}
               placeholder="输入收藏夹名称"
               placeholderTextColor={t.colors.textHint}
               autoFocus
-              style={{minHeight: 48, marginTop: t.spacing.lg, paddingHorizontal: t.spacing.md, color: t.colors.text, backgroundColor: t.colors.surfaceHigh, borderRadius: 16}}
+              style={{minHeight: 52, paddingHorizontal: t.spacing.md, color: t.colors.text, fontSize: t.fontSize.base, backgroundColor: t.colors.surfaceHigh, borderRadius: 16}}
             />
             <TouchableOpacity
+              accessibilityRole="switch"
+              accessibilityLabel="私密收藏夹"
+              accessibilityState={{checked: newFolderIsPrivate}}
+              accessibilityHint="切换公开或私密，公开收藏夹可被他人查看"
               onPress={() => setNewFolderIsPrivate(value => !value)}
-              style={{flexDirection: 'row', alignItems: 'center', paddingVertical: t.spacing.md}}>
+              style={{minHeight: 52, flexDirection: 'row', alignItems: 'center', paddingVertical: t.spacing.md}}>
               <Icon name={newFolderIsPrivate ? 'lock-outline' : 'earth'} size={19} color={t.colors.primary} />
-              <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, marginLeft: t.spacing.xs}}>
+              <Text style={{flex: 1, color: t.colors.text, fontSize: t.fontSize.sm, marginLeft: t.spacing.sm}}>
                 {newFolderIsPrivate ? '私密收藏夹' : '公开收藏夹'} · 点按切换
               </Text>
             </TouchableOpacity>
             {favoriteError && (
-              <Text style={{color: t.colors.error, fontSize: t.fontSize.sm, marginVertical: t.spacing.xs}}>
+              <Text accessibilityRole="alert" style={{color: t.colors.error, fontSize: t.fontSize.sm, marginVertical: t.spacing.xs}}>
                 {favoriteError}
               </Text>
             )}
@@ -818,17 +854,17 @@ export const FoldersScreen = ({ navigation }: any) => {
               onPress={handleCreateFavoriteFolder}
               disabled={!newFolderTitle.trim()}
               loading={createFolderLoading}
-              style={{height: 48, marginTop: t.spacing.sm}}
+              style={{minHeight: 52, marginTop: t.spacing.sm}}
             />
             <Button
               title="关闭"
               variant="secondary"
               onPress={() => setCreateFolderVisible(false)}
               disabled={createFolderLoading}
-              style={{height: 40, marginTop: t.spacing.sm}}
+              style={{minHeight: 48, marginTop: t.spacing.sm}}
             />
-          </View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

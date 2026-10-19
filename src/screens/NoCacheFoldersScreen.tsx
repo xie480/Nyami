@@ -3,8 +3,7 @@ import {
   View, FlatList, RefreshControl, StyleSheet, TouchableOpacity, Text, StatusBar,
 } from 'react-native';
 import { Header } from '../components/Header';
-import { ListItem } from '../components/ListItem';
-import { IconButton } from '../components/IconButton';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
@@ -88,16 +87,30 @@ export const NoCacheFoldersScreen = ({ navigation }: any) => {
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background },
-    list: { padding: t.spacing.lg, gap: t.spacing.md },
+    list: { padding: t.spacing.lg, paddingBottom: t.spacing.xl },
     toolbar: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      paddingHorizontal: t.spacing.lg,
-      paddingVertical: t.spacing.md,
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: t.spacing.sm,
+      padding: t.spacing.sm,
+      marginBottom: t.spacing.lg,
       backgroundColor: t.colors.surface,
-      borderBottomWidth: 0.5,
-      borderColor: t.colors.divider,
+      borderRadius: t.radius.xl,
     },
+    fill: {flex: 1},
+    saveButton: {minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center'},
+    saveText: {color: t.colors.primary, fontSize: t.fontSize.base, fontWeight: '600'},
+    intro: {padding: t.spacing.lg, backgroundColor: t.colors.primaryLight, borderRadius: t.radius.xl, marginBottom: t.spacing.lg},
+    introTitle: {fontSize: t.fontSize.md, fontWeight: '600', color: t.colors.text, marginTop: t.spacing.sm},
+    introHint: {fontSize: t.fontSize.sm, lineHeight: 21, color: t.colors.textSub, marginTop: t.spacing.sm},
+    toolbarButton: {minHeight: 48, paddingHorizontal: t.spacing.sm, justifyContent: 'center'},
+    card: {flexDirection: 'row', alignItems: 'center', paddingVertical: t.spacing.md, paddingHorizontal: t.spacing.md, minHeight: 88, backgroundColor: t.colors.surface, borderWidth: 1, borderColor: t.colors.divider, borderRadius: t.radius.xl},
+    cardSelected: {backgroundColor: t.colors.primaryLight, borderColor: t.colors.primary},
+    iconBox: {width: 44, height: 44, borderRadius: t.radius.lg, backgroundColor: t.colors.surfaceHigh, alignItems: 'center', justifyContent: 'center'},
+    cardContent: {flex: 1, minWidth: 0, marginHorizontal: t.spacing.md},
+    cardTitle: {fontSize: t.fontSize.base, color: t.colors.text, fontWeight: '600'},
   });
 
   return (
@@ -106,66 +119,70 @@ export const NoCacheFoldersScreen = ({ navigation }: any) => {
       <Header
         title="无缓存收藏夹"
         showBack
-        right={folders && (
-          <TouchableOpacity onPress={onSave}>
-            <Text style={{ color: t.colors.primary, fontSize: t.fontSize.base, fontWeight: '600' }}>保存</Text>
+        right={uid && folders && (
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="保存无缓存收藏夹设置" onPress={onSave} style={s.saveButton}>
+            <Text style={s.saveText}>保存</Text>
           </TouchableOpacity>
         )}
       />
-      {folders === null && !error ? (
+      {!uid ? (
+        <Empty title="登录后设置缓存偏好" hint="前往设置登录 B 站，选择无需缓存的收藏夹" />
+      ) : folders === null && !error ? (
         <Loading />
       ) : error ? (
         <ErrorView message={error} onRetry={() => load(true)} />
       ) : folders!.length === 0 ? (
-        <Empty title="没有公开的收藏夹" hint="请在设置中填入 SESSDATA 以加载私密收藏夹" />
+        <Empty title="暂无收藏夹" hint="收藏夹会在登录并同步后显示在这里" />
       ) : (
         <>
-          <View style={s.toolbar}>
-            <TouchableOpacity onPress={onSelectAll}>
-              <Text style={{ color: t.colors.primary, fontSize: t.fontSize.sm }}>全选</Text>
-            </TouchableOpacity>
-            <Text style={{ color: t.colors.textSub, fontSize: t.fontSize.sm }}>
-              已选 {folders!.filter(f => isFolderNoCache(f.id)).length}/{folders!.length} 个
-            </Text>
-            <TouchableOpacity onPress={onDeselectAll}>
-              <Text style={{ color: t.colors.error, fontSize: t.fontSize.sm }}>反选</Text>
-            </TouchableOpacity>
-          </View>
           <FlatList
+            style={s.fill}
             contentContainerStyle={s.list}
             data={folders!}
             showsVerticalScrollIndicator={false}
             keyExtractor={(it) => String(it.id)}
             extraData={localNoCache}
+            ListHeaderComponent={
+              <View>
+                <View style={s.intro}>
+                  <Icon name="cloud-off-outline" size={28} color={t.colors.primary} />
+                  <Text accessibilityRole="header" style={s.introTitle}>按收藏夹管理缓存</Text>
+                  <Text style={s.introHint}>选中的收藏夹不缓存音频，播放时仍需网络。点按右上角“保存”后生效。</Text>
+                </View>
+                <View style={s.toolbar}>
+                  <TouchableOpacity accessibilityRole="button" onPress={onSelectAll} style={s.toolbarButton}>
+                    <Text style={{ color: t.colors.primary, fontSize: t.fontSize.sm }}>全选</Text>
+                  </TouchableOpacity>
+                  <Text accessibilityLiveRegion="polite" style={{ color: t.colors.textSub, fontSize: t.fontSize.sm }}>
+                    已选 {folders!.filter(f => isFolderNoCache(f.id)).length}/{folders!.length} 个
+                  </Text>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="清空无缓存收藏夹选择" onPress={onDeselectAll} style={s.toolbarButton}>
+                    <Text style={{ color: t.colors.textSub, fontSize: t.fontSize.sm }}>清空</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            }
             ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={t.colors.primary} />
             }
             renderItem={({ item }) => (
               <TouchableOpacity
+                accessibilityRole="checkbox"
+                accessibilityLabel={`${item.title}，${item.mediaCount} 个视频，不缓存音频`}
+                accessibilityState={{checked: isFolderNoCache(item.id)}}
+                activeOpacity={0.76}
                 onPress={() => toggleFolder(item.id)}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingVertical: t.spacing.md,
-                  paddingHorizontal: t.spacing.lg,
-                  backgroundColor: t.colors.surface,
-                  borderRadius: t.radius.md,
-                }}
+                style={[s.card, isFolderNoCache(item.id) && s.cardSelected]}
               >
-                <IconButton
-                  name={isFolderNoCache(item.id) ? 'checkbox-marked' : 'checkbox-blank-outline'}
-                  size={24}
-                  color={isFolderNoCache(item.id) ? t.colors.primary : t.colors.textHint}
-                />
-                <View style={{ flex: 1, marginLeft: t.spacing.md }}>
-                  <ListItem
-                    title={item.title}
-                    subtitle={`${item.mediaCount} 个视频`}
-                    icon="folder-music-outline"
-                    showArrow={false}
-                  />
+                <View style={s.iconBox}>
+                  <Icon name="folder-music-outline" size={24} color={t.colors.primary} />
                 </View>
+                <View style={s.cardContent}>
+                  <Text style={s.cardTitle} numberOfLines={2}>{item.title}</Text>
+                  <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: t.spacing.xs}}>{item.mediaCount} 个视频 · {isFolderNoCache(item.id) ? '不缓存音频' : '沿用缓存设置'}</Text>
+                </View>
+                <Icon name={isFolderNoCache(item.id) ? 'check-circle' : 'checkbox-blank-circle-outline'} size={24} color={isFolderNoCache(item.id) ? t.colors.primary : t.colors.textSub} />
               </TouchableOpacity>
             )}
           />

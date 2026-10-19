@@ -12,11 +12,14 @@ import {
   Modal,
   TextInput,
   RefreshControl,
+  ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { IconButton } from '../components/IconButton';
+import { Header } from '../components/Header';
 import { SubscribePlaylistButton } from '../components/SubscribePlaylistButton';
 import { StatusBar } from 'react-native';
 import { Loading } from '../components/Loading';
@@ -51,44 +54,51 @@ interface VideoItemProps {
   spacingMd: number;
   spacingLg: number;
   surfaceColor: string;
+  compact: boolean;
 }
 
 const VideoItem = memo(function VideoItem({
   item, index, onPlay, onMenu,
   textColor, textHintColor, surfaceHighColor,
   fontSizeBase, fontSizeSm, spacingSm, spacingMd, spacingLg, surfaceColor,
+  compact,
 }: VideoItemProps) {
   return (
-    <TouchableOpacity
-      activeOpacity={0.7}
+    <View
       style={{
         flexDirection: 'row',
         alignItems: 'center',
         paddingVertical: spacingSm,
-        paddingHorizontal: spacingSm,
+        paddingLeft: spacingSm,
+        paddingRight: 0,
         marginHorizontal: spacingLg,
         marginVertical: spacingSm,
         borderRadius: 18,
         backgroundColor: surfaceColor,
       }}
-      onPress={() => onPlay(index)}
     >
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={`播放 ${item.title}，${item.upper.name || '未知 UP 主'}，时长 ${formatDuration(item.duration)}`}
+        activeOpacity={0.72}
+        onPress={() => onPlay(index)}
+        style={{flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center'}}>
       <View>
         <FastImage
           source={{uri: item.cover}}
-          style={{width: 116, height: 72, borderRadius: 12, backgroundColor: surfaceHighColor}}
+          style={{width: compact ? 80 : 104, height: compact ? 60 : 72, borderRadius: 12, backgroundColor: surfaceHighColor}}
           resizeMode={FastImage.resizeMode.cover}
         />
         <View style={{position: 'absolute', bottom: 4, right: 4, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 7, backgroundColor: 'rgba(0,0,0,0.68)'}}>
-          <Text style={{color: '#fff', fontSize: 10}}>{formatDuration(item.duration)}</Text>
+          <Text style={{color: '#fff', fontSize: 12}}>{formatDuration(item.duration)}</Text>
         </View>
       </View>
-      <View style={{ flex: 1, marginLeft: spacingMd }}>
+      <View style={{ flex: 1, minWidth: 0, marginLeft: spacingMd }}>
         <Text
           style={{
             fontSize: fontSizeBase,
             color: textColor,
-            fontWeight: '500',
+            fontWeight: '600',
             marginBottom: spacingSm / 2,
           }}
           numberOfLines={2}
@@ -108,13 +118,15 @@ const VideoItem = memo(function VideoItem({
           </Text>
         </View>
       </View>
+      </TouchableOpacity>
       <IconButton
         name="dots-vertical"
+        accessibilityLabel={`${item.title}的更多操作`}
         size={24}
         color={textColor}
         onPress={() => onMenu(item)}
       />
-    </TouchableOpacity>
+    </View>
   );
 });
 // ========== Item 组件结束 ==========
@@ -133,6 +145,9 @@ function showQueueStartError(error: unknown, fallback: string) {
 export const VideosScreen = ({ route, navigation }: any) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const {width, height, fontScale} = useWindowDimensions();
+  const compactLayout = width < 360 || fontScale > 1.25;
+  const compactHero = height < 650 || fontScale > 1.25;
   const { mediaId, title } = route.params;
   const source = route.params.source as ImportedPlaylist | undefined;
   const includeVideoParts = Boolean(route.params.includeVideoParts || source);
@@ -260,9 +275,15 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const displayedList = getDisplayedList();
   const totalVideoCount = source?.mediaCount ?? route.params.mediaCount ?? list.length;
   const heroCover = source?.cover || route.params.cover || displayedList[0]?.cover;
-  const statusBarHeight = Platform.OS === 'android'
-    ? Math.max(insets.top, StatusBar.currentHeight ?? 0)
-    : insets.top;
+  const sortOptions = [
+    {value: SortOption.TitleAsc, title: '标题正序', hint: 'A → Z'},
+    {value: SortOption.TitleDesc, title: '标题逆序', hint: 'Z → A'},
+    {value: SortOption.DurationAsc, title: '时长正序', hint: '由短到长'},
+    {value: SortOption.DurationDesc, title: '时长逆序', hint: '由长到短'},
+    {value: SortOption.FavoriteTimeAsc, title: '收藏时间正序', hint: '最早收藏优先'},
+    {value: SortOption.FavoriteTimeDesc, title: '收藏时间逆序', hint: '最近收藏优先'},
+  ];
+  const activeSortTitle = sortOptions.find(option => option.value === sortOption)?.title ?? '默认顺序';
 
   const playFrom = useCallback(async (idx: number) => {
     try {
@@ -435,7 +456,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       backgroundColor: t.colors.surfaceHigh,
       borderRadius: 20,
       paddingHorizontal: t.spacing.md,
-      height: 40,
+      minHeight: 52,
       marginHorizontal: t.spacing.lg,
       marginVertical: t.spacing.md,
     },
@@ -458,31 +479,28 @@ export const VideosScreen = ({ route, navigation }: any) => {
     footer: { padding: t.spacing.lg, alignItems: 'center' },
     modalOverlay: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
+      backgroundColor: t.colors.overlay,
       justifyContent: 'flex-end',
     },
     modalContent: {
-      backgroundColor: t.isDark ? '#17181B' : '#FAFBFD',
-      borderTopLeftRadius: 12,
-      borderTopRightRadius: 12,
-      padding: t.spacing.lg,
+      backgroundColor: t.colors.surfaceRaised,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      flexGrow: 0,
       maxHeight: '80%',
     },
     modalTitle: {
       fontSize: t.fontSize.lg,
       fontWeight: '600',
+      color: t.colors.text,
       marginBottom: t.spacing.md,
       textAlign: 'center',
     },
   });
 
-  // No longer using cycleSort, sorting handled via modal
-
-  return (
-    // 【性能优化】collapsable=false 确保 Android 上屏幕容器不被 View 融合优化
-    <View style={s.container} {...(Platform.OS === 'android' ? { collapsable: false as any } : {})}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      <View style={{height: 252, overflow: 'hidden', backgroundColor: t.colors.primaryDark}}>
+  const collectionHeader = (
+    <View>
+      <View style={{overflow: 'hidden', backgroundColor: t.colors.primaryDark, paddingBottom: t.spacing.xl}}>
         {heroCover ? (
           <FastImage source={{uri: heroCover}} style={StyleSheet.absoluteFillObject} resizeMode={FastImage.resizeMode.cover} />
         ) : (
@@ -492,60 +510,57 @@ export const VideosScreen = ({ route, navigation }: any) => {
         )}
         <LinearGradient
           pointerEvents="none"
-          colors={t.isDark ? ['rgba(8,8,12,0.08)', 'rgba(8,8,12,0.94)'] : ['rgba(12,10,22,0.02)', 'rgba(12,10,22,0.84)']}
+          colors={['rgba(12,10,22,0.64)', 'rgba(12,10,22,0.92)']}
           style={StyleSheet.absoluteFillObject}
         />
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="返回收藏夹"
-          onPress={() => navigation.goBack()}
-          style={{alignSelf: 'flex-start', marginTop: statusBarHeight + 5, marginLeft: t.spacing.md, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(12,10,22,0.32)'}}>
-          <Icon name="chevron-left" size={28} color="#fff" />
-        </TouchableOpacity>
-        {source ? (
-          <View style={{position: 'absolute', top: statusBarHeight + 5, right: t.spacing.md, zIndex: 2}}>
-            <SubscribePlaylistButton source={source} compact />
-          </View>
-        ) : null}
-        <View style={{position: 'absolute', left: t.spacing.lg, right: t.spacing.lg, bottom: t.spacing.lg}}>
+        <View style={{paddingHorizontal: t.spacing.lg, paddingTop: compactHero ? t.spacing.md : t.spacing.xxl}}>
           <View style={{alignSelf: 'flex-start', paddingHorizontal: t.spacing.sm, paddingVertical: 4, borderRadius: t.radius.full, backgroundColor: t.colors.primary}}>
             <Text style={{fontSize: t.fontSize.xs, fontWeight: '600', color: t.colors.onPrimary}}>
               {source?.kind === 'subscribedSeason' ? '订阅合集' : source ? '收藏夹' : '我创建'}
             </Text>
           </View>
-          <Text style={{fontSize: 25, lineHeight: 31, fontWeight: '700', color: '#fff', marginTop: t.spacing.sm}} numberOfLines={2}>{listTitle}</Text>
+          <Text accessibilityRole="header" style={{fontSize: compactHero ? 24 : 28, fontWeight: '700', color: '#fff', marginTop: t.spacing.sm}} numberOfLines={2}>{listTitle}</Text>
           <Text style={{fontSize: t.fontSize.sm, color: 'rgba(255,255,255,0.88)', marginTop: t.spacing.xs}} numberOfLines={1}>
             {source?.ownerName ? `${source.ownerName} · ` : '我的收藏 · '}{totalVideoCount} 个视频
           </Text>
-          {source?.description ? (
-            <Text style={{fontSize: t.fontSize.xs, lineHeight: 17, color: 'rgba(255,255,255,0.82)', marginTop: t.spacing.xs}} numberOfLines={2}>
+          {source?.description && !compactHero ? (
+            <Text style={{fontSize: t.fontSize.sm, color: 'rgba(255,255,255,0.88)', marginTop: t.spacing.sm}} numberOfLines={2}>
               {source.description}
             </Text>
           ) : null}
         </View>
       </View>
       {/* 搜索 + 排序栏 */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md}}>
-        <View style={[s.searchBar, { flex: 1, height: 46, marginHorizontal: 0, marginVertical: 0, borderRadius: t.radius.full }]}>
+      <View style={{paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.lg, paddingBottom: t.spacing.md}}>
+        <Text style={{fontSize: t.fontSize.sm, fontWeight: '600', color: t.colors.text, marginBottom: t.spacing.sm}}>查找列表内容</Text>
+        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+        <View style={[s.searchBar, { flex: 1, marginHorizontal: 0, marginVertical: 0, borderRadius: t.radius.xl }]}>
           <Icon name="magnify" size={20} color={t.colors.textHint} />
           <TextInput
+            accessibilityLabel={source ? '搜索合集内视频' : '搜索收藏夹内视频'}
+            returnKeyType="search"
             style={{ flex: 1, marginLeft: t.spacing.sm, color: isSearchDisabled ? t.colors.textHint : t.colors.text, fontSize: t.fontSize.base, padding: 0 }}
-            placeholder={isSyncing ? "索引同步中，暂不可搜索" : isGlobalIndexEmpty ? "全局索引为空，暂不可搜索" : source ? "搜索合集内视频" : "搜索收藏夹内视频"}
+            placeholder={isSearchDisabled ? '同步完成后可搜索' : '输入视频标题'}
             placeholderTextColor={t.colors.textHint}
             value={searchQuery}
             onChangeText={setSearchQuery} editable={!isSearchDisabled}
           />
+          {searchQuery.length > 0 && (
+            <IconButton name="close-circle" size={20} color={t.colors.textSub} accessibilityLabel="清空列表搜索" onPress={() => setSearchQuery('')} />
+          )}
         </View>
         {/* 增量刷新按钮：点击触发单收藏夹增量同步 */}
         {isRefreshing ? (
           <ActivityIndicator
             size="small"
             color={t.colors.primary}
-            style={{ marginLeft: t.spacing.sm, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' }}
+            accessibilityLabel="正在刷新播放列表"
+            style={{ marginLeft: t.spacing.sm, width: 48, height: 48, justifyContent: 'center', alignItems: 'center' }}
           />
         ) : (
           <IconButton
             name="refresh"
+            accessibilityLabel="刷新当前播放列表"
             size={24}
             color={t.colors.text}
             style={{ marginLeft: t.spacing.sm }}
@@ -553,19 +568,26 @@ export const VideosScreen = ({ route, navigation }: any) => {
             onPress={handleRefresh}
           />
         )}
-        <IconButton name="sort-variant" size={24} color={t.colors.text} style={{ marginLeft: t.spacing.sm }} disabled={isSearchDisabled} onPress={() => setSortModalVisible(true)} />
+        </View>
+        {isSearchDisabled && (
+          <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: t.spacing.sm}}>
+            {isSyncing ? '正在同步收藏索引，请稍候再搜索' : '收藏索引尚未就绪，可先在设置中同步'}
+          </Text>
+        )}
       </View>
+    </View>
+  );
 
-      {initing || (loading && displayedList.length === 0) ? (
-        <Loading />
-      ) : error && displayedList.length === 0 ? (
-        <ErrorView message={error} onRetry={loadMore} />
-      ) : displayedList.length === 0 ? (
-        <Empty title="播放列表是空的" />
-      ) : (
+  return (
+    <View style={s.container} {...(Platform.OS === 'android' ? { collapsable: false as any } : {})}>
+      <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
+      <Header title="收藏内容" showBack right={source ? <SubscribePlaylistButton source={source} compact /> : undefined} />
         <FlatList
+          style={{flex: 1}}
           data={displayedList}
-          contentContainerStyle={{paddingBottom: insets.bottom + 136}}
+          contentContainerStyle={{paddingBottom: t.spacing.xl}}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           keyExtractor={(it) => it.bvid}
           showsVerticalScrollIndicator={false}
           // ========== 性能优化参数 ==========
@@ -575,21 +597,25 @@ export const VideosScreen = ({ route, navigation }: any) => {
           initialNumToRender={10}
           // =================================
           ListHeaderComponent={
+            <>
+            {collectionHeader}
             <View style={{paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.sm, paddingBottom: t.spacing.xs}}>
-              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: t.spacing.md}}>
-                <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub}}>共 {totalVideoCount} 个视频</Text>
-                <TouchableOpacity onPress={() => setSortModalVisible(true)} style={{flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.sm, paddingVertical: 6, borderRadius: t.radius.full, backgroundColor: t.colors.surfaceHigh}}>
+              <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.sm, alignItems: 'center', justifyContent: 'space-between', marginBottom: t.spacing.md}}>
+                <Text accessibilityLiveRegion="polite" style={{fontSize: t.fontSize.sm, color: t.colors.textSub}}>{searchQuery.trim() ? `找到 ${displayedList.length} 个视频` : `共 ${totalVideoCount} 个视频`}</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`排序方式，当前${activeSortTitle}`} onPress={() => setSortModalVisible(true)} style={{flexDirection: 'row', alignItems: 'center', minHeight: 48, paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.sm, borderRadius: t.radius.full, backgroundColor: t.colors.surfaceHigh}}>
                   <Icon name="sort" size={17} color={t.colors.textSub} />
-                  <Text style={{fontSize: t.fontSize.xs, color: t.colors.textSub, marginLeft: 4}}>排序</Text>
+                  <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginLeft: 4}}>{activeSortTitle}</Text>
                   <Icon name="chevron-down" size={17} color={t.colors.textSub} />
                 </TouchableOpacity>
               </View>
-              <View style={s.actions}>
-                <Button title="▶  全部播放" onPress={playAll} style={s.actionBtn} />
-                <Button title="⤨  随机播放" variant="secondary" onPress={shuffle} style={s.actionBtn} />
+              <View style={[s.actions, compactLayout && {flexDirection: 'column'}]}>
+                <Button title="全部播放" onPress={playAll} disabled={displayedList.length === 0} style={[s.actionBtn, compactLayout && {flex: 0}]} />
+                <Button title="随机播放" variant="secondary" onPress={shuffle} disabled={displayedList.length === 0} style={[s.actionBtn, compactLayout && {flex: 0}]} />
               </View>
             </View>
+            </>
           }
+          ListEmptyComponent={initing || loading ? <Loading /> : error ? <ErrorView message={error} onRetry={loadMore} /> : <Empty title={searchQuery.trim() ? '没有找到匹配的视频' : '播放列表是空的'} hint={searchQuery.trim() ? '试试更短的关键词，或清空搜索查看全部内容' : '收藏视频后，刷新列表即可查看'} />}
           renderItem={({ item, index }) => (
             <VideoItem
               item={item}
@@ -597,7 +623,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
               onPlay={playFrom}
               onMenu={(v) => { setSelectedVideo(v); setModalVisible(true); }}
               textColor={t.colors.text}
-              textHintColor={t.colors.textHint}
+              textHintColor={t.colors.textSub}
               surfaceHighColor={t.colors.surfaceHigh}
               surfaceColor={t.colors.surface}
               fontSizeBase={t.fontSize.base}
@@ -605,9 +631,14 @@ export const VideosScreen = ({ route, navigation }: any) => {
               spacingSm={t.spacing.sm}
               spacingMd={t.spacing.md}
               spacingLg={t.spacing.lg}
+              compact={compactLayout}
             />
           )}
-          onEndReached={loadMore}
+          onEndReached={() => {
+            if (!initing && !loading && !error && hasMore) {
+              void loadMore();
+            }
+          }}
           onEndReachedThreshold={0.4}
           refreshControl={(
             <RefreshControl
@@ -623,14 +654,13 @@ export const VideosScreen = ({ route, navigation }: any) => {
               <View style={s.footer}>
                 <ActivityIndicator color={t.colors.primary} />
               </View>
-            ) : !hasMore ? (
+            ) : !hasMore && displayedList.length > 0 ? (
               <View style={s.footer}>
-                <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs }}>到底了</Text>
+                <Text style={{ color: t.colors.textSub, fontSize: t.fontSize.sm }}>已显示全部内容</Text>
               </View>
             ) : null
           }
         />
-      )}
       {/* Bottom Action Modal */}
       <Modal
         visible={modalVisible}
@@ -639,8 +669,9 @@ export const VideosScreen = ({ route, navigation }: any) => {
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={s.modalOverlay}>
-          <View style={s.modalContent}>
-            <Text style={s.modalTitle} numberOfLines={1}>{selectedVideo?.title}</Text>
+          <ScrollView style={s.modalContent} contentContainerStyle={{padding: t.spacing.lg, paddingBottom: Math.max(insets.bottom, t.spacing.lg)}}>
+            <View style={{width: 36, height: 4, borderRadius: 2, alignSelf: 'center', backgroundColor: t.colors.divider, marginBottom: t.spacing.lg}} />
+            <Text accessibilityRole="header" style={s.modalTitle} numberOfLines={3}>{selectedVideo?.title}</Text>
             <Button
               title="下一首播放"
               variant="secondary"
@@ -653,10 +684,10 @@ export const VideosScreen = ({ route, navigation }: any) => {
                 }
                 setModalVisible(false);
               }}
-              style={{ marginBottom: t.spacing.sm, height: 36 }}
+              style={{ marginBottom: t.spacing.sm, minHeight: 52 }}
             />
             <Button title="取消" variant="secondary" onPress={() => setModalVisible(false)} />
-          </View>
+          </ScrollView>
         </View>
       </Modal>
       {/* 排序弹窗 */}
@@ -667,16 +698,29 @@ export const VideosScreen = ({ route, navigation }: any) => {
         onRequestClose={() => setSortModalVisible(false)}
       >
         <View style={s.modalOverlay}>
-          <View style={s.modalContent}>
-            <Text style={s.modalTitle}>排序方式</Text>
-            <Button title="标题正序" variant="secondary" onPress={() => { setSortOption(SortOption.TitleAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
-            <Button title="标题逆序" variant="secondary" onPress={() => { setSortOption(SortOption.TitleDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
-            <Button title="时长正序" variant="secondary" onPress={() => { setSortOption(SortOption.DurationAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
-            <Button title="时长逆序" variant="secondary" onPress={() => { setSortOption(SortOption.DurationDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
-            <Button title="收藏时间正序" variant="secondary" onPress={() => { setSortOption(SortOption.FavoriteTimeAsc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
-            <Button title="收藏时间逆序" variant="secondary" onPress={() => { setSortOption(SortOption.FavoriteTimeDesc); setSortModalVisible(false); }} style={{ marginBottom: t.spacing.sm, height: 36 }} />
+          <ScrollView style={s.modalContent} contentContainerStyle={{padding: t.spacing.lg, paddingBottom: Math.max(insets.bottom, t.spacing.lg)}}>
+            <View style={{width: 36, height: 4, borderRadius: 2, alignSelf: 'center', backgroundColor: t.colors.divider, marginBottom: t.spacing.lg}} />
+            <Text accessibilityRole="header" style={s.modalTitle}>排序方式</Text>
+            {sortOptions.map(option => {
+              const selected = option.value === sortOption;
+              return (
+                <TouchableOpacity
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`${option.title}，${option.hint}`}
+                  accessibilityState={{checked: selected}}
+                  onPress={() => { setSortOption(option.value); setSortModalVisible(false); }}
+                  style={{minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: t.spacing.md, padding: t.spacing.md, marginBottom: t.spacing.sm, borderRadius: t.radius.xl, backgroundColor: selected ? t.colors.primaryLight : t.colors.surfaceHigh, borderWidth: 1, borderColor: selected ? t.colors.primary : 'transparent'}}>
+                  <View style={{flex: 1, minWidth: 0}}>
+                    <Text style={{fontSize: t.fontSize.base, color: t.colors.text, fontWeight: selected ? '600' : '400'}}>{option.title}</Text>
+                    <Text style={{fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 4}}>{option.hint}</Text>
+                  </View>
+                  <Icon name={selected ? 'radiobox-marked' : 'radiobox-blank'} size={24} color={selected ? t.colors.primary : t.colors.textSub} />
+                </TouchableOpacity>
+              );
+            })}
             <Button title="关闭" variant="secondary" onPress={() => setSortModalVisible(false)} />
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     </View>

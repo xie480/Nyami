@@ -2,21 +2,24 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Alert,
   ScrollView,
-  StyleSheet,
   StatusBar,
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
-import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {useFocusEffect, useIsFocused} from '@react-navigation/native';
 import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Button} from '../components/Button';
 import {Loading} from '../components/Loading';
-import {TagProfilePipeline, TagProfileRadar} from '../components/TagProfileVisualization';
+import {Header} from '../components/Header';
+import {IconButton} from '../components/IconButton';
+import {
+  TagProfilePipeline,
+  TagProfileRadar,
+} from '../components/TagProfileVisualization';
 import {
   favoriteService,
   ensureGlobalIndexCacheLoaded,
@@ -101,7 +104,8 @@ function readPersistedTagProfileSnapshot(
   );
   if (
     snapshot?.uid !== uid ||
-    snapshot.scopeKey !== getTagProfileScopeKey(uid, hiddenFolderIds, visibleSourceKeys) ||
+    snapshot.scopeKey !==
+      getTagProfileScopeKey(uid, hiddenFolderIds, visibleSourceKeys) ||
     !snapshot.profile ||
     !Array.isArray(snapshot.profile.preferences)
   ) {
@@ -142,7 +146,10 @@ function getTagProfileSnapshotKey(
 }
 
 function prepareTagProfileCache(uid: string, indexRevision: number): void {
-  if (cachedProfileUid === uid && cachedProfileIndexRevision === indexRevision) {
+  if (
+    cachedProfileUid === uid &&
+    cachedProfileIndexRevision === indexRevision
+  ) {
     return;
   }
   tagProfileSnapshots.clear();
@@ -157,7 +164,9 @@ function getCachedTagProfile(
 ): TagProfile | null {
   prepareTagProfileCache(uid, indexRevision);
   const profile = tagProfileSnapshots.get(snapshotKey);
-  if (!profile) return null;
+  if (!profile) {
+    return null;
+  }
   tagProfileSnapshots.delete(snapshotKey);
   tagProfileSnapshots.set(snapshotKey, profile);
   return profile;
@@ -174,7 +183,9 @@ function cacheTagProfile(
   tagProfileSnapshots.set(snapshotKey, profile);
   while (tagProfileSnapshots.size > TAG_PROFILE_CACHE_LIMIT) {
     const oldestKey = tagProfileSnapshots.keys().next().value;
-    if (oldestKey === undefined) break;
+    if (oldestKey === undefined) {
+      break;
+    }
     tagProfileSnapshots.delete(oldestKey);
   }
 }
@@ -185,7 +196,8 @@ function cacheTagProfile(
  */
 export const TagRecommendationsScreen = ({navigation}: any) => {
   const t = useTheme();
-  const insets = useSafeAreaInsets();
+  const {width, fontScale} = useWindowDimensions();
+  const compact = width < 380 || fontScale > 1.2;
   const isFocused = useIsFocused();
   const uid = useAuthStore(state => state.userId);
   const backgroundBackfillStatus = useTagBackfillStore(state =>
@@ -199,11 +211,15 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   );
   const hiddenFolderIds = useSettingsStore(state => state.hiddenFolderIds);
   const visibleSourceKeys = useImportedPlaylistStore(state =>
-    uid ? state.visibleSourceKeysByUid[uid] ?? EMPTY_VISIBLE_SOURCE_KEYS : EMPTY_VISIBLE_SOURCE_KEYS,
+    uid
+      ? state.visibleSourceKeysByUid[uid] ?? EMPTY_VISIBLE_SOURCE_KEYS
+      : EMPTY_VISIBLE_SOURCE_KEYS,
   );
   const setQueue = usePlayerStore(state => state.setQueue);
   const cachedScreenSnapshot = useMemo(() => {
-    if (!uid || storage.getString('lastUid') !== uid) return null;
+    if (!uid || storage.getString('lastUid') !== uid) {
+      return null;
+    }
     return readPersistedTagProfileSnapshot(
       uid,
       hiddenFolderIds,
@@ -233,202 +249,222 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   const activeSnapshotController = useRef<AbortController | null>(null);
   const backgroundBackfillWasRunning = useRef(false);
 
-  const loadSnapshot = useCallback(async (refreshProfile = false) => {
-    if (!uid) {
-      loadedUid.current = null;
-      loadedSnapshotKey.current = null;
-      activeSnapshotKey.current = null;
-      activeSnapshotController.current?.abort();
-      activeSnapshotController.current = null;
-      requestController.current?.abort();
-      requestController.current = null;
-      loadedTagCacheRevision.current = null;
-      tagProfileSnapshots.clear();
-      cachedProfileUid = null;
-      cachedProfileIndexRevision = null;
-      setFavorites([]);
-      setProfile(null);
-      setRecommendations([]);
-      setFailedSearchCount(0);
-      setRecommendationHasMore(false);
-      setHasGenerated(false);
-      setInitialLoading(false);
-      return;
-    }
-
-    const requestUid = uid;
-    const normalizedHiddenFolderIds = [...new Set(hiddenFolderIds)].sort(
-      (left, right) => left - right,
-    );
-    const normalizedVisibleSourceKeys = [...new Set(visibleSourceKeys)].sort();
-    const persistedProfile = readPersistedTagProfileSnapshot(
-      requestUid,
-      normalizedHiddenFolderIds,
-      normalizedVisibleSourceKeys,
-    );
-    if (!refreshProfile && persistedProfile) {
-      setProfile(persistedProfile.profile);
-      setInitialLoading(false);
-    } else if (!refreshProfile) {
-      setProfile(null);
-      setInitialLoading(true);
-    }
-    const scopeKey = JSON.stringify([
-      requestUid,
-      normalizedHiddenFolderIds,
-      normalizedVisibleSourceKeys,
-    ]);
-    let requestKey = scopeKey;
-    if (isGlobalIndexCacheLoaded()) {
-      const currentRevision = getGlobalIndexRevision();
-      const currentSnapshotKey = getTagProfileSnapshotKey(
-        requestUid,
-        currentRevision,
-        normalizedHiddenFolderIds,
-        normalizedVisibleSourceKeys,
-      );
-      const currentTagCacheRevision = getTagProfileCacheRevision();
-      requestKey = JSON.stringify([currentSnapshotKey, currentTagCacheRevision]);
-      if (
-        !refreshProfile &&
-        loadedSnapshotKey.current === currentSnapshotKey &&
-        loadedTagCacheRevision.current === currentTagCacheRevision
-      ) {
-        return;
-      }
-    }
-    if (activeSnapshotKey.current === requestKey && !refreshProfile) return;
-
-    const controller = new AbortController();
-    requestController.current?.abort();
-    requestController.current = controller;
-    activeSnapshotKey.current = requestKey;
-    activeSnapshotController.current = controller;
-    if (refreshProfile || !persistedProfile) {
-      setInitialLoading(true);
-    }
-    setError(null);
-    if (loadedUid.current !== requestUid) {
-      loadedUid.current = requestUid;
-      setRecommendations([]);
-      setFailedSearchCount(0);
-      setRecommendationHasMore(false);
-      setHasGenerated(false);
-    }
-
-    try {
-      if (storage.getString('lastUid') !== requestUid) {
+  const loadSnapshot = useCallback(
+    async (refreshProfile = false) => {
+      if (!uid) {
+        loadedUid.current = null;
+        loadedSnapshotKey.current = null;
+        activeSnapshotKey.current = null;
+        activeSnapshotController.current?.abort();
+        activeSnapshotController.current = null;
+        requestController.current?.abort();
+        requestController.current = null;
+        loadedTagCacheRevision.current = null;
+        tagProfileSnapshots.clear();
+        cachedProfileUid = null;
+        cachedProfileIndexRevision = null;
         setFavorites([]);
         setProfile(null);
-        setError('本机收藏数据正在随账号切换清理，请稍后返回此页重试。');
+        setRecommendations([]);
+        setFailedSearchCount(0);
+        setRecommendationHasMore(false);
+        setHasGenerated(false);
+        setInitialLoading(false);
         return;
       }
-      await ensureGlobalIndexCacheLoaded();
-      if (
-        controller.signal.aborted ||
-        useAuthStore.getState().userId !== requestUid ||
-        storage.getString('lastUid') !== requestUid
-      ) {
-        return;
-      }
-      const indexRevision = getGlobalIndexRevision();
-      const snapshotKey = getTagProfileSnapshotKey(
-        requestUid,
-        indexRevision,
-        normalizedHiddenFolderIds,
-        normalizedVisibleSourceKeys,
+
+      const requestUid = uid;
+      const normalizedHiddenFolderIds = [...new Set(hiddenFolderIds)].sort(
+        (left, right) => left - right,
       );
-      const indexFingerprint = getGlobalIndexFingerprint();
-      const tagCacheRevision = getTagProfileCacheRevision();
-      const persistedSnapshot = readPersistedTagProfileSnapshot(
+      const normalizedVisibleSourceKeys = [
+        ...new Set(visibleSourceKeys),
+      ].sort();
+      const persistedProfile = readPersistedTagProfileSnapshot(
         requestUid,
         normalizedHiddenFolderIds,
         normalizedVisibleSourceKeys,
       );
-      if (!refreshProfile) {
+      if (!refreshProfile && persistedProfile) {
+        setProfile(persistedProfile.profile);
+        setInitialLoading(false);
+      } else if (!refreshProfile) {
+        setProfile(null);
+        setInitialLoading(true);
+      }
+      const scopeKey = JSON.stringify([
+        requestUid,
+        normalizedHiddenFolderIds,
+        normalizedVisibleSourceKeys,
+      ]);
+      let requestKey = scopeKey;
+      if (isGlobalIndexCacheLoaded()) {
+        const currentRevision = getGlobalIndexRevision();
+        const currentSnapshotKey = getTagProfileSnapshotKey(
+          requestUid,
+          currentRevision,
+          normalizedHiddenFolderIds,
+          normalizedVisibleSourceKeys,
+        );
+        const currentTagCacheRevision = getTagProfileCacheRevision();
+        requestKey = JSON.stringify([
+          currentSnapshotKey,
+          currentTagCacheRevision,
+        ]);
         if (
-          loadedSnapshotKey.current === snapshotKey &&
-          loadedTagCacheRevision.current === tagCacheRevision
+          !refreshProfile &&
+          loadedSnapshotKey.current === currentSnapshotKey &&
+          loadedTagCacheRevision.current === currentTagCacheRevision
         ) {
           return;
         }
-        const persistedSnapshotIsCurrent =
-          persistedSnapshot?.indexFingerprint === indexFingerprint &&
-          persistedSnapshot.tagCacheRevision === tagCacheRevision;
-        const cachedProfile = persistedSnapshotIsCurrent
-          ? getCachedTagProfile(requestUid, indexRevision, snapshotKey) ??
-            persistedSnapshot.profile
-          : null;
-        if (cachedProfile) {
-          const cachedFavorites = await favoriteService.getGlobalIndexYielding(
-            normalizedHiddenFolderIds,
-            normalizedVisibleSourceKeys,
-            controller.signal,
-          );
-          if (controller.signal.aborted) return;
-          loadedUid.current = requestUid;
-          loadedSnapshotKey.current = snapshotKey;
-          loadedTagCacheRevision.current = tagCacheRevision;
-          setFavorites(cachedFavorites);
-          setProfile(cachedProfile);
-          cacheTagProfile(requestUid, indexRevision, snapshotKey, cachedProfile);
-          return;
-        }
       }
-      setInitialLoading(true);
-      const localFavorites = await favoriteService.getGlobalIndexYielding(
-        normalizedHiddenFolderIds,
-        normalizedVisibleSourceKeys,
-        controller.signal,
-      );
-      if (controller.signal.aborted) return;
-      setFavorites(localFavorites);
-      const {profile: cachedProfile} = await loadTagProfile(
-        localFavorites,
-        controller.signal,
-      );
-      if (
-        controller.signal.aborted ||
-        useAuthStore.getState().userId !== requestUid ||
-        storage.getString('lastUid') !== requestUid ||
-        getGlobalIndexRevision() !== indexRevision ||
-        getGlobalIndexFingerprint() !== indexFingerprint ||
-        getTagProfileCacheRevision() !== tagCacheRevision
-      ) {
+      if (activeSnapshotKey.current === requestKey && !refreshProfile) {
         return;
       }
-      cacheTagProfile(requestUid, indexRevision, snapshotKey, cachedProfile);
-      persistTagProfileSnapshot(
-        requestUid,
-        normalizedHiddenFolderIds,
-        normalizedVisibleSourceKeys,
-        indexFingerprint,
-        tagCacheRevision,
-        cachedProfile,
-      );
-      setProfile(cachedProfile);
-      loadedSnapshotKey.current = snapshotKey;
-      loadedTagCacheRevision.current = tagCacheRevision;
-    } catch (loadError) {
-      if (!controller.signal.aborted) {
-        setError(
-          loadError instanceof Error ? loadError.message : '读取收藏画像失败',
+
+      const controller = new AbortController();
+      requestController.current?.abort();
+      requestController.current = controller;
+      activeSnapshotKey.current = requestKey;
+      activeSnapshotController.current = controller;
+      if (refreshProfile || !persistedProfile) {
+        setInitialLoading(true);
+      }
+      setError(null);
+      if (loadedUid.current !== requestUid) {
+        loadedUid.current = requestUid;
+        setRecommendations([]);
+        setFailedSearchCount(0);
+        setRecommendationHasMore(false);
+        setHasGenerated(false);
+      }
+
+      try {
+        if (storage.getString('lastUid') !== requestUid) {
+          setFavorites([]);
+          setProfile(null);
+          setError('本机收藏数据正在随账号切换清理，请稍后返回此页重试。');
+          return;
+        }
+        await ensureGlobalIndexCacheLoaded();
+        if (
+          controller.signal.aborted ||
+          useAuthStore.getState().userId !== requestUid ||
+          storage.getString('lastUid') !== requestUid
+        ) {
+          return;
+        }
+        const indexRevision = getGlobalIndexRevision();
+        const snapshotKey = getTagProfileSnapshotKey(
+          requestUid,
+          indexRevision,
+          normalizedHiddenFolderIds,
+          normalizedVisibleSourceKeys,
         );
+        const indexFingerprint = getGlobalIndexFingerprint();
+        const tagCacheRevision = getTagProfileCacheRevision();
+        const persistedSnapshot = readPersistedTagProfileSnapshot(
+          requestUid,
+          normalizedHiddenFolderIds,
+          normalizedVisibleSourceKeys,
+        );
+        if (!refreshProfile) {
+          if (
+            loadedSnapshotKey.current === snapshotKey &&
+            loadedTagCacheRevision.current === tagCacheRevision
+          ) {
+            return;
+          }
+          const persistedSnapshotIsCurrent =
+            persistedSnapshot?.indexFingerprint === indexFingerprint &&
+            persistedSnapshot.tagCacheRevision === tagCacheRevision;
+          const cachedProfile = persistedSnapshotIsCurrent
+            ? getCachedTagProfile(requestUid, indexRevision, snapshotKey) ??
+              persistedSnapshot.profile
+            : null;
+          if (cachedProfile) {
+            const cachedFavorites =
+              await favoriteService.getGlobalIndexYielding(
+                normalizedHiddenFolderIds,
+                normalizedVisibleSourceKeys,
+                controller.signal,
+              );
+            if (controller.signal.aborted) {
+              return;
+            }
+            loadedUid.current = requestUid;
+            loadedSnapshotKey.current = snapshotKey;
+            loadedTagCacheRevision.current = tagCacheRevision;
+            setFavorites(cachedFavorites);
+            setProfile(cachedProfile);
+            cacheTagProfile(
+              requestUid,
+              indexRevision,
+              snapshotKey,
+              cachedProfile,
+            );
+            return;
+          }
+        }
+        setInitialLoading(true);
+        const localFavorites = await favoriteService.getGlobalIndexYielding(
+          normalizedHiddenFolderIds,
+          normalizedVisibleSourceKeys,
+          controller.signal,
+        );
+        if (controller.signal.aborted) {
+          return;
+        }
+        setFavorites(localFavorites);
+        const {profile: cachedProfile} = await loadTagProfile(
+          localFavorites,
+          controller.signal,
+        );
+        if (
+          controller.signal.aborted ||
+          useAuthStore.getState().userId !== requestUid ||
+          storage.getString('lastUid') !== requestUid ||
+          getGlobalIndexRevision() !== indexRevision ||
+          getGlobalIndexFingerprint() !== indexFingerprint ||
+          getTagProfileCacheRevision() !== tagCacheRevision
+        ) {
+          return;
+        }
+        cacheTagProfile(requestUid, indexRevision, snapshotKey, cachedProfile);
+        persistTagProfileSnapshot(
+          requestUid,
+          normalizedHiddenFolderIds,
+          normalizedVisibleSourceKeys,
+          indexFingerprint,
+          tagCacheRevision,
+          cachedProfile,
+        );
+        setProfile(cachedProfile);
+        loadedSnapshotKey.current = snapshotKey;
+        loadedTagCacheRevision.current = tagCacheRevision;
+      } catch (loadError) {
+        if (!controller.signal.aborted) {
+          setError(
+            loadError instanceof Error ? loadError.message : '读取收藏画像失败',
+          );
+        }
+      } finally {
+        if (requestController.current === controller) {
+          requestController.current = null;
+        }
+        if (activeSnapshotController.current === controller) {
+          activeSnapshotKey.current = null;
+          activeSnapshotController.current = null;
+        }
+        if (!controller.signal.aborted) {
+          setInitialLoading(false);
+          setStage(current => (current === 'search' ? 'idle' : current));
+        }
       }
-    } finally {
-      if (requestController.current === controller) {
-        requestController.current = null;
-      }
-      if (activeSnapshotController.current === controller) {
-        activeSnapshotKey.current = null;
-        activeSnapshotController.current = null;
-      }
-      if (!controller.signal.aborted) {
-        setInitialLoading(false);
-        setStage(current => (current === 'search' ? 'idle' : current));
-      }
-    }
-  }, [uid, hiddenFolderIds, visibleSourceKeys]);
+    },
+    [uid, hiddenFolderIds, visibleSourceKeys],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -443,7 +479,9 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
   useNetworkRecoveryRefresh(() => loadSnapshot(true), Boolean(uid && error));
 
   useEffect(() => {
-    if (!uid) return;
+    if (!uid) {
+      return;
+    }
     return subscribeGlobalIndexRevision(() => {
       if (isFocused && loadedSnapshotKey.current) {
         loadSnapshot();
@@ -451,10 +489,13 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
     });
   }, [isFocused, loadSnapshot, uid]);
 
-  useEffect(() => () => {
-    requestController.current?.abort();
-    requestController.current = null;
-  }, []);
+  useEffect(
+    () => () => {
+      requestController.current?.abort();
+      requestController.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (backgroundBackfillStatus === 'running') {
@@ -614,84 +655,178 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
               displayedProgress.totalVideoCount) *
               100,
           ),
-      )
+        )
       : 0;
   const displayedFavoriteCount = profile?.totalVideoCount ?? favorites.length;
+  const surface = t.glass?.colors.glass.bg ?? t.colors.surface;
+  const border = t.glass?.colors.glass.border ?? t.colors.divider;
+
   return (
-    <View style={{flex: 1, backgroundColor: t.colors.background}}>
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: t.glass ? 'transparent' : t.colors.background,
+      }}>
       <StatusBar
         barStyle={t.isDark ? 'light-content' : 'dark-content'}
         translucent
         backgroundColor="transparent"
       />
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingTop: insets.top + t.spacing.sm,
-          paddingHorizontal: t.spacing.lg,
-          paddingBottom: t.spacing.sm,
-        }}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="返回收藏夹"
-          onPress={() => navigation.goBack()}
-          style={{width: 40, height: 40, alignItems: 'center', justifyContent: 'center'}}>
-          <Icon name="arrow-left" size={24} color={t.colors.text} />
-        </TouchableOpacity>
-        <Text
-          style={{
-            position: 'absolute',
-            left: 58,
-            right: 58,
-            color: t.colors.text,
-            fontSize: t.fontSize.lg,
-            fontWeight: '700',
-            textAlign: 'center',
-          }}>
-          用户画像
-        </Text>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="刷新用户画像"
-          onPress={() => loadSnapshot(true)}
-          style={{width: 40, height: 40, alignItems: 'center', justifyContent: 'center'}}>
-          <Icon name="refresh" size={22} color={t.colors.text} />
-        </TouchableOpacity>
-      </View>
-
+      <Header
+        title="用户画像"
+        showBack
+        noBorder
+        right={
+          <IconButton
+            name="refresh"
+            accessibilityLabel="刷新用户画像"
+            disabled={initialLoading || isWorking}
+            onPress={() => loadSnapshot(true)}
+          />
+        }
+      />
       {initialLoading ? (
         <Loading text="正在读取本地收藏与标签缓存" />
       ) : (
         <ScrollView
-          style={{flex: 1}}
+          style={{flex: 1, width: '100%', maxWidth: 880, alignSelf: 'center'}}
           contentContainerStyle={{
-            paddingHorizontal: t.spacing.lg,
-            paddingBottom: insets.bottom + 136,
+            paddingHorizontal: t.spacing.xl,
+            paddingTop: t.spacing.lg,
+            paddingBottom: 24,
           }}
           showsVerticalScrollIndicator={false}>
-          <Text style={{color: t.colors.textSub, fontSize: t.fontSize.sm, lineHeight: 22}}>
-            根据本机已同步的 {displayedFavoriteCount} 个收藏视频统计兴趣标签，再到 B 站音乐区寻找相似内容。
+          <Text
+            accessibilityRole="header"
+            style={{
+              fontSize: 28,
+              lineHeight: 38,
+              fontWeight: '700',
+              color: t.colors.text,
+            }}>
+            你的音乐轮廓
           </Text>
-          <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs, lineHeight: 18, marginTop: t.spacing.xs}}>
-            画像在本机计算；查询仅发送视频 BVID 和兴趣标签。离开页面会中断手动生成，已完成缓存会保留。
+          <Text
+            style={{
+              color: t.colors.textSub,
+              fontSize: t.fontSize.base,
+              lineHeight: 24,
+              marginTop: t.spacing.sm,
+            }}>
+            每一次收藏，都在记录你的喜好。
           </Text>
+          <View
+            style={{
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              gap: t.spacing.sm,
+              marginTop: t.spacing.xl,
+              marginBottom: t.spacing.lg,
+            }}>
+            {[
+              {label: '收藏视频', value: displayedFavoriteCount},
+              {label: '已读取视频', value: profile?.resolvedVideoCount ?? 0},
+              {label: '含有效标签', value: profile?.taggedVideoCount ?? 0},
+            ].map(item => (
+              <View
+                key={item.label}
+                style={{
+                  flex: 1,
+                  minWidth: 80,
+                  padding: t.spacing.md,
+                  borderRadius: 16,
+                  backgroundColor: surface,
+                  borderWidth: 1,
+                  borderColor: border,
+                }}>
+                <Text
+                  style={{
+                    fontSize: t.fontSize.xxl,
+                    fontWeight: '700',
+                    color: t.colors.text,
+                  }}>
+                  {item.value}
+                </Text>
+                <Text
+                  style={{
+                    fontSize: t.fontSize.xs,
+                    lineHeight: 20,
+                    color: t.colors.textSub,
+                    marginTop: t.spacing.xs,
+                  }}>
+                  {item.label}
+                </Text>
+              </View>
+            ))}
+          </View>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: t.spacing.sm,
+              marginBottom: t.spacing.xl,
+            }}>
+            <Icon
+              accessible={false}
+              name="shield-check-outline"
+              size={20}
+              color={t.colors.textSub}
+            />
+            <Text
+              style={{
+                flex: 1,
+                color: t.colors.textSub,
+                fontSize: t.fontSize.sm,
+                lineHeight: 22,
+              }}>
+              画像在本机计算；查询仅发送视频 BVID
+              和兴趣标签。已完成的标签缓存会保留。
+            </Text>
+          </View>
 
-          <View style={{flexDirection: 'row', padding: 4, marginTop: t.spacing.lg, borderRadius: t.radius.full, backgroundColor: t.colors.surfaceHigh}}>
-            {([
-              {key: 'radar', title: '兴趣雷达'},
-              {key: 'pipeline', title: '推荐路径'},
-            ] as const).map(tab => {
+          <View
+            style={{
+              flexDirection: 'row',
+              padding: t.spacing.xs,
+              gap: t.spacing.xs,
+              borderRadius: 18,
+              backgroundColor: t.colors.surfaceHigh,
+            }}>
+            {(
+              [
+                {key: 'radar', title: '兴趣雷达'},
+                {key: 'pipeline', title: '推荐路径'},
+              ] as const
+            ).map(tab => {
               const selected = profileView === tab.key;
               return (
                 <TouchableOpacity
                   key={tab.key}
                   accessibilityRole="button"
                   accessibilityState={{selected}}
+                  activeOpacity={0.7}
                   onPress={() => setProfileView(tab.key)}
-                  style={{flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: t.radius.full, backgroundColor: selected ? t.colors.primary : 'transparent'}}>
-                  <Text style={{color: selected ? t.colors.onPrimary : t.colors.textSub, fontSize: t.fontSize.sm, fontWeight: selected ? '600' : '400'}}>{tab.title}</Text>
+                  style={{
+                    flex: 1,
+                    minHeight: 48,
+                    padding: t.spacing.sm,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 14,
+                    borderWidth: 1,
+                    borderColor: selected ? border : 'transparent',
+                    backgroundColor: selected
+                      ? t.colors.surface
+                      : 'transparent',
+                  }}>
+                  <Text
+                    style={{
+                      color: selected ? t.colors.primary : t.colors.textSub,
+                      fontSize: t.fontSize.base,
+                      fontWeight: selected ? '700' : '500',
+                    }}>
+                    {tab.title}
+                  </Text>
                 </TouchableOpacity>
               );
             })}
@@ -702,190 +837,360 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
               style={{
                 marginTop: t.spacing.lg,
                 padding: t.spacing.lg,
-                borderRadius: 24,
-                backgroundColor: t.colors.surface,
+                borderRadius: 20,
+                backgroundColor: surface,
+                borderWidth: 1,
+                borderColor: border,
               }}>
-              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
-                <Text style={{color: t.colors.text, fontSize: t.fontSize.md, fontWeight: '700'}}>
-                  {profileView === 'radar' ? '兴趣维度' : '推荐生成路径'}
-                </Text>
-                <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs}}>
-                  已读取 {profile.resolvedVideoCount}/{profile.totalVideoCount} 个视频
-                </Text>
-              </View>
-              <Text style={{color: t.colors.textSub, fontSize: t.fontSize.sm, marginTop: t.spacing.xs}}>
-                {profile.taggedVideoCount} 个视频含可用于画像的标签
+              <Text
+                accessibilityRole="header"
+                style={{
+                  color: t.colors.text,
+                  fontSize: t.fontSize.lg,
+                  fontWeight: '700',
+                }}>
+                {profileView === 'radar' ? '经常听见的兴趣' : '从收藏到推荐'}
               </Text>
-              {profile.preferences.length > 0 ? profileView === 'radar' ? (
-                <TagProfileRadar preferences={profile.preferences} />
+              <Text
+                style={{
+                  color: t.colors.textSub,
+                  fontSize: t.fontSize.sm,
+                  lineHeight: 21,
+                  marginTop: t.spacing.sm,
+                }}>
+                根据收藏视频的标签出现频次，整理你的音乐偏好。
+              </Text>
+              {profile.preferences.length > 0 ? (
+                profileView === 'radar' ? (
+                  <TagProfileRadar preferences={profile.preferences} />
+                ) : (
+                  <TagProfilePipeline profile={profile} />
+                )
               ) : (
-                <TagProfilePipeline profile={profile} />
-              ) : (
-                <Text style={{color: t.colors.textHint, fontSize: t.fontSize.sm, marginTop: t.spacing.md}}>
-                  还没有可用的标签数据。点击下方按钮读取收藏视频 tag。
-                </Text>
+                <View
+                  style={{alignItems: 'center', paddingVertical: t.spacing.xl}}>
+                  <Icon
+                    accessible={false}
+                    name="tag-search-outline"
+                    size={32}
+                    color={t.colors.textSub}
+                  />
+                  <Text
+                    style={{
+                      color: t.colors.textSub,
+                      fontSize: t.fontSize.base,
+                      lineHeight: 24,
+                      textAlign: 'center',
+                      marginTop: t.spacing.md,
+                    }}>
+                    还没有可用的兴趣标签
+                  </Text>
+                  <Text
+                    style={{
+                      color: t.colors.textSub,
+                      fontSize: t.fontSize.sm,
+                      lineHeight: 22,
+                      textAlign: 'center',
+                      marginTop: t.spacing.sm,
+                    }}>
+                    读取收藏视频标签后，这里会呈现你的音乐喜好。
+                  </Text>
+                </View>
               )}
             </View>
           )}
 
           {(stage === 'tags' || showBackgroundProgress) && (
-            <View style={{marginTop: t.spacing.md, padding: t.spacing.md, borderRadius: 20, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.divider}}>
-              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
-                <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
-                  <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: t.colors.primary, marginRight: t.spacing.sm}} />
-                  <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600'}} numberOfLines={1}>
-                    {isBackgroundBackfillActive
-                      ? '同步后正在后台读取标签'
-                      : backgroundBackfillStatus === 'paused' && stage !== 'tags'
-                        ? '后台读取已暂停'
-                        : '正在读取标签'}
-                  </Text>
-                </View>
-                <Text style={{color: t.colors.primary, fontSize: t.fontSize.md, fontWeight: '700'}}>
+            <View
+              style={{
+                marginTop: t.spacing.lg,
+                padding: t.spacing.lg,
+                borderRadius: 20,
+                backgroundColor: surface,
+                borderWidth: 1,
+                borderColor: border,
+              }}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: t.spacing.md,
+                }}>
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    color: t.colors.text,
+                    fontSize: t.fontSize.base,
+                    lineHeight: 24,
+                    fontWeight: '600',
+                  }}>
+                  {isBackgroundBackfillActive
+                    ? '后台正在读取兴趣标签'
+                    : backgroundBackfillStatus === 'paused' && stage !== 'tags'
+                    ? '后台读取已暂停'
+                    : '正在读取兴趣标签'}
+                </Text>
+                <Text
+                  style={{
+                    color: t.colors.primary,
+                    fontSize: t.fontSize.xl,
+                    fontWeight: '700',
+                  }}>
                   {progressPercent}%
                 </Text>
               </View>
-              <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: 3}}>
-                已完成 {displayedProgress.completedVideoCount} / {displayedProgress.totalVideoCount} 个视频
+              <Text
+                style={{
+                  color: t.colors.textSub,
+                  fontSize: t.fontSize.sm,
+                  lineHeight: 21,
+                  marginTop: t.spacing.sm,
+                }}>
+                已完成 {displayedProgress.completedVideoCount} /{' '}
+                {displayedProgress.totalVideoCount} 个视频
               </Text>
               <View
+                accessible
+                accessibilityRole="progressbar"
+                accessibilityLabel="读取兴趣标签进度"
+                accessibilityValue={{min: 0, max: 100, now: progressPercent}}
                 style={{
                   height: 8,
-                  marginTop: t.spacing.md,
+                  marginTop: t.spacing.lg,
                   borderRadius: 4,
                   overflow: 'hidden',
                   backgroundColor: t.colors.surfaceHigh,
                 }}>
-                <LinearGradient
-                  colors={[t.colors.primary, t.glass?.colors.accent.secondary ?? t.colors.primary]}
-                  style={{height: '100%', width: `${progressPercent}%`, borderRadius: 4}}
+                <View
+                  style={{
+                    height: '100%',
+                    width: `${progressPercent}%`,
+                    borderRadius: 4,
+                    backgroundColor: t.colors.primary,
+                  }}
                 />
               </View>
-              <View style={{flexDirection: 'row', marginTop: t.spacing.sm}}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  flexWrap: 'wrap',
+                  gap: t.spacing.sm,
+                  marginTop: t.spacing.lg,
+                }}>
                 {[
-                  {label: '有标签', value: displayedProgress.successfulVideoCount, color: t.colors.primaryLight},
-                  {label: '无标签', value: displayedProgress.emptyVideoCount, color: t.colors.surfaceHigh},
-                  {label: '失败', value: displayedProgress.failedVideoCount, color: t.colors.error + '18'},
+                  {
+                    label: '有标签',
+                    value: displayedProgress.successfulVideoCount,
+                  },
+                  {label: '无标签', value: displayedProgress.emptyVideoCount},
+                  {
+                    label: '读取失败',
+                    value: displayedProgress.failedVideoCount,
+                  },
                 ].map(item => (
-                  <View key={item.label} style={{flex: 1, marginRight: item.label === '失败' ? 0 : t.spacing.xs, paddingHorizontal: t.spacing.sm, paddingVertical: t.spacing.xs, borderRadius: 12, backgroundColor: item.color}}>
-                    <Text style={{color: t.colors.textHint, fontSize: 10}}>{item.label}</Text>
-                    <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '700', marginTop: 1}}>{item.value}</Text>
+                  <View
+                    key={item.label}
+                    style={{
+                      flex: 1,
+                      minWidth: 72,
+                      padding: t.spacing.sm,
+                      borderRadius: 12,
+                      backgroundColor: t.colors.surfaceHigh,
+                    }}>
+                    <Text
+                      style={{
+                        color: t.colors.textSub,
+                        fontSize: t.fontSize.xs,
+                        lineHeight: 20,
+                      }}>
+                      {item.label}
+                    </Text>
+                    <Text
+                      style={{
+                        color: t.colors.text,
+                        fontSize: t.fontSize.lg,
+                        fontWeight: '600',
+                        marginTop: t.spacing.xs,
+                      }}>
+                      {item.value}
+                    </Text>
                   </View>
                 ))}
               </View>
             </View>
           )}
 
-          {progress.paused && (
-            <Text
+          {(progress.paused ||
+            (backgroundBackfillStatus === 'paused' && stage !== 'tags')) && (
+            <View
+              accessibilityLiveRegion="polite"
               style={{
-                color: t.colors.textHint,
-                fontSize: t.fontSize.xs,
-                marginTop: t.spacing.sm,
+                marginTop: t.spacing.lg,
+                padding: t.spacing.lg,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: border,
+                backgroundColor: surface,
               }}>
-              采集因登录、网络或限流问题暂停，本轮未继续在线搜索。已读取标签会保留，稍后可重试。
-            </Text>
+              <Text
+                style={{
+                  fontSize: t.fontSize.base,
+                  fontWeight: '600',
+                  color: t.colors.text,
+                }}>
+                标签读取已暂停
+              </Text>
+              <Text
+                style={{
+                  fontSize: t.fontSize.sm,
+                  lineHeight: 22,
+                  color: t.colors.textSub,
+                  marginTop: t.spacing.sm,
+                }}>
+                {progress.paused
+                  ? '可能与登录、网络或限流有关，本轮未继续在线搜索。已读取标签会保留，稍后可重试。'
+                  : '已写入的标签会保留；点击下方按钮可继续生成推荐。'}
+              </Text>
+            </View>
+          )}
+          {((backgroundBackfillStatus === 'error' && backgroundBackfillError) ||
+            error) && (
+            <View
+              accessibilityLiveRegion="polite"
+              style={{
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                gap: t.spacing.sm,
+                marginTop: t.spacing.lg,
+                padding: t.spacing.lg,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: border,
+                backgroundColor: surface,
+              }}>
+              <Icon
+                accessible={false}
+                name="alert-circle-outline"
+                size={20}
+                color={t.colors.error}
+              />
+              <Text
+                style={{
+                  flex: 1,
+                  color: t.colors.text,
+                  fontSize: t.fontSize.sm,
+                  lineHeight: 22,
+                }}>
+                {error || `后台提取失败：${backgroundBackfillError}`}
+              </Text>
+            </View>
           )}
 
-          {backgroundBackfillStatus === 'paused' && stage !== 'tags' && (
+          <View style={{marginTop: t.spacing.xl}}>
+            <Button
+              title={
+                isBackgroundBackfillActive
+                  ? '后台正在读取兴趣标签'
+                  : stage === 'tags'
+                  ? '正在读取标签'
+                  : stage === 'search'
+                  ? '正在搜索音乐推荐'
+                  : '读取标签并生成推荐'
+              }
+              onPress={handleBuildRecommendations}
+              loading={isWorking}
+              disabled={
+                !uid || favorites.length === 0 || initialLoading || isWorking
+              }
+            />
             <Text
               style={{
-                color: t.colors.textHint,
-                fontSize: t.fontSize.xs,
-                marginTop: t.spacing.sm,
-              }}>
-              后台提取已暂停，已写入的标签会保留；可以点击下方按钮继续生成推荐。
-            </Text>
-          )}
-
-          {backgroundBackfillStatus === 'error' && backgroundBackfillError && (
-            <Text
-              style={{
-                color: t.colors.error,
-                fontSize: t.fontSize.xs,
-                marginTop: t.spacing.sm,
-              }}>
-              后台提取失败：{backgroundBackfillError}
-            </Text>
-          )}
-
-          {error && (
-            <Text
-              style={{
-                color: t.colors.error,
+                color: t.colors.textSub,
                 fontSize: t.fontSize.sm,
+                lineHeight: 22,
                 marginTop: t.spacing.md,
-              }}>
-              {error}
-            </Text>
-          )}
-
-          <Button
-            title={
-              isBackgroundBackfillActive
-                ? '后台正在读取兴趣标签'
-                : stage === 'tags'
-                ? '正在读取标签'
-                : stage === 'search'
-                ? '正在搜索音乐推荐'
-                : '读取标签并生成推荐'
-            }
-            onPress={handleBuildRecommendations}
-            loading={isWorking}
-            disabled={
-              !uid ||
-              favorites.length === 0 ||
-              initialLoading ||
-              isBackgroundBackfillActive
-            }
-            style={{marginTop: t.spacing.lg}}
-          />
-
-          {favorites.length === 0 &&
-            !initialLoading &&
-            (!profile || profile.totalVideoCount === 0) && (
-            <Text
-              style={{
-                color: t.colors.textHint,
-                fontSize: t.fontSize.sm,
                 textAlign: 'center',
-              marginTop: t.spacing.md,
-            }}>
-              先同步至少一个收藏夹，再生成标签推荐。
+              }}>
+              {favorites.length === 0 &&
+              (!profile || profile.totalVideoCount === 0)
+                ? '先同步至少一个收藏夹，再生成音乐推荐。'
+                : '根据收藏标签，在 B 站音乐区寻找相似内容。'}
             </Text>
-          )}
+          </View>
 
           {failedSearchCount > 0 && (
             <Text
+              accessibilityLiveRegion="polite"
               style={{
-                color: t.colors.textHint,
-                fontSize: t.fontSize.xs,
-                marginTop: t.spacing.md,
-              }}>
-              有 {failedSearchCount} 个兴趣标签搜索失败，当前结果可能不完整。
-            </Text>
-          )}
-
-          {hasGenerated && recommendations.length === 0 && (
-            <Text
-              style={{
-                color: t.colors.textHint,
+                color: t.colors.textSub,
                 fontSize: t.fontSize.sm,
-                marginTop: t.spacing.md,
-                textAlign: 'center',
+                lineHeight: 22,
+                marginTop: t.spacing.lg,
               }}>
-              暂未找到匹配的音乐视频，可以调整收藏标签后再次生成。
+              有 {failedSearchCount}{' '}
+              个兴趣标签搜索失败，当前结果可能不完整，稍后可重新生成。
             </Text>
           )}
-
-          {recommendations.length > 0 && (
-            <View style={{marginTop: t.spacing.xl}}>
+          {hasGenerated && recommendations.length === 0 && (
+            <View
+              style={{
+                alignItems: 'center',
+                padding: t.spacing.xl,
+                marginTop: t.spacing.xl,
+                borderRadius: 20,
+                backgroundColor: surface,
+                borderWidth: 1,
+                borderColor: border,
+              }}>
+              <Icon
+                accessible={false}
+                name="music-note-search-outline"
+                size={32}
+                color={t.colors.textSub}
+              />
               <Text
                 style={{
                   color: t.colors.text,
-                  fontSize: t.fontSize.md,
+                  fontSize: t.fontSize.lg,
                   fontWeight: '600',
-                  marginBottom: t.spacing.md,
+                  lineHeight: 26,
+                  marginTop: t.spacing.md,
+                }}>
+                暂未找到匹配的音乐
+              </Text>
+              <Text
+                style={{
+                  color: t.colors.textSub,
+                  fontSize: t.fontSize.sm,
+                  lineHeight: 22,
+                  textAlign: 'center',
+                  marginTop: t.spacing.sm,
+                }}>
+                可以丰富收藏内容，再次生成推荐。
+              </Text>
+            </View>
+          )}
+
+          {recommendations.length > 0 && (
+            <View style={{marginTop: t.spacing.xxl}}>
+              <Text
+                accessibilityRole="header"
+                style={{
+                  color: t.colors.text,
+                  fontSize: t.fontSize.xl,
+                  fontWeight: '700',
+                }}>
+                与你的喜好相近
+              </Text>
+              <Text
+                style={{
+                  color: t.colors.textSub,
+                  fontSize: t.fontSize.sm,
+                  lineHeight: 21,
+                  marginTop: t.spacing.sm,
+                  marginBottom: t.spacing.lg,
                 }}>
                 为你找到 {recommendations.length} 个音乐视频
               </Text>
@@ -893,7 +1198,7 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
                 <TouchableOpacity
                   key={item.bvid}
                   accessibilityRole="button"
-                  accessibilityLabel={`播放推荐：${item.title}`}
+                  accessibilityLabel={`播放推荐 ${item.title}，${item.author}`}
                   activeOpacity={0.75}
                   onPress={() => handlePlayRecommendation(item)}
                   style={{
@@ -901,67 +1206,80 @@ export const TagRecommendationsScreen = ({navigation}: any) => {
                     alignItems: 'center',
                     padding: t.spacing.md,
                     marginBottom: t.spacing.sm,
-                    borderRadius: t.radius.lg,
-                    backgroundColor: t.colors.surface,
+                    borderRadius: 16,
+                    backgroundColor: surface,
+                    borderWidth: 1,
+                    borderColor: border,
                   }}>
-                  <View>
+                  <View
+                    style={{
+                      width: compact ? 76 : 96,
+                      height: 76,
+                      borderRadius: 12,
+                      overflow: 'hidden',
+                      backgroundColor: t.colors.surfaceHigh,
+                    }}>
                     <FastImage
                       source={{uri: item.cover}}
-                      style={{
-                        width: 100,
-                        height: 64,
-                        borderRadius: 8,
-                        backgroundColor: t.colors.surfaceHigh,
-                      }}
+                      style={{width: '100%', height: '100%'}}
                       resizeMode={FastImage.resizeMode.cover}
                     />
                     <View
                       style={{
                         position: 'absolute',
-                        bottom: 3,
-                        right: 3,
-                        paddingHorizontal: 4,
-                        paddingVertical: 2,
-                        borderRadius: 3,
-                        backgroundColor: 'rgba(0,0,0,0.65)',
+                        bottom: 4,
+                        right: 4,
+                        paddingHorizontal: 5,
+                        paddingVertical: 3,
+                        borderRadius: 5,
+                        backgroundColor: 'rgba(15,15,20,0.8)',
                       }}>
-                      <Text style={{color: '#fff', fontSize: 10}}>
+                      <Text style={{color: '#fff', fontSize: t.fontSize.xs}}>
                         {formatDuration(item.duration)}
                       </Text>
                     </View>
                   </View>
-                  <View style={{flex: 1, marginLeft: t.spacing.md}}>
+                  <View
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      marginHorizontal: t.spacing.md,
+                    }}>
                     <Text
                       numberOfLines={2}
                       style={{
                         color: t.colors.text,
-                        fontSize: t.fontSize.sm,
-                        fontWeight: '500',
+                        fontSize: t.fontSize.base,
+                        lineHeight: 23,
+                        fontWeight: '600',
                       }}>
                       {item.title}
                     </Text>
                     <Text
                       numberOfLines={1}
                       style={{
-                        color: t.colors.textHint,
-                        fontSize: t.fontSize.xs,
+                        color: t.colors.textSub,
+                        fontSize: t.fontSize.sm,
                         marginTop: t.spacing.xs,
                       }}>
                       {item.author}
                     </Text>
-                    <Text
-                      numberOfLines={1}
-                      style={{
-                        color: t.colors.primary,
-                        fontSize: t.fontSize.xs,
-                        marginTop: t.spacing.xs,
-                      }}>
-                      匹配：{item.matchedTags.join(' · ')}
-                    </Text>
+                    {item.matchedTags.length > 0 && (
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          color: t.colors.textSub,
+                          fontSize: t.fontSize.xs,
+                          marginTop: t.spacing.xs,
+                        }}>
+                        匹配：{item.matchedTags.slice(0, 2).join(' · ')}
+                      </Text>
+                    )}
                   </View>
                   <Icon
+                    accessible={false}
                     name="play-circle-outline"
-                    size={28}
+                    size={26}
                     color={t.colors.primary}
                   />
                 </TouchableOpacity>

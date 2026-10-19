@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Alert, TouchableOpacity } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LoggerService from '../services/LoggerService';
 import { Header } from '../components/Header';
 import { useTheme } from '../theme';
@@ -12,6 +13,7 @@ import { IconButton } from '../components/IconButton';
 import { Button } from '../components/Button';
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
+import { ErrorView } from '../components/ErrorView';
 import {useNetworkRecoveryRefresh} from '../hooks/useNetworkRecoveryRefresh';
 
 interface FolderSyncInfo {
@@ -41,7 +43,7 @@ function getSyncStatusDisplay(meta: PlaylistMeta | null) {
   }
 }
 
-export const SyncDetailsScreen = ({ navigation }: any) => {
+export const SyncDetailsScreen = () => {
   const t = useTheme();
   const uid = useAuthStore((s) => s.userId);
   const [loading, setLoading] = useState(true);
@@ -127,27 +129,40 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
     const statusColor = t.colors[status.color];
 
     return (
-      <View style={[styles.itemContainer, { backgroundColor: t.colors.surface, borderBottomColor: t.colors.divider }]}>
-        {isMultiSelectMode && (
-          <IconButton
-            name={isSelected ? 'checkbox-marked' : 'checkbox-blank-outline'}
-            size={24}
-            color={isSelected ? t.colors.primary : t.colors.textSub}
-            onPress={() => toggleSelect(folder.id)}
-            style={{ marginRight: t.spacing.sm }}
-          />
-        )}
+      <View style={[styles.itemContainer, {backgroundColor: isSelected ? t.colors.primaryLight : t.colors.surface, borderColor: isSelected ? t.colors.primary : t.colors.divider}]}>
+        <TouchableOpacity
+          accessible={isMultiSelectMode}
+          accessibilityRole={isMultiSelectMode ? 'checkbox' : undefined}
+          accessibilityLabel={isMultiSelectMode ? `${folder.title}，${status.text}，选择删除索引` : undefined}
+          accessibilityState={isMultiSelectMode ? {checked: isSelected} : undefined}
+          disabled={!isMultiSelectMode}
+          activeOpacity={0.76}
+          onPress={() => toggleSelect(folder.id)}
+          style={styles.selectionArea}>
+        <Icon name={isMultiSelectMode ? isSelected ? 'check-circle' : 'checkbox-blank-circle-outline' : 'folder-sync-outline'} size={26} color={isSelected ? t.colors.primary : t.colors.textSub} style={{marginRight: t.spacing.md}} />
         <View style={styles.itemContent}>
-          <Text style={[styles.title, { color: t.colors.text }]} numberOfLines={1}>
+          <Text style={[styles.title, { color: t.colors.text }]} numberOfLines={2}>
             {folder.title}
           </Text>
-          <Text style={[styles.subtitle, { color: statusColor }]} numberOfLines={1}>
+          <Text style={[styles.subtitle, { color: statusColor }]}>
             {status.text}
           </Text>
+          {meta && meta.remoteVideoCount > 0 && (
+            <View
+              accessible
+              accessibilityRole="progressbar"
+              accessibilityLabel={`${folder.title}索引同步进度`}
+              accessibilityValue={{min: 0, max: meta.remoteVideoCount, now: Math.min(meta.remoteVideoCount, Math.max(0, meta.localSyncedCount))}}
+              style={styles.progressTrack}>
+              <View style={[styles.progressFill, {width: `${Math.min(100, Math.max(0, meta.localSyncedCount / meta.remoteVideoCount * 100))}%`, backgroundColor: statusColor}]} />
+            </View>
+          )}
         </View>
+        </TouchableOpacity>
         {!isMultiSelectMode && meta && (
           <IconButton
             name="delete-outline"
+            accessibilityLabel={`删除 ${folder.title} 的本地索引`}
             size={24}
             color={t.colors.error}
             onPress={() => handleDelete([folder.id])}
@@ -158,17 +173,27 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
   };
 
   const styles = StyleSheet.create({
-    container: { flex: 1 },
-    list: { paddingBottom: t.spacing.xl },
+    container: { flex: 1, backgroundColor: t.colors.background },
+    list: { paddingHorizontal: t.spacing.lg, paddingTop: t.spacing.lg, paddingBottom: t.spacing.xl },
     itemContainer: {
       flexDirection: 'row',
       alignItems: 'center',
-      padding: t.spacing.md,
-      borderBottomWidth: StyleSheet.hairlineWidth,
+      minHeight: 88,
+      paddingHorizontal: t.spacing.md,
+      borderWidth: 1,
+      borderRadius: t.radius.xl,
+      marginBottom: t.spacing.md,
     },
-    itemContent: { flex: 1 },
-    title: { fontSize: t.fontSize.md, fontWeight: '500', marginBottom: 4 },
-    subtitle: { fontSize: t.fontSize.sm },
+    itemContent: { flex: 1, minWidth: 0 },
+    title: { fontSize: t.fontSize.base, fontWeight: '600', marginBottom: 6 },
+    subtitle: { fontSize: t.fontSize.sm, lineHeight: 21 },
+    fill: {flex: 1},
+    selectionArea: {flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', paddingVertical: t.spacing.md},
+    progressTrack: {height: 4, overflow: 'hidden', borderRadius: 2, backgroundColor: t.colors.surfaceHigh, marginTop: t.spacing.sm},
+    progressFill: {height: '100%', borderRadius: 2},
+    intro: {padding: t.spacing.lg, marginBottom: t.spacing.lg, backgroundColor: t.colors.primaryLight, borderRadius: t.radius.xl},
+    introTitle: {fontSize: t.fontSize.lg, fontWeight: '700', color: t.colors.text},
+    introHint: {fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: t.spacing.sm, lineHeight: 21},
     footer: {
       flexDirection: 'row',
       padding: t.spacing.md,
@@ -177,6 +202,8 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
       borderTopColor: t.colors.divider,
       justifyContent: 'space-between',
       alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: t.spacing.md,
     },
   });
 
@@ -188,6 +215,7 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
         right={
           <IconButton
             name={isMultiSelectMode ? 'close' : 'playlist-check'}
+            accessibilityLabel={isMultiSelectMode ? '退出批量管理' : '批量管理同步索引'}
             size={24}
             onPress={() => {
               setIsMultiSelectMode(!isMultiSelectMode);
@@ -196,17 +224,38 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
           />
         }
       />
-      {loading ? (
+      {!uid ? (
+        <Empty title="登录后查看同步状态" hint="前往设置登录 B 站，同步收藏夹内容" />
+      ) : loading ? (
         <Loading />
+      ) : loadFailed && foldersInfo.length === 0 ? (
+        <ErrorView message="同步详情加载失败，请重试" onRetry={loadData} />
       ) : foldersInfo.length === 0 ? (
         <Empty title="暂无收藏夹" />
       ) : (
         <>
           <FlatList
+            style={styles.fill}
             data={foldersInfo}
             keyExtractor={item => item.folder.id.toString()}
             renderItem={renderItem}
             contentContainerStyle={styles.list}
+            extraData={{selectedIds, isMultiSelectMode}}
+            ListHeaderComponent={
+              <View style={styles.intro}>
+                <Text accessibilityRole="header" style={styles.introTitle}>收藏同步概览</Text>
+                <Text style={styles.introHint}>
+                  {foldersInfo.length} 个收藏夹 · {foldersInfo.filter(item => item.meta?.playlistSyncStatus === 'success' && !item.meta.needResync).length} 个已完成同步
+                </Text>
+                <Text style={styles.introHint}>这里管理本机索引，删除后可重新同步，B 站收藏内容会保留。</Text>
+                {loadFailed && (
+                  <>
+                    <Text accessibilityRole="alert" style={{fontSize: t.fontSize.sm, color: t.colors.error, marginTop: t.spacing.sm}}>刷新失败，当前显示上次读取的状态</Text>
+                    <Button title="重新加载" variant="text" onPress={loadData} />
+                  </>
+                )}
+              </View>
+            }
           />
           {isMultiSelectMode && (
             <View style={styles.footer}>
@@ -214,7 +263,7 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
                 已选择 {selectedIds.size} 项
               </Text>
               <Button
-                title="批量删除"
+                title="删除所选索引"
                 variant="primary"
                 disabled={selectedIds.size === 0}
                 onPress={() => handleDelete(Array.from(selectedIds))}
