@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import FastImage from 'react-native-fast-image';
@@ -33,6 +34,8 @@ const MiniPlayerComponent: React.FC<MiniPlayerProps> = ({
   onOpenPlayer,
 }) => {
   const t = useTheme();
+  const {width} = useWindowDimensions();
+  const compact = width < 360;
   const track = useActiveTrack();
   const playback = usePlaybackState();
   // 【性能修复】选择性子订阅，避免每次进度轮询触发重渲染
@@ -56,7 +59,7 @@ const MiniPlayerComponent: React.FC<MiniPlayerProps> = ({
     (playback.state === State.Buffering ||
       playback.state === State.Loading ||
       isResolving);
-  const p = progressDuration > 0 ? progressPosition / progressDuration : 0;
+  const p = progressDuration > 0 ? Math.min(1, Math.max(0, progressPosition / progressDuration)) : 0;
 
   const s = StyleSheet.create({
     wrap: {
@@ -76,10 +79,10 @@ const MiniPlayerComponent: React.FC<MiniPlayerProps> = ({
       alignItems: 'center',
       paddingVertical: t.spacing.sm,
       paddingHorizontal: t.spacing.md,
-      height: 56,
+      minHeight: 64,
     },
-    cover: {width: 40, height: 40, borderRadius: t.radius.sm},
-    info: {flex: 1, marginHorizontal: t.spacing.md},
+    cover: {width: 44, height: 44, borderRadius: 12},
+    info: {flex: 1, minWidth: 0, marginHorizontal: t.spacing.sm, minHeight: 48, justifyContent: 'center'},
     title: {fontSize: t.fontSize.base, color: t.colors.text, fontWeight: '500'},
     artist: {fontSize: t.fontSize.xs, color: t.colors.textSub, marginTop: 2},
     actions: {flexDirection: 'row', alignItems: 'center'},
@@ -112,11 +115,16 @@ const MiniPlayerComponent: React.FC<MiniPlayerProps> = ({
     <View style={s.row}>
       <TouchableOpacity
         onPress={onOpenPlayer}
+        accessibilityRole="button"
+        accessibilityLabel={`打开播放器，${track.title ?? '当前歌曲'}`}
+        style={{minHeight: 48, minWidth: 48, justifyContent: 'center'}}
         activeOpacity={0.7}>
         <FastImage source={{uri: track.artwork as string}} style={s.cover} />
       </TouchableOpacity>
       <TouchableOpacity
         style={s.info}
+        accessibilityRole="button"
+        accessibilityLabel={`${track.title ?? '当前歌曲'}，${track.artist ?? '未知歌手'}，打开播放器`}
         activeOpacity={0.7}
         onPress={onOpenPlayer}>
         <Text style={s.title} numberOfLines={1}>
@@ -131,11 +139,13 @@ const MiniPlayerComponent: React.FC<MiniPlayerProps> = ({
           <ActivityIndicator
             size="small"
             color={t.colors.primary}
-            style={{marginRight: 12}}
+            accessibilityLabel="正在加载音频"
+            style={{width: 48}}
           />
         ) : (
           <IconButton
             name={isPlaying ? 'pause' : 'play'}
+            accessibilityLabel={isPlaying ? '暂停播放' : '继续播放'}
             size={26}
             color={t.colors.text}
             onPress={() =>
@@ -143,14 +153,16 @@ const MiniPlayerComponent: React.FC<MiniPlayerProps> = ({
             }
           />
         )}
-        <IconButton
+        {!compact && <IconButton
           name="skip-next"
+          accessibilityLabel="播放下一首"
           size={26}
           color={t.colors.text}
           onPress={skipToNext}
-        />
+        />}
         <IconButton
           name="playlist-music"
+          accessibilityLabel="打开播放队列"
           size={24}
           color={t.colors.text}
           onPress={() => useUIStore.getState().setPlaylistVisible(true)}

@@ -5,11 +5,11 @@ import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { AppState, View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler, PermissionsAndroid, StatusBar } from 'react-native';
+import { AppState, View, useColorScheme, Alert, Platform, ToastAndroid, BackHandler, PermissionsAndroid } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, useTheme } from './theme';
 import LoggerService from './services/LoggerService';
-import ToastNotification, { ToastNotificationRef, ToastConfig } from './components/ToastNotification';
+import ToastNotification, { ToastNotificationRef } from './components/ToastNotification';
 import { setupPlayer } from './services/trackPlayer';
 import { netStatus } from './services/netStatus';
 import { initializeNetworkRecovery } from './services/networkRecoveryService';
@@ -41,6 +41,7 @@ import { DiscoverScreen } from './screens/DiscoverScreen';
 import { SearchScreen } from './screens/SearchScreen';
 import { PlaylistRecommendationsScreen } from './screens/PlaylistRecommendationsScreen';
 import { SongRecommendationsScreen } from './screens/SongRecommendationsScreen';
+import {lightColors, darkColors} from './theme/colors';
 
 const Stack = createNativeStackNavigator();
 
@@ -108,18 +109,17 @@ export default function App() {
   const systemScheme = useColorScheme();
   const themeMode = useSettingsStore((s) => s.themeMode);
   const isDark = themeMode === 'system' ? systemScheme === 'dark' : (themeMode === 'dark' || themeMode === 'glass-dark');
-  const baseBgColor = isDark ? '#0F0F11' : '#FFFFFF';
+  const baseBgColor = isDark ? darkColors.background : lightColors.background;
   
   const toastRef = useRef<ToastNotificationRef>(null);
   const startupIndexRefreshUidsRef = useRef<Set<string>>(new Set());
-  const [isOnline, setIsOnline] = useState(true);
+  const [, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
   const updateCurrentRouteName = useCallback(() => {
     if (navigationRef.isReady()) {
       useUIStore.getState().setCurrentRouteName(navigationRef.getCurrentRoute()?.name ?? null);
     }
   }, [navigationRef]);
-  const loggedIn = useAuthStore((s) => s.loggedIn);
   const uid = useAuthStore((s) => s.userId);
   const initAuth = useAuthStore((s) => s.initAuth);
   const authReady = useAuthStore((s) => s.authReady);
@@ -205,7 +205,7 @@ export default function App() {
       backHandler.remove();
       stopProgressPolling();
     };
-  }, []);
+  }, [initAuth, navigationRef]);
 
   // Restore the same account's local index, or clear old account data before reuse.
   useEffect(() => {

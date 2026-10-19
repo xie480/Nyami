@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Image,
@@ -8,10 +8,10 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { BlurView } from '@react-native-community/blur';
 import { useTheme } from '../theme';
 import { useSettingsStore } from '../store/settingsStore';
 import { useUIStore } from '../store/uiStore';
+import {useReducedMotion} from '../hooks/useReducedMotion';
 
 const TRANSITION_DURATION = 50;
 
@@ -32,7 +32,8 @@ const TRANSITION_DURATION = 50;
  *     glassTransitionComplete is set to false allowing baseColors.background back.
  */
 export const GlassBackground: React.FC = () => {
-  const { glass, isDark } = useTheme();
+  const { glass, isDark, colors } = useTheme();
+  const reducedMotion = useReducedMotion();
   const customBackgroundImage = useSettingsStore((s) => s.customBackgroundImage);
   const glassBlurAmount = useSettingsStore((s) => s.glassBlurAmount);
   const setGlassTransitionComplete = useUIStore((s) => s.setGlassTransitionComplete);
@@ -56,14 +57,14 @@ export const GlassBackground: React.FC = () => {
     }
     Animated.timing(overlayAnim, {
       toValue,
-      duration: isGlass ? TRANSITION_DURATION : 300,
+      duration: reducedMotion ? 0 : isGlass ? TRANSITION_DURATION : 300,
       useNativeDriver: true,
     }).start(() => {
       if (!isGlass) {
         setGlassTransitionComplete(false);
       }
     });
-  }, [isGlass, overlayAnim, setGlassTransitionComplete]);
+  }, [isGlass, overlayAnim, setGlassTransitionComplete, reducedMotion]);
 
   // ── Resolve blur radius ───────────────────────────────────────────
   const rawBlur = isGlass ? (glassBlurAmount ?? glass!.material.blurRadius) : 0;
@@ -72,7 +73,6 @@ export const GlassBackground: React.FC = () => {
   // ── Mask colours ──────────────────────────────────────────────────
   const diffusionMask = isDark ? 'rgba(10, 10, 20, 0.45)' : 'rgba(240, 240, 248, 0.40)';
   const readabilityMask = isDark ? 'rgba(10, 10, 20, 0.32)' : 'rgba(255, 255, 255, 0.28)';
-  const strongMask = isDark ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.65)';
 
   // ── Stable base layer — always at full opacity, never animated ─────
   const stableBase = (
@@ -100,9 +100,7 @@ export const GlassBackground: React.FC = () => {
     <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
       <LinearGradient
         colors={
-          isDark
-            ? ['#0F0F11', '#0F0F11']
-            : ['#FFFFFF', '#FFFFFF']
+          [colors.background, colors.background]
         }
         style={StyleSheet.absoluteFillObject}
         start={{ x: 0, y: 0 }}

@@ -1,6 +1,7 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -48,6 +49,7 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newFolderTitle, setNewFolderTitle] = useState('');
   const [newFolderPrivate, setNewFolderPrivate] = useState(false);
+  const contentRef = useRef<ScrollView>(null);
 
   const loadFolders = useCallback(async () => {
     if (!uid || !visible) return;
@@ -157,7 +159,7 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
       transparent
       animationType="slide"
       onRequestClose={onClose}>
-      <View style={{flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.44)'}}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1, justifyContent: 'flex-end', backgroundColor: t.colors.overlay}}>
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityLabel="关闭收藏夹选择"
@@ -166,13 +168,15 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
           style={{flex: 1}}
         />
         <View
+          accessibilityViewIsModal
+          onAccessibilityEscape={onClose}
           style={{
             paddingHorizontal: t.spacing.lg,
             paddingTop: t.spacing.lg,
             paddingBottom: Math.max(insets.bottom, t.spacing.lg),
             borderTopLeftRadius: 26,
             borderTopRightRadius: 26,
-            backgroundColor: t.isDark ? '#18191C' : '#FFFFFF',
+            backgroundColor: t.colors.surfaceRaised,
             borderColor: t.colors.divider,
             borderWidth: 1,
             maxHeight: '78%',
@@ -193,8 +197,13 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
             仅显示当前账号创建的 B 站收藏夹
           </Text>
           <ScrollView
-            style={{maxHeight: 300, marginTop: t.spacing.sm}}
+            ref={contentRef}
+            onContentSizeChange={() => {
+              if (showCreateForm) {contentRef.current?.scrollToEnd({animated: false});}
+            }}
+            style={{maxHeight: 360, flexShrink: 1, minHeight: 0, marginTop: t.spacing.sm}}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}>
             {loading && folders.length === 0 ? (
               <Text style={{paddingVertical: t.spacing.lg, textAlign: 'center', color: t.colors.textSub}}>
@@ -216,7 +225,8 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    minHeight: 52,
+                    minHeight: 64,
+                    paddingVertical: 10,
                     paddingHorizontal: t.spacing.md,
                     borderRadius: t.radius.lg,
                     backgroundColor: selected ? t.colors.primaryLight : surface,
@@ -227,8 +237,8 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
                     size={22}
                     color={selected ? t.colors.primary : t.colors.textHint}
                   />
-                  <View style={{flex: 1, marginLeft: t.spacing.md}}>
-                    <Text style={{color: t.colors.text, fontSize: t.fontSize.sm, fontWeight: '600'}} numberOfLines={1}>
+                  <View style={{flex: 1, minWidth: 0, marginLeft: t.spacing.md}}>
+                    <Text style={{color: t.colors.text, fontSize: t.fontSize.base, fontWeight: '600'}} numberOfLines={2}>
                       {folder.title}
                     </Text>
                     <Text style={{color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: 2}}>
@@ -240,21 +250,23 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
                 </TouchableOpacity>
               );
             })}
-          </ScrollView>
-
           {showCreateForm && (
             <View style={{marginTop: t.spacing.sm, padding: t.spacing.md, borderRadius: t.radius.lg, backgroundColor: surface}}>
               <TextInput
+                accessibilityLabel="新收藏夹名称"
                 value={newFolderTitle}
                 onChangeText={setNewFolderTitle}
                 placeholder="新收藏夹名称"
                 placeholderTextColor={t.colors.textHint}
                 maxLength={40}
-                style={{color: t.colors.text, borderBottomWidth: 1, borderBottomColor: t.colors.divider, paddingVertical: t.spacing.sm}}
+                style={{color: t.colors.text, minHeight: 48, borderBottomWidth: 1, borderBottomColor: t.colors.divider, paddingVertical: t.spacing.sm}}
               />
               <TouchableOpacity
+                accessibilityRole="checkbox"
+                accessibilityLabel="新建为私密收藏夹"
+                accessibilityState={{checked: newFolderPrivate}}
                 onPress={() => setNewFolderPrivate(value => !value)}
-                style={{flexDirection: 'row', alignItems: 'center', marginTop: t.spacing.sm}}>
+                style={{flexDirection: 'row', minHeight: 48, alignItems: 'center', marginTop: t.spacing.sm}}>
                 <Icon
                   name={newFolderPrivate ? 'lock-outline' : 'earth'}
                   size={18}
@@ -275,10 +287,11 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
           )}
 
           {error && (
-            <Text style={{color: t.colors.error, fontSize: t.fontSize.xs, marginTop: t.spacing.sm}}>
+            <Text accessibilityLiveRegion="polite" style={{color: t.colors.error, fontSize: t.fontSize.sm, marginTop: t.spacing.sm}}>
               {error}
             </Text>
           )}
+          </ScrollView>
           <View style={{flexDirection: 'row', gap: t.spacing.sm, marginTop: t.spacing.md}}>
             <Button
               title={showCreateForm ? '取消新建' : '＋ 新建收藏夹'}
@@ -296,7 +309,7 @@ export const FavoriteFolderPickerSheet: React.FC<FavoriteFolderPickerSheetProps>
             />
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };

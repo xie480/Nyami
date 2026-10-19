@@ -12,6 +12,7 @@ import type {FavoriteVideo} from '../../src/types/domain';
 let mockPlayerState: any;
 let mockTheme: any;
 let mockUserId: string | null;
+let mockWindowDimensions: {height: number; width: number; fontScale: number};
 
 jest.mock('react-native', () => {
   const ReactMock = require('react');
@@ -25,6 +26,10 @@ jest.mock('react-native', () => {
     Modal: 'Modal',
     TouchableOpacity: 'TouchableOpacity',
     ActivityIndicator: 'ActivityIndicator',
+    AccessibilityInfo: {
+      isReduceMotionEnabled: jest.fn(() => Promise.resolve(true)),
+      addEventListener: jest.fn(() => ({remove: jest.fn()})),
+    },
     RefreshControl: 'RefreshControl',
     FlatList: ReactMock.forwardRef((props: any, ref: any) => {
       ReactMock.useImperativeHandle(ref, () => ({scrollToIndex: jest.fn()}));
@@ -49,7 +54,7 @@ jest.mock('react-native', () => {
     Platform: {OS: 'android', select: () => undefined},
     Alert: {alert: jest.fn()},
     ToastAndroid: {show: jest.fn(), SHORT: 0},
-    useWindowDimensions: () => ({height: 800, width: 400}),
+    useWindowDimensions: () => mockWindowDimensions,
   };
 });
 jest.mock('react-native-safe-area-context', () => ({
@@ -133,6 +138,7 @@ describe('PlaylistPanel search result playback', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUserId = 'uid';
+    mockWindowDimensions = {height: 800, width: 400, fontScale: 1};
     mockTheme = {
       colors: {primary: '#fb7299', background: '#fff', divider: '#ddd'},
       radius: {md: 12},
@@ -333,11 +339,14 @@ describe('PlaylistPanel search result playback', () => {
 
   it.each([false, true])(
     'constrains every list ancestor in the glass=%s branch without forcing a full-height sheet',
-    glass => {
+    async glass => {
       if (glass) {
         mockTheme.glass = {colors: {glass: {}}, material: {}};
       }
       const {list} = openPanel();
+      await act(async () => {
+        await Promise.resolve();
+      });
 
       expect(StyleSheet.flatten(list.props.style)).toMatchObject({
         flexGrow: 0,
@@ -386,6 +395,88 @@ describe('PlaylistPanel search result playback', () => {
         StyleSheet.flatten(wrapper.props.style).flexShrink,
       ).toBeUndefined();
     });
+  });
+
+  it('keeps expanded queue scroll targets aligned with rendered rows when system text grows', () => {
+    mockPlayerState.queue = [
+      {
+        ...videos[0],
+        parts: [
+          {cid: 101, title: '第一部分', duration: 30, page: 1},
+          {cid: 102, title: '第二部分', duration: 30, page: 2},
+        ],
+      },
+      ...videos.slice(1),
+    ];
+    mockPlayerState.currentBvid = videos[5].bvid;
+    const {list, onClose} = openPanel();
+    const rowStyle = (index: number) => {
+      const button = findHostNodes('TouchableOpacity').find(
+        node => node.props.accessibilityLabel === `播放 ${videos[index].title}，${videos[index].upper.name}`,
+      )!;
+      return StyleSheet.flatten(button.parent!.props.style);
+    };
+    expect(rowStyle(0).height).toBe(72);
+    expect(list.props.getItemLayout(list.props.data, 5).offset).toBe(5 * 80);
+
+    act(() => {
+      findHostNodes('TouchableOpacity').find(
+        node => node.props.accessibilityLabel === '展开分 P',
+      )!.props.onPress();
+    });
+    expect(
+      StyleSheet.flatten(findHostNodes('TouchableOpacity').find(
+        node => node.props.accessibilityLabel === '播放分 P 第一部分',
+      )!.props.style).height,
+    ).toBe(48);
+    const defaultLayout = list.props.getItemLayout;
+
+    act(() => {
+      mockWindowDimensions = {...mockWindowDimensions, fontScale: 3};
+      view!.update(<PlaylistPanel visible onClose={onClose} />);
+    });
+
+    const enlargedList = findHostNodes('FlatList')[0];
+    const firstRow = rowStyle(0);
+    const firstButton = findHostNodes('TouchableOpacity').find(
+      node => node.props.accessibilityLabel === `播放 ${videos[0].title}，${videos[0].upper.name}`,
+    )!;
+    const textStyles = firstButton.findAll(
+      node => (node.type as unknown) === 'Text',
+    ).map(node => StyleSheet.flatten(node.props.style));
+    const textBlockHeight = textStyles.reduce(
+      (height, style) => height + style.lineHeight * 3 + (style.marginTop ?? 0),
+      0,
+    );
+    expect(firstRow.height).toBeGreaterThanOrEqual(textBlockHeight);
+    expect(firstRow.height).toBeGreaterThan(72);
+
+    const partButtons = findHostNodes('TouchableOpacity').filter(
+      node => node.props.accessibilityLabel?.startsWith('播放分 P '),
+    );
+    const partsHeight = partButtons.reduce(
+      (height, button) => height + StyleSheet.flatten(button.props.style).height,
+      StyleSheet.flatten(partButtons[0].parent!.props.style).marginBottom,
+    );
+    expect(StyleSheet.flatten(partButtons[0].props.style).height).toBeGreaterThan(48);
+    partButtons.forEach(button => {
+      const rowHeight = StyleSheet.flatten(button.props.style).height;
+      button.findAll(node => (node.type as unknown) === 'Text').forEach(text => {
+        expect(rowHeight).toBeGreaterThanOrEqual(StyleSheet.flatten(text.props.style).lineHeight * 3);
+      });
+    });
+    // Use the actual rendered row sizes, including margins and expanded parts,
+    // to check the geometry RN consumes for the active item outside its buffer.
+    const renderedTargetOffset = Array.from({length: 5}, (_, index) => rowStyle(index))
+      .reduce((offset, style) => offset + style.height + style.marginVertical * 2, partsHeight);
+    const firstLayout = enlargedList.props.getItemLayout(enlargedList.props.data, 0);
+    const targetLayout = enlargedList.props.getItemLayout(enlargedList.props.data, 5);
+    expect(firstLayout.length).toBe(firstRow.height + firstRow.marginVertical * 2 + partsHeight);
+    expect(targetLayout.offset).toBe(renderedTargetOffset);
+    expect(enlargedList.props.initialScrollIndex).toBe(5);
+    expect(enlargedList.props.getItemLayout).not.toBe(defaultLayout);
+    expect(loadQueue).not.toHaveBeenCalled();
+    expect(playQueuedTrack).not.toHaveBeenCalled();
   });
 
   it.each(['keyword', 'author'] as const)(

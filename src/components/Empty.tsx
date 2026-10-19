@@ -10,18 +10,24 @@ export const Empty: React.FC<Props> = ({
 }) => {
   const t = useTheme();
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 }}>
-      <Icon name={icon} size={64} color={t.colors.textHint} />
+    <View style={{ flex: 1, minHeight: 200, alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+      <View style={{width: 72, height: 72, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.primaryLight}}>
+        <Icon accessible={false} name={icon} size={32} color={t.colors.primary} />
+      </View>
       <Text style={{
         marginTop: t.spacing.lg,
-        color: t.colors.textSub,
-        fontSize: t.fontSize.md,
+        color: t.colors.text,
+        fontSize: t.fontSize.lg,
+        fontWeight: '600',
+        textAlign: 'center',
       }}>{title}</Text>
       {hint && (
         <Text style={{
           marginTop: t.spacing.sm,
-          color: t.colors.textHint,
-          fontSize: t.fontSize.sm,
+          color: t.colors.textSub,
+          fontSize: t.fontSize.base,
+          lineHeight: 22,
+          maxWidth: 320,
           textAlign: 'center',
         }}>{hint}</Text>
       )}

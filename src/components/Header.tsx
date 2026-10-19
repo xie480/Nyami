@@ -1,66 +1,96 @@
-import React from 'react';
-import { View, Text, StyleSheet, Platform, StatusBar } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { IconButton } from './IconButton';
-import { GlassView } from './GlassView';
-import { useTheme } from '../theme';
+import React, {useState} from 'react';
+import {View, Text, StyleSheet, Platform, StatusBar} from 'react-native';
+import {useNavigation} from '@react-navigation/native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {IconButton} from './IconButton';
+import {useTheme} from '../theme';
 
-/**
- * Header 组件现在接受 `left` 属性，用于在左侧放置自定义按钮。
- * 当提供 `left` 时会覆盖默认的返回按钮 (`showBack`).
- */
 interface Props {
   title: string;
-  /** 是否显示默认返回按钮（仅在未提供 left 时生效） */
   showBack?: boolean;
-  /** 自定义左侧内容（如多选/取消按钮） */
   left?: React.ReactNode;
-  /** 右侧额外内容 */
   right?: React.ReactNode;
-  /** 是否移除底部边框/阴影 */
   noBorder?: boolean;
 }
 
-export const Header: React.FC<Props> = ({ title, showBack, left, right, noBorder }) => {
+export const Header: React.FC<Props> = ({
+  title,
+  showBack,
+  left,
+  right,
+  noBorder,
+}) => {
   const t = useTheme();
   const nav = useNavigation();
-  const isGlass = !!t.glass;
   const insets = useSafeAreaInsets();
-  const statusBarHeight = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight ?? 0) : insets.top;
+  const [leftWidth, setLeftWidth] = useState(48);
+  const [rightWidth, setRightWidth] = useState(48);
+  const sideWidth = Math.max(48, leftWidth, rightWidth);
+  const top =
+    Platform.OS === 'android'
+      ? Math.max(insets.top, StatusBar.currentHeight ?? 0)
+      : insets.top;
 
-  const s = StyleSheet.create({
-    outer: {
-      borderBottomWidth: (isGlass || noBorder) ? 0 : 0.5,
-      borderBottomColor: t.colors.divider,
-      elevation: 0,
-      shadowOpacity: 0,
-      paddingTop: statusBarHeight,
-    },
-    container: {
-      height: 48, flexDirection: 'row', alignItems: 'center',
-      paddingHorizontal: t.spacing.sm,
-    },
-    title: {
-      flex: 1, fontSize: t.fontSize.lg, fontWeight: '600',
-      color: t.colors.text, textAlign: 'center',
-    },
-    side: { width: 40, alignItems: 'center' },
-  });
-
-  const inner = (
-    <View style={s.container}>
-      {/* 左侧区域：优先渲染 left，自定义按钮；若未提供且 showBack 为 true，则渲染返回按钮 */}
-      <View style={s.side}>
-        {left ?? (showBack && (
-          <IconButton name="chevron-left" size={28} onPress={() => nav.goBack()} />
-        ))}
+  return (
+    <View
+      style={{
+        paddingTop: top,
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
+        backgroundColor: t.glass
+          ? t.glass.colors.glass.bg
+          : t.colors.background,
+        borderBottomWidth: noBorder ? 0 : StyleSheet.hairlineWidth,
+        borderBottomColor: t.colors.divider,
+      }}>
+      <View
+        style={{
+          minHeight: 60,
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: t.spacing.sm,
+        }}>
+        <View style={{width: sideWidth, alignItems: 'flex-start'}}>
+          <View
+            style={styles.actions}
+            onLayout={e => setLeftWidth(e.nativeEvent.layout.width)}>
+            {left ??
+              (showBack ? (
+                <IconButton
+                  name="chevron-left"
+                  size={28}
+                  accessibilityLabel="返回上一页"
+                  onPress={() => nav.goBack()}
+                />
+              ) : null)}
+          </View>
+        </View>
+        <Text
+          accessibilityRole="header"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: t.fontSize.lg,
+            fontWeight: '600',
+            color: t.colors.text,
+            textAlign: 'center',
+            paddingVertical: 12,
+          }}
+          numberOfLines={1}>
+          {title}
+        </Text>
+        <View style={{width: sideWidth, alignItems: 'flex-end'}}>
+          <View
+            style={styles.actions}
+            onLayout={e => setRightWidth(e.nativeEvent.layout.width)}>
+            {right}
+          </View>
+        </View>
       </View>
-      <Text style={s.title} numberOfLines={1}>{title}</Text>
-      <View style={s.side}>{right}</View>
     </View>
   );
-
-  const bgColor = t.isDark ? '#0F0F11' : '#FFFFFF';
-  return <View style={[s.outer, { backgroundColor: bgColor }]}>{inner}</View>;
 };
+
+const styles = StyleSheet.create({
+  actions: {flexDirection: 'row', alignItems: 'center', flexShrink: 0},
+});

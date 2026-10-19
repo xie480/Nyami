@@ -1,11 +1,14 @@
-import React, { useRef } from 'react';
+import React, {useRef} from 'react';
 import {
   View,
   PanResponder,
   StyleSheet,
   LayoutChangeEvent,
   DimensionValue,
+  StyleProp,
+  ViewStyle,
 } from 'react-native';
+import {useTheme} from '../theme';
 
 interface SliderProps {
   value: number;
@@ -18,8 +21,10 @@ interface SliderProps {
   thumbColor?: string;
   trackHeight?: number;
   thumbSize?: number;
-  style?: any;
+  style?: StyleProp<ViewStyle>;
   disabled?: boolean;
+  accessibilityLabel?: string;
+  accessibilityValueText?: string;
 }
 
 export const Slider: React.FC<SliderProps> = ({
@@ -28,105 +33,180 @@ export const Slider: React.FC<SliderProps> = ({
   maximumValue = 100,
   step = 1,
   onValueChange,
-  minimumTrackColor = '#6C5CE7',
-  maximumTrackColor = 'rgba(255,255,255,0.15)',
-  thumbColor = '#6C5CE7',
+  minimumTrackColor,
+  maximumTrackColor,
+  thumbColor,
   trackHeight = 4,
   thumbSize = 24,
   style,
   disabled = false,
+  accessibilityLabel = '调整数值',
+  accessibilityValueText,
 }) => {
+  const t = useTheme();
   const trackRef = useRef<View>(null);
-  const trackWidthRef = useRef<number>(0);
-  const trackXRef = useRef<number>(0);
-
-  const clampAndStep = (raw: number): number => {
-    const clamped = Math.max(minimumValue, Math.min(maximumValue, raw));
-    if (step <= 0) return clamped;
-    return Math.round(clamped / step) * step;
+  const trackWidth = useRef(0);
+  const trackX = useRef(0);
+  const latest = useRef({
+    value,
+    minimumValue,
+    maximumValue,
+    step,
+    onValueChange,
+    disabled,
+  });
+  latest.current = {
+    value,
+    minimumValue,
+    maximumValue,
+    step,
+    onValueChange,
+    disabled,
   };
 
-  const fraction = maximumValue > minimumValue
-    ? (value - minimumValue) / (maximumValue - minimumValue)
-    : 0;
-
-  const panResponder = useRef(
+  const update = (raw: number) => {
+    const current = latest.current;
+    if (
+      current.disabled ||
+      current.maximumValue <= current.minimumValue ||
+      !Number.isFinite(raw)
+    ) {
+      return;
+    }
+    const rounded =
+      current.step > 0
+        ? current.minimumValue +
+          Math.round((raw - current.minimumValue) / current.step) * current.step
+        : raw;
+    current.onValueChange(
+      Math.max(current.minimumValue, Math.min(current.maximumValue, rounded)),
+    );
+  };
+  const updateFromTouch = (pageX: number) => {
+    if (trackWidth.current <= 0) {
+      return;
+    }
+    const ratio = Math.max(
+      0,
+      Math.min(1, (pageX - trackX.current) / trackWidth.current),
+    );
+    const current = latest.current;
+    update(
+      current.minimumValue +
+        ratio * (current.maximumValue - current.minimumValue),
+    );
+  };
+  const handlers = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => !disabled,
-      onMoveShouldSetPanResponder: () => !disabled,
-      onPanResponderGrant: (evt) => {
-        updateValueFromTouch(evt.nativeEvent.pageX);
+      onStartShouldSetPanResponder: () => !latest.current.disabled,
+      onMoveShouldSetPanResponder: () => !latest.current.disabled,
+      onPanResponderGrant: event => {
+        const pageX = event.nativeEvent.pageX;
+        // Measure again after scrolling or opening a sheet.
+        trackRef.current?.measureInWindow((x, _y, width) => {
+          trackX.current = x;
+          trackWidth.current = width;
+          updateFromTouch(pageX);
+        });
       },
-      onPanResponderMove: (evt) => {
-        updateValueFromTouch(evt.nativeEvent.pageX);
-      },
-    })
+      onPanResponderMove: event => updateFromTouch(event.nativeEvent.pageX),
+    }),
   ).current;
 
-  const updateValueFromTouch = (pageX: number) => {
-    if (!trackWidthRef.current) return;
-    const dx = pageX - trackXRef.current;
-    const ratio = Math.max(0, Math.min(1, dx / trackWidthRef.current));
-    const raw = minimumValue + ratio * (maximumValue - minimumValue);
-    onValueChange(clampAndStep(raw));
-  };
-
-  const onLayout = (e: LayoutChangeEvent) => {
+  const fraction =
+    maximumValue > minimumValue
+      ? Math.max(
+          0,
+          Math.min(1, (value - minimumValue) / (maximumValue - minimumValue)),
+        )
+      : 0;
+  const left: DimensionValue = `${fraction * 100}%`;
+  const activeColor = minimumTrackColor ?? t.colors.primary;
+  const onLayout = (_event: LayoutChangeEvent) => {
     trackRef.current?.measureInWindow((x, _y, width) => {
-      trackXRef.current = x;
-      trackWidthRef.current = width;
+      trackX.current = x;
+      trackWidth.current = width;
     });
   };
 
-  const thumbLeft: DimensionValue = `${fraction * 100}%`;
-
-  const styles = StyleSheet.create({
-    container: {
-      height: Math.max(thumbSize, trackHeight),
-      justifyContent: 'center',
-      paddingHorizontal: thumbSize / 2,
-    },
-    track: {
-      height: trackHeight,
-      borderRadius: trackHeight / 2,
-      backgroundColor: maximumTrackColor,
-      overflow: 'visible',
-    },
-    trackFill: {
-      position: 'absolute',
-      left: 0,
-      top: 0,
-      height: trackHeight,
-      width: thumbLeft,
-      borderRadius: trackHeight / 2,
-      backgroundColor: minimumTrackColor,
-    },
-    thumb: {
-      position: 'absolute',
-      top: -(thumbSize - trackHeight) / 2,
-      left: thumbLeft,
-      marginLeft: -thumbSize / 2,
-      width: thumbSize,
-      height: thumbSize,
-      borderRadius: thumbSize / 2,
-      backgroundColor: thumbColor,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      elevation: 5,
-    },
-  });
-
   return (
     <View
-      style={[styles.container, style]}
-      {...panResponder.panHandlers}
-    >
-      <View ref={trackRef} style={styles.track} onLayout={onLayout}>
-        <View style={styles.trackFill} />
-        <View style={styles.thumb} />
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{disabled}}
+      accessibilityValue={{
+        min: minimumValue,
+        max: maximumValue,
+        now: Math.max(minimumValue, Math.min(maximumValue, value)),
+        text: accessibilityValueText,
+      }}
+      accessibilityActions={[
+        {name: 'increment', label: '增加'},
+        {name: 'decrement', label: '减少'},
+      ]}
+      onAccessibilityAction={event => {
+        const direction =
+          event.nativeEvent.actionName === 'increment'
+            ? 1
+            : event.nativeEvent.actionName === 'decrement'
+            ? -1
+            : 0;
+        if (direction) {
+          update(
+            latest.current.value +
+              direction *
+                (latest.current.step > 0
+                  ? latest.current.step
+                  : (maximumValue - minimumValue) / 100),
+          );
+        }
+      }}
+      style={[
+        styles.container,
+        {paddingHorizontal: thumbSize / 2, opacity: disabled ? 0.45 : 1},
+        style,
+      ]}
+      {...handlers.panHandlers}>
+      <View
+        ref={trackRef}
+        onLayout={onLayout}
+        style={{
+          height: trackHeight,
+          borderRadius: trackHeight / 2,
+          backgroundColor: maximumTrackColor ?? t.colors.divider,
+        }}>
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: left,
+            height: trackHeight,
+            borderRadius: trackHeight / 2,
+            backgroundColor: activeColor,
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            left,
+            top: -(thumbSize - trackHeight) / 2,
+            marginLeft: -thumbSize / 2,
+            width: thumbSize,
+            height: thumbSize,
+            borderRadius: thumbSize / 2,
+            backgroundColor: thumbColor ?? activeColor,
+            borderWidth: 2,
+            borderColor: t.colors.surfaceRaised,
+            elevation: 2,
+          }}
+        />
       </View>
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {minHeight: 48, justifyContent: 'center'},
+});

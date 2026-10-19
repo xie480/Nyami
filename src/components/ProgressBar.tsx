@@ -139,6 +139,7 @@ export const ProgressBar: React.FC<Props> = ({
   const panGesture = useMemo(
     () =>
       Gesture.Pan()
+        .enabled(!!onSeekEnd && duration > 0)
         .onStart(event => {
           if (width <= 0) {
             return;
@@ -179,6 +180,8 @@ export const ProgressBar: React.FC<Props> = ({
         }),
     [
       beginSeekPreview,
+      onSeekEnd,
+      duration,
       cancelSeekPreview,
       finishSeek,
       dragProgress,
@@ -195,6 +198,7 @@ export const ProgressBar: React.FC<Props> = ({
   const tapGesture = useMemo(
     () =>
       Gesture.Tap()
+        .enabled(!!onSeekEnd && duration > 0)
         .maxDuration(350)
         .onEnd((event, success) => {
           if (!success || width <= 0) {
@@ -214,6 +218,8 @@ export const ProgressBar: React.FC<Props> = ({
       pendingSeek,
       playbackDuration,
       width,
+      onSeekEnd,
+      duration,
     ],
   );
 
@@ -243,10 +249,10 @@ export const ProgressBar: React.FC<Props> = ({
     () =>
       StyleSheet.create({
         container: {paddingVertical: 10},
-        seekArea: {paddingVertical: 10},
+        seekArea: {minHeight: 48, justifyContent: 'center'},
         bar: {
           height: 3,
-          backgroundColor: trackColor ?? 'rgba(255,255,255,0.32)',
+          backgroundColor: trackColor ?? t.colors.divider,
           borderRadius: 2,
           overflow: 'visible',
         },
@@ -276,9 +282,9 @@ export const ProgressBar: React.FC<Props> = ({
           justifyContent: 'space-between',
           marginTop: -3,
         },
-        time: {fontSize: 12, fontWeight: '500', fontVariant: ['tabular-nums']},
+        time: {fontSize: 12, fontWeight: '500', fontVariant: ['tabular-nums'], color: t.colors.textSub},
       }),
-    [colors, t.colors.primary, thumbColor, trackColor],
+    [colors, t.colors.primary, t.colors.divider, t.colors.textSub, thumbColor, trackColor],
   );
 
   const accessibilityProgress = clampProgress(progress);
@@ -295,10 +301,22 @@ export const ProgressBar: React.FC<Props> = ({
           accessible
           accessibilityRole="adjustable"
           accessibilityLabel="播放进度"
+          accessibilityState={{disabled: !onSeekEnd || duration <= 0}}
+          accessibilityActions={[{name: 'increment', label: '快进 10 秒'}, {name: 'decrement', label: '后退 10 秒'}]}
+          onAccessibilityAction={event => {
+            if (!onSeekEnd || duration <= 0) {return;}
+            const direction = event.nativeEvent.actionName === 'increment' ? 1 : event.nativeEvent.actionName === 'decrement' ? -1 : 0;
+            if (!direction) {return;}
+            const seconds = Math.max(0, Math.min(duration, (previewPosition ?? position) + direction * 10));
+            pendingSeek.value = true;
+            dragProgress.value = seconds / duration;
+            finishSeek(seconds / duration, seconds);
+          }}
           accessibilityValue={{
             min: 0,
             max: 100,
             now: Math.round(accessibilityProgress * 100),
+            text: `${formatDuration(previewPosition ?? position)}，共 ${formatDuration(duration)}`,
           }}>
           <View style={s.bar}>
             {gradientColors ? (

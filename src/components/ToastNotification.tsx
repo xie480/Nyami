@@ -1,218 +1,124 @@
-/**
- * ToastNotification - 全局顶部通知组件
- *
- * 用于展示 warn（黄色）和 error（红色）级别的日志通知
- * 调用方式：ToastNotification.show({ type: 'warn' | 'error', message: '...' })
- */
-
 import React, {
+  forwardRef,
   useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
   useState,
-  forwardRef,
 } from 'react';
-import {
-  Animated,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import {ScrollView, Text, View} from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {IconButton} from './IconButton';
+import {useTheme} from '../theme';
 
 export interface ToastConfig {
   type: 'warn' | 'error';
   message: string;
-  duration?: number; // 显示时长，默认 4000ms
+  duration?: number;
 }
 
 export interface ToastNotificationRef {
   show: (config: ToastConfig) => void;
 }
 
+/** A readable, dismissible status surface below the actual system safe area. */
 const ToastNotification = forwardRef<ToastNotificationRef>((_props, ref) => {
-  const [visible, setVisible] = useState(false);
+  const t = useTheme();
+  const insets = useSafeAreaInsets();
   const [config, setConfig] = useState<ToastConfig | null>(null);
-  const translateY = useRef(new Animated.Value(-120)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 清除定时器
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearTimer = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
     }
   }, []);
-
-  // 显示通知
-  const show = useCallback(
-    (newConfig: ToastConfig) => {
-      clearTimer();
-      setConfig(newConfig);
-      setVisible(true);
-
-      // 滑入动画
-      Animated.parallel([
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-
-      // 自动隐藏
-      const duration = newConfig.duration || 4000;
-      timerRef.current = setTimeout(() => {
-        hide();
-      }, duration);
-    },
-    [translateY, opacity, clearTimer],
-  );
-
-  // 隐藏通知
   const hide = useCallback(() => {
     clearTimer();
-    Animated.parallel([
-      Animated.timing(translateY, {
-        toValue: -120,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setVisible(false);
-      setConfig(null);
-    });
-  }, [translateY, opacity, clearTimer]);
-
-  // 暴露 show 方法给父组件
-  useImperativeHandle(ref, () => ({ show }), [show]);
-
-  // 组件卸载时清理
-  useEffect(() => {
-    return () => clearTimer();
+    setConfig(null);
   }, [clearTimer]);
-
-  if (!visible || !config) return null;
-
-  const isError = config.type === 'error';
-
+  useImperativeHandle(
+    ref,
+    () => ({
+      show(next) {
+        clearTimer();
+        setConfig(next);
+        timer.current = setTimeout(hide, next.duration ?? 4000);
+      },
+    }),
+    [clearTimer, hide],
+  );
+  useEffect(() => clearTimer, [clearTimer]);
+  if (!config) {
+    return null;
+  }
+  const error = config.type === 'error';
+  const accent = error ? t.colors.error : t.colors.warning;
   return (
-    <Animated.View
-      style={[
-        styles.container,
-        isError ? styles.errorContainer : styles.warnContainer,
-        { transform: [{ translateY }], opacity },
-      ]}
-    >
-      <TouchableOpacity
-        style={styles.content}
-        onPress={hide}
-        activeOpacity={0.8}
-      >
-        <View
-          style={[
-            styles.indicator,
-            isError ? styles.errorIndicator : styles.warnIndicator,
-          ]}
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: 'absolute',
+        top: insets.top + 8,
+        left: insets.left + 12,
+        right: insets.right + 12,
+        zIndex: 9999,
+        elevation: 30,
+        alignItems: 'center',
+      }}>
+      <View
+        style={{
+          width: '100%',
+          maxWidth: 560,
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          padding: 12,
+          borderRadius: 18,
+          backgroundColor: t.colors.surfaceRaised,
+          borderWidth: 1,
+          borderColor: accent,
+        }}>
+        <Icon
+          accessible={false}
+          name={error ? 'alert-circle-outline' : 'information-outline'}
+          size={24}
+          color={accent}
+          style={{margin: 4}}
         />
-        <View style={styles.textContainer}>
-          <Text style={[styles.title, isError ? styles.errorTitle : styles.warnTitle]}>
-            {isError ? '发生错误' : '警告'}
+        <ScrollView
+          style={{flex: 1, maxHeight: 220, marginHorizontal: 8}}
+          onTouchStart={clearTimer}>
+          <Text
+            accessibilityLiveRegion="polite"
+            style={{
+              fontSize: t.fontSize.base,
+              fontWeight: '700',
+              color: accent,
+              marginBottom: 4,
+            }}>
+            {error ? '遇到问题' : '请留意'}
           </Text>
           <Text
-            style={[styles.message, isError ? styles.errorMessage : styles.warnMessage]}
-            numberOfLines={3}
-            ellipsizeMode="tail"
-          >
+            selectable
+            style={{
+              fontSize: t.fontSize.base,
+              lineHeight: 22,
+              color: t.colors.text,
+            }}>
             {config.message}
           </Text>
-        </View>
-      </TouchableOpacity>
-    </Animated.View>
+        </ScrollView>
+        <IconButton
+          name="close"
+          size={20}
+          accessibilityLabel="关闭通知"
+          onPress={hide}
+        />
+      </View>
+    </View>
   );
 });
 
 ToastNotification.displayName = 'ToastNotification';
-
-const styles = StyleSheet.create({
-  container: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 9999,
-    elevation: 9999,
-    paddingTop: 50, // 避开状态栏
-    paddingHorizontal: 12,
-    paddingBottom: 8,
-  },
-  warnContainer: {
-    backgroundColor: '#FFF9C4',
-    borderBottomWidth: 1,
-    borderBottomColor: '#FFE082',
-  },
-  errorContainer: {
-    backgroundColor: '#FFEBEE',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EF9A9A',
-  },
-  content: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-  },
-  indicator: {
-    width: 4,
-    height: '100%',
-    borderRadius: 2,
-    marginRight: 10,
-    marginTop: 2,
-    minHeight: 30,
-  },
-  warnIndicator: {
-    backgroundColor: '#FFC107',
-  },
-  errorIndicator: {
-    backgroundColor: '#F44336',
-  },
-  textContainer: {
-    flex: 1,
-  },
-  title: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  warnTitle: {
-    color: '#F57F17',
-  },
-  errorTitle: {
-    color: '#D32F2F',
-  },
-  message: {
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  warnMessage: {
-    color: '#795548',
-  },
-  errorMessage: {
-    color: '#C62828',
-  },
-});
-
 export default ToastNotification;

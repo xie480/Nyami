@@ -21,11 +21,12 @@ export const Button: React.FC<Props> = ({
 
   const styles = StyleSheet.create({
     base: {
-      height: 48,
+      minHeight: 48,
       borderRadius: t.radius.lg,
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: t.spacing.lg,
+      paddingVertical: t.spacing.md,
     },
     primary: { backgroundColor: t.colors.primary },
     secondary: {
@@ -33,7 +34,7 @@ export const Button: React.FC<Props> = ({
       borderWidth: 1,
       borderColor: t.colors.divider,
     },
-    text: { backgroundColor: 'transparent', height: 'auto', paddingVertical: t.spacing.sm },
+    text: { backgroundColor: 'transparent', paddingVertical: t.spacing.sm },
     titlePrimary: { color: t.colors.onPrimary, fontSize: t.fontSize.md, fontWeight: '600' },
     titleSecondary: { color: t.colors.text, fontSize: t.fontSize.md, fontWeight: '500' },
     titleText: { color: t.colors.primary, fontSize: t.fontSize.base },
@@ -55,14 +56,17 @@ export const Button: React.FC<Props> = ({
   return (
     <TouchableOpacity
       activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled: !!(disabled || loading), busy: !!loading }}
       onPress={onPress}
       disabled={disabled || loading}
       style={containerStyle}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'primary' ? '#fff' : t.colors.primary} />
+        <ActivityIndicator color={variant === 'primary' ? t.colors.onPrimary : t.colors.primary} />
       ) : (
-        <Text style={titleStyle}>{title}</Text>
+        <Text style={[titleStyle, {textAlign: 'center', flexShrink: 1}]}>{title}</Text>
       )}
     </TouchableOpacity>
   );

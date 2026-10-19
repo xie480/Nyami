@@ -22,6 +22,7 @@ export const ListItem: React.FC<Props> = ({
   const s = StyleSheet.create({
     container: {
       flexDirection: 'row',
+      minHeight: 64,
       alignItems: 'center',
       paddingVertical: t.spacing.md,
       paddingHorizontal: t.spacing.lg,
@@ -33,22 +34,22 @@ export const ListItem: React.FC<Props> = ({
       marginRight: t.spacing.md,
       backgroundColor: iconBg || t.colors.primaryLight,
     },
-    content: { flex: 1 },
+    content: { flex: 1, minWidth: 0 },
     title: { fontSize: t.fontSize.md, color: t.colors.text, fontWeight: '500' },
-    subtitle: { fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 2 },
+    subtitle: { fontSize: t.fontSize.sm, color: t.colors.textSub, marginTop: 4, lineHeight: 20 },
     right: { marginLeft: t.spacing.sm },
   });
 
   return (
-    <Container activeOpacity={0.7} onPress={onPress} style={s.container}>
+    <Container {...(onPress ? {activeOpacity: 0.7, onPress, accessibilityRole: 'button'} : {})} style={s.container}>
       {icon && (
         <View style={s.iconBox}>
-          <Icon name={icon} size={22} color={t.colors.primary} />
+          <Icon accessible={false} name={icon} size={22} color={t.colors.primary} />
         </View>
       )}
       <View style={s.content}>
-        <Text style={s.title} numberOfLines={1}>{title}</Text>
-        {subtitle && <Text style={s.subtitle} numberOfLines={1}>{subtitle}</Text>}
+        <Text style={s.title}>{title}</Text>
+        {subtitle && <Text style={s.subtitle}>{subtitle}</Text>}
       </View>
       {right ? <View style={s.right}>{right}</View> : null}
       {showArrow && (

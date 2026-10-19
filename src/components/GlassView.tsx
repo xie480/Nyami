@@ -1,212 +1,106 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ViewStyle, Platform, InteractionManager } from 'react-native';
-import { BlurView } from '@react-native-community/blur';
-import { useTheme } from '../theme';
-import { useSettingsStore } from '../store/settingsStore';
+import React, {useEffect, useState} from 'react';
+import {
+  View,
+  StyleSheet,
+  ViewStyle,
+  StyleProp,
+  Platform,
+  InteractionManager,
+} from 'react-native';
+import {BlurView} from '@react-native-community/blur';
+import {useTheme} from '../theme';
+import {useSettingsStore} from '../store/settingsStore';
 
 interface GlassViewProps {
   children: React.ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   blurRadius?: number;
   borderRadius?: number;
-  /** Override background color (defaults to theme glass bg) */
   backgroundColor?: string;
   borderColor?: string;
-  /** If true, renders without shadow (for flat headers etc) */
   noShadow?: boolean;
-  /** If true, skips the native backdrop blur for lightweight surfaces. */
   noBlur?: boolean;
-  /** Use a single base/border layer for repeated surfaces in scrolling lists. */
   minimal?: boolean;
-  /** Let scrollable content shrink through every wrapper inside a bounded parent. */
+  /** Preserve a bounded scroll area through every wrapper. */
   constrainContent?: boolean;
 }
 
 const constrainedContentStyle: ViewStyle = {flexShrink: 1, minHeight: 0};
 
-/**
- * Ultra-premium dark frosted glass container — "极致暗黑磨砂玻璃".
- *
- * Features:
- *  - Extreme backdrop blur (64 px default) for deep frosted translucency
- *  - Multi-layered edge treatment:
- *      • Chromatic aberration fringing (subtle cyan/magenta shifts)
- *      • Inner highlight — simulates light catching the top-left glass edge
- *      • Shimmer edge wrap — ultra-soft luminous rim on right/bottom
- *  - Micro-grain noise overlay — physical sandblasted texture simulation
- *  - Ambient occlusion rim at the bottom for grounded depth
- *
- * All layers are pointerEvents="none" so they never interfere with
- * touch interactions on children.
- */
+/** One theme-aware surface: native blur is reserved for glass themes and overlays. */
 export const GlassView: React.FC<GlassViewProps> = ({
   children,
   style,
   blurRadius,
   borderRadius,
-  backgroundColor: bgOverride,
-  borderColor: borderOverride,
+  backgroundColor,
+  borderColor,
   noShadow = false,
   noBlur = false,
   minimal = false,
   constrainContent = false,
 }) => {
   const t = useTheme();
-  const glassTheme = t.glass;
-  const globalBlurAmount = useSettingsStore((s) => s.glassBlurAmount);
-
-  const resolvedBlurRadius = blurRadius ?? globalBlurAmount ?? glassTheme?.material.blurRadius ?? 32;
-  const resolvedBorderRadius = borderRadius ?? t.radius.md;
-  const glassColors = glassTheme?.colors.glass;
-  const resolvedBg = bgOverride ?? glassColors?.bg ?? 'rgba(18,18,24,0.48)';
-  const resolvedBorder = borderOverride ?? glassColors?.border ?? 'rgba(255,255,255,0.06)';
-  const innerHighlight = glassColors?.highlightInner ?? 'rgba(255,255,255,0.14)';
-  const shimmerEdge = glassColors?.shimmerEdge ?? 'rgba(255,255,255,0.18)';
-
-  const blurType = t.isDark ? ('dark' as const) : ('light' as const);
-
-  const shouldBlur = !noBlur && !minimal;
-  const contentConstraint = constrainContent ? constrainedContentStyle : undefined;
-  const [isAnimating, setIsAnimating] = useState(shouldBlur);
+  const globalBlurAmount = useSettingsStore(s => s.glassBlurAmount);
+  const shouldBlur = !!t.glass && !noBlur && !minimal;
+  const [ready, setReady] = useState(false);
+  const constraint = constrainContent ? constrainedContentStyle : undefined;
+  const rounded = borderRadius ?? t.radius.xl;
+  const background =
+    backgroundColor ?? t.glass?.colors.glass.bg ?? t.colors.surface;
+  const border =
+    borderColor ?? t.glass?.colors.glass.border ?? t.colors.divider;
+  const requestedBlur =
+    blurRadius ?? globalBlurAmount ?? t.glass?.material.blurRadius ?? 16;
 
   useEffect(() => {
+    setReady(false);
     if (!shouldBlur) {
-      setIsAnimating(false);
       return;
     }
-
-    setIsAnimating(true);
-    const task = InteractionManager.runAfterInteractions(() => {
-      setIsAnimating(false);
-    });
+    const task = InteractionManager.runAfterInteractions(() => setReady(true));
     return () => task.cancel();
   }, [shouldBlur]);
 
-  // ── Outer container: holds shadows + clips inner content ──────────
-  const outerStyle: ViewStyle = {
-    borderRadius: resolvedBorderRadius,
-    ...(noShadow || minimal
-      ? {}
-      : Platform.select({
-          ios: {
-            shadowColor: 'rgba(0,0,0,0.85)',
-            shadowOffset: { width: 0, height: 18 },
-            shadowOpacity: 1,
-            shadowRadius: 56,
-          },
-          android: {
-            elevation: 24,
-          },
-        })),
-  };
-
   return (
-    <View style={[outerStyle, contentConstraint, style]} {...(Platform.OS === 'android' && !minimal ? { collapsable: false as any } : {})}>
-      {/* Inner clip region — overflow hidden lives here so outer shadow isn't clipped */}
-      <View style={[{ overflow: 'hidden', borderRadius: resolvedBorderRadius }, contentConstraint]}>
-        {/* ── Backdrop blur layer ─────────────────────────────────── */}
-        {shouldBlur && !isAnimating && (
+    <View
+      style={[
+        {borderRadius: rounded},
+        !noShadow &&
+          !minimal && {
+            shadowColor: '#000',
+            shadowOffset: {width: 0, height: 4},
+            shadowOpacity: t.isDark ? 0.18 : 0.05,
+            shadowRadius: 16,
+            elevation: 2,
+          },
+        constraint,
+        style,
+      ]}>
+      <View style={[{overflow: 'hidden', borderRadius: rounded}, constraint]}>
+        {shouldBlur && ready && (
           <BlurView
             style={StyleSheet.absoluteFill}
-            blurType={blurType}
-            blurAmount={resolvedBlurRadius}
-            reducedTransparencyFallbackColor={resolvedBg}
+            blurType={t.isDark ? 'dark' : 'light'}
+            blurAmount={
+              Platform.OS === 'android'
+                ? Math.min(requestedBlur, 25)
+                : requestedBlur
+            }
+            reducedTransparencyFallbackColor={t.colors.surfaceRaised}
           />
         )}
-
-        {/* ── Glass base ──────────────────────────────────────────── */}
         <View
-          style={[{
-            backgroundColor: resolvedBg,
-            borderRadius: resolvedBorderRadius,
-            ...(minimal
-              ? {borderWidth: StyleSheet.hairlineWidth, borderColor: resolvedBorder}
-              : {}),
-          }, contentConstraint]}
-        >
-          {!minimal && <>
-          {/* ── 1. Chromatic aberration fringing ─────────────────────
-               Ultra-thin colour shift at edges; cyan on top, magenta on
-               bottom — simulates light dispersion through glass. ─── */}
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              {
-                borderRadius: resolvedBorderRadius,
-                borderWidth: 1.5,
-                borderColor: resolvedBorder,
-                borderTopColor: 'rgba(0, 229, 255, 0.07)',
-                borderBottomColor: 'rgba(180, 77, 255, 0.05)',
-              },
-            ]}
-            pointerEvents="none"
-          />
-
-          {/* ── 2. Inner highlight (top-left light catch) ──────────── */}
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              {
-                borderRadius: resolvedBorderRadius,
-                borderWidth: 1,
-                borderColor: 'transparent',
-                borderTopColor: innerHighlight,
-                borderLeftColor: 'rgba(255,255,255,0.07)',
-                margin: 1,
-              },
-            ]}
-            pointerEvents="none"
-          />
-
-          {/* ── 3. Shimmer edge wrap (right + bottom) ──────────────── */}
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              {
-                borderRadius: resolvedBorderRadius,
-                borderWidth: 2,
-                borderColor: 'transparent',
-                borderRightColor: shimmerEdge,
-                borderBottomColor: 'rgba(255,255,255,0.04)',
-                margin: -1,
-                opacity: 0.5,
-              },
-            ]}
-            pointerEvents="none"
-          />
-
-          {/* ── 4. Micro-grain noise overlay ─────────────────────────
-               Simulates physical sandblasted / frosted grain texture
-               via a subtle flat tint with very low opacity. ──────── */}
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              {
-                borderRadius: resolvedBorderRadius,
-                backgroundColor: 'rgba(255, 255, 255, 0.016)',
-              },
-            ]}
-            pointerEvents="none"
-          />
-
-          {/* ── 5. Ambient occlusion rim (bottom shadow accent) ────── */}
-          {!noShadow && (
-            <View
-              style={[
-                StyleSheet.absoluteFill,
-                {
-                  borderRadius: resolvedBorderRadius,
-                  borderBottomWidth: 2,
-                  borderBottomColor: 'rgba(0, 0, 0, 0.35)',
-                },
-              ]}
-              pointerEvents="none"
-            />
-          )}
-          </>}
-
-          {/* ── Content ───────────────────────────────────────────── */}
-          <View style={contentConstraint}>{children}</View>
+          style={[
+            {
+              backgroundColor: background,
+              borderColor: border,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderRadius: rounded,
+            },
+            constraint,
+          ]}>
+          <View style={constraint}>{children}</View>
         </View>
       </View>
     </View>

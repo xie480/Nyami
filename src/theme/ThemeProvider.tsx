@@ -1,4 +1,4 @@
-import React, { createContext, useContext, ReactNode } from 'react';
+import React, { createContext, useContext, useMemo, ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
 import { lightColors, darkColors, Colors } from './colors';
 import { fontSize, fontWeight } from './typography';
@@ -45,7 +45,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
 
   const effectiveBackground = isGlass ? 'transparent' : baseColors.background;
 
-  const value: Theme = {
+  const value = useMemo<Theme>(() => ({
     colors: isGlass
       ? {
           ...baseColors,
@@ -53,7 +53,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
           // surface 使用玻璃半透明背景
           surface: glassColors.glass.bg,
           // surfaceHigh 用于搜索栏等，使用稍不透明的玻璃色
-          surfaceHigh: isGlassLight ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.10)',
+          surfaceHigh: isGlassLight ? 'rgba(241,237,249,0.92)' : 'rgba(43,37,56,0.94)',
           // 主色调使用玻璃主题的强调色
           primary: glassColors.accent.primary,
           onPrimary: isGlassLight ? '#ffffff' : '#0a0a14',
@@ -79,7 +79,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     glass: isGlass
       ? (isGlassLight ? GlassLightTheme : GlassDarkTheme)
       : undefined,
-  };
+  }), [isGlass, isGlassLight, isDark, glassColors, baseColors, effectiveBackground]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 };

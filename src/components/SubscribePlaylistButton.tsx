@@ -90,7 +90,7 @@ export const SubscribePlaylistButton = ({
       onPress={() => void onSubscribe()}
       activeOpacity={0.78}
       style={{
-        minHeight: compact ? 32 : 38,
+        minHeight: 48,
         alignSelf: 'flex-start',
         flexDirection: 'row',
         alignItems: 'center',

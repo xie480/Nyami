@@ -76,7 +76,7 @@ export const GlassLightTheme: GlassTheme = {
   colors: {
     pageBg: ['#f8f5ff', '#fef7fa', '#f5f0ff', '#faf5f9', '#f3f0fc'],
     glass: {
-      bg: 'rgba(255, 255, 255, 0.45)',
+      bg: 'rgba(255, 255, 255, 0.94)',
       border: 'rgba(255, 255, 255, 0.55)',
       highlightInner: 'rgba(255, 255, 255, 0.7)',
       shimmerEdge: 'rgba(255, 255, 255, 0.7)'
@@ -85,14 +85,14 @@ export const GlassLightTheme: GlassTheme = {
       bgOverlay: 'rgba(255, 255, 255, 0.12)'
     },
     accent: {
-      primary: '#6c5ce7',
+      primary: '#6945DB',
       secondary: '#e879a0',
       tertiary: '#5b9cf5'
     },
     text: {
       primary: '#1a1a2e',
       secondary: '#5a5a7a',
-      tertiary: '#8a8aa0'
+      tertiary: '#686879'
     },
     progress: {
       trackBg: 'rgba(0, 0, 0, 0.08)',
@@ -137,7 +137,7 @@ export const GlassDarkTheme: GlassTheme = {
   colors: {
     pageBg: ['#040404', '#08080c', '#060608'],
     glass: {
-      bg: 'rgba(18, 18, 24, 0.48)',
+      bg: 'rgba(24, 22, 32, 0.88)',
       border: 'rgba(255, 255, 255, 0.06)',
       highlightInner: 'rgba(255, 255, 255, 0.14)',
       shimmerEdge: 'rgba(255, 255, 255, 0.18)'
@@ -146,14 +146,14 @@ export const GlassDarkTheme: GlassTheme = {
       bgOverlay: 'rgba(5, 5, 10, 0.20)'
     },
     accent: {
-      primary: '#b44dff',
+      primary: '#C3A0FF',
       secondary: '#00e5ff',
       tertiary: '#4da6ff'
     },
     text: {
       primary: '#f0f0f5',
       secondary: '#b0b0c8',
-      tertiary: '#787898'
+      tertiary: '#AAA3BC'
     },
     progress: {
       trackBg: 'rgba(255, 255, 255, 0.06)',

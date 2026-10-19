@@ -1,16 +1,17 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import {
   Modal,
   View,
   Text,
   StyleSheet,
-  Animated,
+  ScrollView,
   TouchableWithoutFeedback,
-  Easing,
   TouchableOpacity,
+  useWindowDimensions,
 } from 'react-native';
-import { useTheme } from '../theme';
-import { GlassView } from './GlassView';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {useTheme} from '../theme';
+import {useReducedMotion} from '../hooks/useReducedMotion';
 
 export interface DialogAction {
   text: string;
@@ -31,142 +32,128 @@ export const Dialog: React.FC<DialogProps> = ({
   title,
   message,
   onClose,
-  actions = [{ text: '确定', onPress: onClose }],
+  actions = [{text: '确定'}],
 }) => {
   const t = useTheme();
-  const opacity = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.9)).current;
-
-  useEffect(() => {
-    if (visible) {
-      Animated.parallel([
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 200,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(scale, {
-          toValue: 1,
-          duration: 200,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(opacity, {
-          toValue: 0,
-          duration: 150,
-          easing: Easing.in(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(scale, {
-          toValue: 0.9,
-          duration: 150,
-          easing: Easing.in(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [visible, opacity, scale]);
+  const insets = useSafeAreaInsets();
+  const {width, fontScale} = useWindowDimensions();
+  const reducedMotion = useReducedMotion();
+  const stacked = width < 380 || fontScale > 1.2 || actions.length > 2;
 
   return (
-    <Modal transparent visible={visible} animationType="none" onRequestClose={onClose}>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <Animated.View style={[styles.overlay, { opacity }]}>
-          <TouchableWithoutFeedback>
-            <Animated.View
-              style={[
-                styles.dialog,
-                {
-                  transform: [{ scale }],
-                },
-              ]}
-            >
-              <GlassView borderRadius={15} style={{ padding: 20 }}>
-                {title && (
-                  <Text style={[styles.title, { color: t.colors.text, fontSize: t.fontSize.xl }]}>
-                    {title}
-                  </Text>
-                )}
-                {message && (
-                  <Text style={[styles.message, { color: t.colors.textSub, fontSize: t.fontSize.base }]}>
-                    {message}
-                  </Text>
-                )}
-                <View style={styles.actions}>
-                  {actions.map((action, index) => {
-                    let color = t.colors.primary;
-                    if (action.style === 'destructive') {
-                      color = t.colors.error;
-                    } else if (action.style === 'cancel') {
-                      color = t.colors.textSub;
-                    }
-
-                    return (
-                      <TouchableOpacity
-                        key={index}
-                        style={styles.button}
-                        onPress={() => {
-                          action.onPress?.();
-                          onClose();
-                        }}
-                      >
-                        <Text style={[styles.buttonText, { color, fontSize: t.fontSize.base }]}>
-                          {action.text}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </GlassView>
-            </Animated.View>
-          </TouchableWithoutFeedback>
-        </Animated.View>
-      </TouchableWithoutFeedback>
+    <Modal
+      transparent
+      visible={visible}
+      animationType={reducedMotion ? 'none' : 'fade'}
+      onRequestClose={onClose}
+      statusBarTranslucent>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          paddingHorizontal: 24,
+          paddingTop: insets.top + 16,
+          paddingBottom: insets.bottom + 16,
+        }}>
+        <TouchableWithoutFeedback onPress={onClose} accessible={false}>
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {backgroundColor: t.colors.overlay},
+            ]}
+          />
+        </TouchableWithoutFeedback>
+        <View
+          accessibilityViewIsModal
+          onAccessibilityEscape={onClose}
+          style={{
+            width: '100%',
+            maxWidth: 440,
+            maxHeight: '90%',
+            borderRadius: 24,
+            backgroundColor: t.colors.surfaceRaised,
+            borderColor: t.colors.divider,
+            borderWidth: StyleSheet.hairlineWidth,
+            overflow: 'hidden',
+          }}>
+          <ScrollView bounces={false} contentContainerStyle={{padding: 24}}>
+            {title ? (
+              <Text
+                accessibilityRole="header"
+                style={{
+                  fontSize: t.fontSize.xl,
+                  fontWeight: '700',
+                  color: t.colors.text,
+                  marginBottom: 12,
+                }}>
+                {title}
+              </Text>
+            ) : null}
+            {message ? (
+              <Text
+                selectable
+                style={{
+                  fontSize: t.fontSize.md,
+                  lineHeight: 24,
+                  color: t.colors.textSub,
+                }}>
+                {message}
+              </Text>
+            ) : null}
+            <View
+              style={{
+                marginTop: 24,
+                flexDirection: stacked ? 'column' : 'row',
+                gap: 8,
+              }}>
+              {actions.map((action, index) => {
+                const cancel = action.style === 'cancel';
+                const background = cancel
+                  ? t.colors.surfaceHigh
+                  : action.style === 'destructive'
+                  ? t.colors.error
+                  : t.colors.primary;
+                const foreground = cancel
+                  ? t.colors.textSub
+                  : action.style === 'destructive'
+                  ? t.colors.onError
+                  : t.colors.onPrimary;
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    accessibilityRole="button"
+                    activeOpacity={0.8}
+                    style={{
+                      flex: stacked ? undefined : 1,
+                      minHeight: 48,
+                      borderRadius: 14,
+                      paddingVertical: 12,
+                      paddingHorizontal: 16,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: background,
+                    }}
+                    onPress={() => {
+                      action.onPress?.();
+                      onClose();
+                    }}>
+                    <Text
+                      style={{
+                        fontSize: t.fontSize.md,
+                        fontWeight: '600',
+                        color: foreground,
+                        textAlign: 'center',
+                      }}>
+                      {action.text}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </View>
+      </View>
     </Modal>
   );
 };
-
-const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dialog: {
-    width: '90%',
-    maxWidth: 400,
-    borderRadius: 28, // MD3 standard
-  },
-  title: {
-    padding: 8,
-    fontWeight: '600',
-    marginBottom: 16,
-  },
-  message: {
-    padding: 8,
-    lineHeight: 20,
-    marginBottom: 24,
-  },
-  actions: {
-    padding: 8,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  button: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 100, // Pill shape for text buttons in MD3
-    minWidth: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonText: {
-    fontWeight: '500',
-  },
-});

@@ -26,13 +26,17 @@ import {storage} from '../core/storage';
 import { loadMorePersonalizedSongs } from '../services/homeRecommendationService';
 import {getFavoriteSearchRefreshKey} from '../utils/playbackRefreshKey';
 import {filterFavoriteVideos} from '../utils/favoriteSearch';
+import {useReducedMotion} from '../hooks/useReducedMotion';
 
 const QUEUE_LOAD_AHEAD_TRACKS = 5;
 const EMPTY_PLAYLIST_QUEUE: FavoriteVideo[] = [];
-const QUEUE_ITEM_HEIGHT = 56;
+const QUEUE_ITEM_HEIGHT = 72;
 const QUEUE_ITEM_SPACING = 8;
-const QUEUE_PART_ROW_HEIGHT = 28;
+const QUEUE_PART_ROW_HEIGHT = 48;
 const QUEUE_PARTS_SPACING = 4;
+const QUEUE_TITLE_LINE_HEIGHT = 18;
+const QUEUE_SUBTITLE_LINE_HEIGHT = 14;
+const QUEUE_PART_LINE_HEIGHT = 18;
 
 function getPlaybackSourceIdentity(context: PlayContext | null): string | PlayContext | null {
   if (context?.refreshKey) {
@@ -51,9 +55,9 @@ function getPlaybackSourceIdentity(context: PlayContext | null): string | PlayCo
   return context;
 }
 
-function getQueueItemExtraHeight(video: FavoriteVideo | undefined, expandedBvid: string | null): number {
+function getQueueItemExtraHeight(video: FavoriteVideo | undefined, expandedBvid: string | null, partHeight: number): number {
   if (!video || video.bvid !== expandedBvid || !video.parts || video.parts.length <= 1) return 0;
-  return video.parts.length * QUEUE_PART_ROW_HEIGHT + QUEUE_PARTS_SPACING;
+  return video.parts.length * partHeight + QUEUE_PARTS_SPACING;
 }
 
 interface PlaylistItemProps {
@@ -65,6 +69,8 @@ interface PlaylistItemProps {
   onRemove: (bvid: string) => void;
   isCurrent: boolean;
   primaryColor: string;
+  itemHeight: number;
+  partHeight: number;
 }
 
 const PlaylistItem = memo(function PlaylistItem({
@@ -76,12 +82,14 @@ const PlaylistItem = memo(function PlaylistItem({
   onRemove,
   isCurrent,
   primaryColor,
+  itemHeight,
+  partHeight,
 }: PlaylistItemProps) {
   const t = useTheme();
   return (
     <View>
-      <View style={[styles.item, { backgroundColor: isCurrent ? t.colors.primaryLight : t.colors.surface }]}>
-        <RNTouchableOpacity style={styles.infoTouchable} onPress={() => onPlay(item.bvid)} activeOpacity={0.6}>
+      <View style={[styles.item, {height: itemHeight, backgroundColor: isCurrent ? t.colors.primaryLight : t.colors.surface}]}>
+        <RNTouchableOpacity accessibilityRole="button" accessibilityLabel={`播放 ${item.title}，${item.upper?.name || '未知 UP 主'}`} accessibilityState={{selected: isCurrent}} style={[styles.infoTouchable, {minHeight: itemHeight}]} onPress={() => onPlay(item.bvid)} activeOpacity={0.6}>
           <View style={styles.info}>
             <Text
               style={[{ color: t.colors.text }, styles.title, isCurrent && { color: primaryColor, fontWeight: '700' }]}
@@ -97,11 +105,11 @@ const PlaylistItem = memo(function PlaylistItem({
         </RNTouchableOpacity>
         <View style={styles.actions}>
           {item.parts && item.parts.length > 1 && (
-            <RNTouchableOpacity onPress={() => onExpandToggle(item.bvid)} style={styles.expandButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <RNTouchableOpacity accessibilityRole="button" accessibilityLabel={isExpanded ? '收起分 P' : '展开分 P'} accessibilityState={{expanded: isExpanded}} onPress={() => onExpandToggle(item.bvid)} style={styles.expandButton}>
               <Icon name={isExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={t.colors.textHint} />
             </RNTouchableOpacity>
           )}
-          <IconButton name="delete" size={20} color={t.colors.error} onPress={() => onRemove(item.bvid)} />
+          <IconButton name="delete" size={20} accessibilityLabel={`从队列移除 ${item.title}`} color={t.colors.textSub} onPress={() => onRemove(item.bvid)} />
         </View>
       </View>
       {isExpanded && item.parts && item.parts.length > 1 && (
@@ -109,7 +117,9 @@ const PlaylistItem = memo(function PlaylistItem({
           {item.parts.map(part => (
             <RNTouchableOpacity
               key={part.cid}
-              style={styles.partItem}
+              accessibilityRole="button"
+              accessibilityLabel={`播放分 P ${part.title}`}
+              style={[styles.partItem, {height: partHeight}]}
               onPress={() => onPartPress(item.bvid, part.cid, part.title)}
               activeOpacity={0.7}
             >
@@ -131,7 +141,12 @@ const PlaylistItem = memo(function PlaylistItem({
  */
 export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => {
   const t = useTheme();
-  const {height: windowHeight} = useWindowDimensions();
+  const reducedMotion = useReducedMotion();
+  const {height: windowHeight, fontScale = 1} = useWindowDimensions();
+  // 两行主信息和单行分 P 使用明确的 lineHeight；额外空间容纳行间距与上下留白。
+  // 渲染和虚拟列表定位必须共享高度，否则系统字体变大后会跳到错误的歌曲。
+  const itemHeight = Math.max(QUEUE_ITEM_HEIGHT, Math.ceil((QUEUE_TITLE_LINE_HEIGHT + QUEUE_SUBTITLE_LINE_HEIGHT) * fontScale + 24));
+  const partHeight = Math.max(QUEUE_PART_ROW_HEIGHT, Math.ceil(QUEUE_PART_LINE_HEIGHT * fontScale + 16));
   const insets = useSafeAreaInsets();
   const panelBounds = {
     maxHeight: Math.max(0, windowHeight - insets.top) * 0.8,
@@ -250,9 +265,11 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
         onRemove={handleRemove}
         isCurrent={item.bvid === currentBvid}
         primaryColor={t.colors.primary}
+        itemHeight={itemHeight}
+        partHeight={partHeight}
       />
     ),
-    [t.colors.primary, expandedBvid, handlePlayBvid, handlePartPress, handleExpandToggle, handleRemove, currentBvid]
+    [t.colors.primary, expandedBvid, handlePlayBvid, handlePartPress, handleExpandToggle, handleRemove, currentBvid, itemHeight, partHeight]
   );
 
   // 精确控制的自动滚动逻辑：
@@ -301,17 +318,17 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
 
   const getItemLayout = useCallback((data: ArrayLike<FavoriteVideo> | null | undefined, index: number) => {
     const items = data ?? queue;
-    let offset = index * (QUEUE_ITEM_HEIGHT + QUEUE_ITEM_SPACING);
+    let offset = index * (itemHeight + QUEUE_ITEM_SPACING);
     for (let itemIndex = 0; itemIndex < index; itemIndex += 1) {
-      offset += getQueueItemExtraHeight(items[itemIndex], expandedBvid);
+      offset += getQueueItemExtraHeight(items[itemIndex], expandedBvid, partHeight);
     }
     const item = items[index];
     return {
-      length: QUEUE_ITEM_HEIGHT + QUEUE_ITEM_SPACING + getQueueItemExtraHeight(item, expandedBvid),
+      length: itemHeight + QUEUE_ITEM_SPACING + getQueueItemExtraHeight(item, expandedBvid, partHeight),
       offset,
       index,
     };
-  }, [expandedBvid, queue]);
+  }, [expandedBvid, queue, itemHeight, partHeight]);
 
   const handleLoadMore = useCallback(async () => {
     if (loadingMoreRef.current || !playContext) return;
@@ -643,6 +660,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
           )}
           <IconButton
             name={playMode === 'shuffle' ? 'shuffle' : 'repeat'}
+            accessibilityLabel={playMode === 'shuffle' ? '随机播放，切换到顺序播放' : '顺序播放，切换到随机播放'}
             size={20}
             color={t.colors.text}
             onPress={togglePlayMode}
@@ -679,6 +697,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
             />
           )}
           ListFooterComponent={renderFooter}
+          ListEmptyComponent={<Text style={{color: t.colors.textSub, textAlign: 'center', padding: 32}}>播放队列为空，选择一首喜欢的歌开始。</Text>}
           onEndReached={() => {
             if (!listEndReachedArmedRef.current) return;
             listEndReachedArmedRef.current = false;
@@ -691,14 +710,14 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   );
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType={reducedMotion ? 'none' : 'slide'} transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         {isGlass ? (
-          <GlassView style={StyleSheet.flatten([styles.container, panelBounds])} borderRadius={12} noShadow noBlur minimal constrainContent>
+          <GlassView style={StyleSheet.flatten([styles.container, panelBounds])} backgroundColor={t.colors.surfaceRaised} borderRadius={24} noShadow noBlur minimal constrainContent>
             {playlistContent}
           </GlassView>
         ) : (
-          <View style={[styles.container, panelBounds, { backgroundColor: t.colors.background }]}>{playlistContent}</View>
+          <View style={[styles.container, panelBounds, { backgroundColor: t.colors.surfaceRaised }]}>{playlistContent}</View>
         )}
       </View>
     </Modal>
@@ -714,8 +733,8 @@ const styles = StyleSheet.create({
   container: {
     flexShrink: 1,
     minHeight: 0,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
   },
   queueViewport: {
     flexGrow: 0,
@@ -740,7 +759,6 @@ const styles = StyleSheet.create({
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: QUEUE_ITEM_HEIGHT,
     paddingVertical: 0,
     paddingHorizontal: 12,
     marginVertical: 4,
@@ -749,18 +767,20 @@ const styles = StyleSheet.create({
   },
   infoTouchable: {
     flex: 1,
-    paddingRight: 80,
+    paddingRight: 104,
     justifyContent: 'center',
   },
   info: {
-    flex: 1,
+    minWidth: 0,
   },
   title: {
     fontSize: 14,
+    lineHeight: QUEUE_TITLE_LINE_HEIGHT,
     fontWeight: '500',
   },
   sub: {
     fontSize: 12,
+    lineHeight: QUEUE_SUBTITLE_LINE_HEIGHT,
     color: '#666',
     marginTop: 2,
   },
@@ -772,8 +792,10 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   expandButton: {
-    padding: 4,
-    marginRight: 4,
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   partsContainer: {
     marginLeft: 20,
@@ -786,13 +808,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    height: QUEUE_PART_ROW_HEIGHT,
     paddingVertical: 0,
     paddingRight: 8,
   },
   partTitle: {
     flex: 1,
     fontSize: 13,
+    lineHeight: QUEUE_PART_LINE_HEIGHT,
     color: '#555',
   },
   footerLoader: {
@@ -806,7 +828,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   partDuration: {
-    fontSize: 11,
+    fontSize: 12,
+    lineHeight: QUEUE_PART_LINE_HEIGHT,
     color: '#999',
   },
 });
