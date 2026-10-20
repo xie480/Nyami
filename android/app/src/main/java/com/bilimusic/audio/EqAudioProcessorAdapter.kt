@@ -39,6 +39,11 @@ class EqAudioProcessorAdapter(
     private var inputChannelCount = 2
     private var inputEncoding = C.ENCODING_PCM_FLOAT
 
+    // configure 只声明下一段格式；flush 之前仍可能收到上一段的 PCM 尾块。
+    private var pendingSampleRate = inputSampleRate
+    private var pendingChannelCount = inputChannelCount
+    private var pendingEncoding = inputEncoding
+
     /**
      * 临时缓冲区（16-bit → float 转换用）
      * 复用避免频繁分配
@@ -61,10 +66,10 @@ class EqAudioProcessorAdapter(
      * 配置处理器。返回输出格式（与输入相同，不做重采样/编码转换）。
      */
     override fun configure(inputFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
-        inputSampleRate = inputFormat.sampleRate
-        inputChannelCount = inputFormat.channelCount
-        inputEncoding = inputFormat.encoding
-        Log.d(TAG, "Configured: ${inputSampleRate}Hz, ${inputChannelCount}ch, encoding=$inputEncoding")
+        pendingSampleRate = inputFormat.sampleRate
+        pendingChannelCount = inputFormat.channelCount
+        pendingEncoding = inputFormat.encoding
+        Log.d(TAG, "Pending format: ${pendingSampleRate}Hz, ${pendingChannelCount}ch, encoding=$pendingEncoding")
         return inputFormat
     }
 
@@ -150,6 +155,10 @@ class EqAudioProcessorAdapter(
     override fun flush() {
         pendingOutputBuffer = AudioProcessor.EMPTY_BUFFER
         inputEnded = false
+        inputSampleRate = pendingSampleRate
+        inputChannelCount = pendingChannelCount
+        inputEncoding = pendingEncoding
+        dspProcessor.configure(inputSampleRate, inputChannelCount)
     }
 
     /**
@@ -162,6 +171,10 @@ class EqAudioProcessorAdapter(
         inputSampleRate = 44100
         inputChannelCount = 2
         inputEncoding = C.ENCODING_PCM_FLOAT
+        pendingSampleRate = inputSampleRate
+        pendingChannelCount = inputChannelCount
+        pendingEncoding = inputEncoding
+        dspProcessor.configure(inputSampleRate, inputChannelCount)
     }
 
     // ========================================================================
@@ -189,7 +202,7 @@ class EqAudioProcessorAdapter(
         }
 
         // DSP 处理（in-place）
-        dspProcessor.process(floatBuffer, inputChannelCount)
+        dspProcessor.process(floatBuffer, inputChannelCount, sampleCount)
 
         // Float → Short
         val outputBytes = sampleCount * 2

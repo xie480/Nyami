@@ -124,11 +124,17 @@ describe.each(['glass-light', 'glass-dark'])('%s theme contrast', mode => {
       ).toBeGreaterThanOrEqual(4.5);
       // Cover both extremes under a translucent card, including custom artwork.
       for (const backdrop of ['#000000', '#FFFFFF']) {
-        const surface = composite(theme!.colors.surface, rgb(backdrop));
-        for (const role of textRoles) {
-          expect(contrast(theme!.colors[role], surface)).toBeGreaterThanOrEqual(
-            4.5,
-          );
+        const wallpaper = composite(
+          theme!.glass!.colors.backdropScrim,
+          rgb(backdrop),
+        );
+        for (const surfaceRole of ['surface', 'surfaceHigh'] as const) {
+          const surface = composite(theme!.colors[surfaceRole], wallpaper);
+          for (const role of textRoles) {
+            expect(contrast(theme!.colors[role], surface)).toBeGreaterThanOrEqual(
+              4.5,
+            );
+          }
         }
       }
     } finally {

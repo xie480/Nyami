@@ -32,6 +32,8 @@ export interface GlassTheme {
       highlightInner: string;
       shimmerEdge: string;
     };
+    /** A single wallpaper scrim, shared by rendering and contrast checks. */
+    backdropScrim: string;
     player?: {
       bgOverlay: string;
     };
@@ -76,23 +78,24 @@ export const GlassLightTheme: GlassTheme = {
   colors: {
     pageBg: ['#f8f5ff', '#fef7fa', '#f5f0ff', '#faf5f9', '#f3f0fc'],
     glass: {
-      bg: 'rgba(255, 255, 255, 0.94)',
+      bg: 'rgba(255, 255, 255, 0.68)',
       border: 'rgba(255, 255, 255, 0.55)',
       highlightInner: 'rgba(255, 255, 255, 0.7)',
       shimmerEdge: 'rgba(255, 255, 255, 0.7)'
     },
+    backdropScrim: 'rgba(255, 255, 255, 0.28)',
     player: {
       bgOverlay: 'rgba(255, 255, 255, 0.12)'
     },
     accent: {
-      primary: '#6945DB',
+      primary: '#5832BD',
       secondary: '#e879a0',
       tertiary: '#5b9cf5'
     },
     text: {
       primary: '#1a1a2e',
-      secondary: '#5a5a7a',
-      tertiary: '#686879'
+      secondary: '#47475F',
+      tertiary: '#4B4B60'
     },
     progress: {
       trackBg: 'rgba(0, 0, 0, 0.08)',
@@ -137,23 +140,24 @@ export const GlassDarkTheme: GlassTheme = {
   colors: {
     pageBg: ['#040404', '#08080c', '#060608'],
     glass: {
-      bg: 'rgba(24, 22, 32, 0.88)',
-      border: 'rgba(255, 255, 255, 0.06)',
+      bg: 'rgba(24, 22, 32, 0.68)',
+      border: 'rgba(255, 255, 255, 0.18)',
       highlightInner: 'rgba(255, 255, 255, 0.14)',
       shimmerEdge: 'rgba(255, 255, 255, 0.18)'
     },
+    backdropScrim: 'rgba(10, 10, 20, 0.32)',
     player: {
       bgOverlay: 'rgba(5, 5, 10, 0.20)'
     },
     accent: {
-      primary: '#C3A0FF',
+      primary: '#D0B1FF',
       secondary: '#00e5ff',
       tertiary: '#4da6ff'
     },
     text: {
       primary: '#f0f0f5',
-      secondary: '#b0b0c8',
-      tertiary: '#AAA3BC'
+      secondary: '#C4BED4',
+      tertiary: '#C0B8CF'
     },
     progress: {
       trackBg: 'rgba(255, 255, 255, 0.06)',

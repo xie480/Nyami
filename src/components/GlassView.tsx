@@ -42,7 +42,6 @@ export const GlassView: React.FC<GlassViewProps> = ({
 }) => {
   const t = useTheme();
   const globalBlurAmount = useSettingsStore(s => s.glassBlurAmount);
-  const shouldBlur = !!t.glass && !noBlur && !minimal;
   const [ready, setReady] = useState(false);
   const constraint = constrainContent ? constrainedContentStyle : undefined;
   const rounded = borderRadius ?? t.radius.xl;
@@ -52,6 +51,11 @@ export const GlassView: React.FC<GlassViewProps> = ({
     borderColor ?? t.glass?.colors.glass.border ?? t.colors.divider;
   const requestedBlur =
     blurRadius ?? globalBlurAmount ?? t.glass?.material.blurRadius ?? 16;
+  // Android's native blur radius must be positive. Zero means tint only.
+  const shouldBlur = !!t.glass && !noBlur && !minimal && requestedBlur > 0;
+  // Android captures sibling Views. Keep the tint inside the native material
+  // so it is drawn once and does not obscure the wallpaper in its own snapshot.
+  const nativeTint = Platform.OS === 'android' && shouldBlur && ready;
 
   useEffect(() => {
     setReady(false);
@@ -88,12 +92,13 @@ export const GlassView: React.FC<GlassViewProps> = ({
                 : requestedBlur
             }
             reducedTransparencyFallbackColor={t.colors.surfaceRaised}
+            {...(Platform.OS === 'android' ? {overlayColor: background} : {})}
           />
         )}
         <View
           style={[
             {
-              backgroundColor: background,
+              backgroundColor: nativeTint ? 'transparent' : background,
               borderColor: border,
               borderWidth: StyleSheet.hairlineWidth,
               borderRadius: rounded,

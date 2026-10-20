@@ -4,7 +4,6 @@ import com.bilimusic.audio.filter.BiquadFilter
 import com.bilimusic.audio.filter.RBJFilter
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -26,11 +25,19 @@ class DSPAudioProcessor {
         var instance: DSPAudioProcessor? = null
     }
 
-    // 10-band Graphic EQ 滤波器
-    private val graphicFilters = Array(10) { BiquadFilter() }
-
-    // PEQ 8 个滤波器
-    private val peqFilters = Array(8) { RBJFilter() }
+    // 每个声道独立保存 IIR 历史；不能把交错立体声当作一条采样流。
+    private var sampleRate = 44100
+    private var channelCount = 2
+    private val graphicGains = FloatArray(10)
+    private data class PEQParameters(
+        val type: Int = 0,
+        val frequency: Float = 1000f,
+        val gain: Float = 0f,
+        val q: Float = 1f
+    )
+    private val peqParameters = Array(8) { PEQParameters() }
+    private var graphicFilters = Array(channelCount) { Array(10) { BiquadFilter() } }
+    private var peqFilters = Array(channelCount) { Array(8) { RBJFilter() } }
 
     // FFT 频谱分析器
     val fftAnalyzer = FFTAnalyzer(1024)
@@ -45,7 +52,7 @@ class DSPAudioProcessor {
     private val lock = ReentrantReadWriteLock()
 
     // EQ 状态
-    var enabled = true
+    @Volatile var enabled = true
         private set
     var mode: EQMode = EQMode.GRAPHIC
         private set
@@ -66,20 +73,54 @@ class DSPAudioProcessor {
         // 注册全局实例（供 ExoPlayer AudioProcessor 注入使用）
         instance = this
 
-        // 初始化 Graphic EQ 滤波器（默认平直曲线）
-        for (i in graphicFilters.indices) {
-            graphicFilters[i].sampleRate = 44100f
-            graphicFilters[i].setPeak(bandFrequencies[i], 0f, 1.0f)
-        }
-
-        // 初始化 PEQ 滤波器
-        for (filter in peqFilters) {
-            filter.sampleRate = 44100f
-            filter.calculateCoefficients()
-        }
+        updateFilterCoefficients()
     }
 
     // ====== 配置方法（从 JS 通过 Bridge 调用） ======
+
+    /** 输入格式改变时重建各声道历史，保留用户参数并按实际采样率重算系数。 */
+    fun configure(sampleRate: Int, channels: Int) {
+        require(sampleRate > 0 && channels > 0)
+        lock.write {
+            if (this.sampleRate == sampleRate && channelCount == channels) return
+            this.sampleRate = sampleRate
+            channelCount = channels
+            graphicFilters = Array(channels) { Array(10) { BiquadFilter() } }
+            peqFilters = Array(channels) { Array(8) { RBJFilter() } }
+            updateFilterCoefficients()
+        }
+    }
+
+    private fun updateFilterCoefficients() {
+        updateGraphicCoefficients()
+        for (index in peqParameters.indices) updatePEQCoefficients(index)
+    }
+
+    private fun updateGraphicCoefficients() {
+        for (channel in graphicFilters.indices) {
+            for (index in graphicGains.indices) {
+                graphicFilters[channel][index].sampleRate = sampleRate.toFloat()
+                graphicFilters[channel][index].setPeak(
+                    bandFrequencies[index].coerceAtMost(sampleRate * 0.49f),
+                    graphicGains[index], 1f
+                )
+            }
+        }
+    }
+
+    private fun updatePEQCoefficients(index: Int) {
+        val params = peqParameters[index]
+        for (filters in peqFilters) {
+            filters[index].apply {
+                this.sampleRate = this@DSPAudioProcessor.sampleRate.toFloat()
+                type = RBJFilter.Type.values()[params.type]
+                frequency = params.frequency.coerceIn(1f, sampleRate * 0.49f)
+                gain = params.gain
+                q = params.q
+                calculateCoefficients()
+            }
+        }
+    }
 
     fun setEnabled(enabled: Boolean) {
         lock.write { this.enabled = enabled }
@@ -101,9 +142,8 @@ class DSPAudioProcessor {
     fun updateGraphicEQ(gains: FloatArray) {
         if (gains.size != 10) return
         lock.write {
-            for (i in 0 until 10) {
-                graphicFilters[i].setPeak(bandFrequencies[i], gains[i].coerceIn(-12f, 12f), 1.0f)
-            }
+            for (i in graphicGains.indices) graphicGains[i] = gains[i].coerceIn(-12f, 12f)
+            updateGraphicCoefficients()
         }
     }
 
@@ -119,12 +159,10 @@ class DSPAudioProcessor {
     fun updatePEQFilter(index: Int, type: Int, frequency: Float, gain: Float, q: Float) {
         if (index < 0 || index >= 8) return
         lock.write {
-            val filter = peqFilters[index]
-            filter.type = RBJFilter.Type.values()[type.coerceIn(0, 6)]
-            filter.frequency = frequency
-            filter.gain = gain
-            filter.q = q.coerceIn(0.1f, 20f)
-            filter.calculateCoefficients()
+            peqParameters[index] = PEQParameters(
+                type.coerceIn(0, 6), frequency, gain.coerceIn(-12f, 12f), q.coerceIn(0.1f, 20f)
+            )
+            updatePEQCoefficients(index)
         }
     }
 
@@ -147,10 +185,13 @@ class DSPAudioProcessor {
      * @param channels 声道数
      * @return 处理后的缓冲区
      */
-    fun process(buffer: FloatArray, channels: Int = 2): FloatArray {
+    fun process(buffer: FloatArray, channels: Int = 2, sampleCount: Int = buffer.size): FloatArray {
+        require(sampleCount in 0..buffer.size && channels > 0)
+        if (sampleCount == 0) return buffer
+        if (channelCount != channels) configure(sampleRate, channels)
         if (!enabled) {
             // EQ 关闭时保持音频直通；仅在界面有频谱消费者时继续分析。
-            if (spectrumAnalysisEnabled) fftAnalyzer.analyze(buffer, channels)
+            if (spectrumAnalysisEnabled) fftAnalyzer.analyze(buffer, channels, sampleCount)
             return buffer
         }
 
@@ -158,26 +199,35 @@ class DSPAudioProcessor {
             when (mode) {
                 EQMode.GRAPHIC -> {
                     // 串联 10 个 Biquad 滤波器
-                    for (filter in graphicFilters) {
-                        filter.process(buffer)
+                    for (channel in 0 until channels) {
+                        for (filter in graphicFilters[channel]) {
+                            var index = channel
+                            while (index < sampleCount) {
+                                buffer[index] = filter.process(buffer[index])
+                                index += channels
+                            }
+                        }
                     }
                 }
                 EQMode.PARAMETRIC -> {
                     // 串联 8 个 RBJ 滤波器
-                    for (filter in peqFilters) {
-                        filter.process(buffer)
+                    for (channel in 0 until channels) {
+                        for (filter in peqFilters[channel]) {
+                            var index = channel
+                            while (index < sampleCount) {
+                                buffer[index] = filter.process(buffer[index])
+                                index += channels
+                            }
+                        }
                     }
                 }
             }
-        }
-
-        // 简易 Limiter（防止削波失真）
-        if (limiterEnabled) {
-            applyLimiter(buffer)
+            // 简易 Limiter（防止削波失真），只扫描本块有效样本。
+            if (limiterEnabled) applyLimiter(buffer, sampleCount)
         }
 
         // FFT 分析用于频谱可视化
-        if (spectrumAnalysisEnabled) fftAnalyzer.analyze(buffer, channels)
+        if (spectrumAnalysisEnabled) fftAnalyzer.analyze(buffer, channels, sampleCount)
 
         return buffer
     }
@@ -200,7 +250,7 @@ class DSPAudioProcessor {
         inputBuffer.asFloatBuffer().get(floatBuffer, 0, floatCount)
 
         // DSP 处理
-        process(floatBuffer, channels)
+        process(floatBuffer, channels, floatCount)
 
         // FloatArray → ByteBuffer
         val outputByteCount = floatCount * 4
@@ -221,16 +271,16 @@ class DSPAudioProcessor {
 
     // ====== Limiter ======
 
-    private fun applyLimiter(buffer: FloatArray) {
+    private fun applyLimiter(buffer: FloatArray, sampleCount: Int) {
         var peak = 0f
-        for (sample in buffer) {
-            val abs = kotlin.math.abs(sample)
+        for (i in 0 until sampleCount) {
+            val abs = kotlin.math.abs(buffer[i])
             if (abs > peak) peak = abs
         }
 
         if (peak > limiterThreshold) {
             val gain = limiterThreshold / peak
-            for (i in buffer.indices) {
+            for (i in 0 until sampleCount) {
                 buffer[i] *= gain
             }
         }
@@ -241,8 +291,11 @@ class DSPAudioProcessor {
      */
     fun reset() {
         lock.write {
-            for (filter in graphicFilters) filter.reset()
-            for (filter in peqFilters) filter.reset()
+            graphicGains.fill(0f)
+            for (i in peqParameters.indices) peqParameters[i] = PEQParameters()
+            updateFilterCoefficients()
+            for (filters in graphicFilters) for (filter in filters) filter.reset()
+            for (filters in peqFilters) for (filter in filters) filter.reset()
             fftAnalyzer.reset()
         }
     }

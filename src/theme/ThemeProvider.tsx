@@ -53,7 +53,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
           // surface 使用玻璃半透明背景
           surface: glassColors.glass.bg,
           // surfaceHigh 用于搜索栏等，使用稍不透明的玻璃色
-          surfaceHigh: isGlassLight ? 'rgba(241,237,249,0.92)' : 'rgba(43,37,56,0.94)',
+          surfaceHigh: isGlassLight ? 'rgba(241,237,249,0.82)' : 'rgba(43,37,56,0.82)',
           // 主色调使用玻璃主题的强调色
           primary: glassColors.accent.primary,
           onPrimary: isGlassLight ? '#ffffff' : '#0a0a14',

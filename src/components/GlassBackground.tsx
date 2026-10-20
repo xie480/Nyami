@@ -72,7 +72,7 @@ export const GlassBackground: React.FC = () => {
 
   // ── Mask colours ──────────────────────────────────────────────────
   const diffusionMask = isDark ? 'rgba(10, 10, 20, 0.45)' : 'rgba(240, 240, 248, 0.40)';
-  const readabilityMask = isDark ? 'rgba(10, 10, 20, 0.32)' : 'rgba(255, 255, 255, 0.28)';
+  const readabilityMask = glass?.colors.backdropScrim ?? 'transparent';
 
   // ── Stable base layer — always at full opacity, never animated ─────
   const stableBase = (

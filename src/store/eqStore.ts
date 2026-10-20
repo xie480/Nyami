@@ -63,16 +63,6 @@ export const BAND_FREQUENCIES: string[] = [
 /** 默认 Graphic EQ 频段（平直曲线，所有频段 0dB） */
 const FLAT_BANDS: GraphicBands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-/** 8 个默认 PEQ Filter（平直） */
-const DEFAULT_PEQ_FILTERS: PEQFilter[] = Array.from({ length: 8 }, (_, i) => ({
-  id: i + 1,
-  type: 'Peak' as FilterType,
-  frequency: 1000,
-  gain: 0,
-  q: 1.0,
-  enabled: false,
-}));
-
 /** 默认 PEQ：给每个滤波器一个不同的默认频率 */
 const DEFAULT_PEQ_FILTERS_PRESET: PEQFilter[] = [
   { id: 1, type: 'Peak', frequency: 31,   gain: 0, q: 1.0, enabled: false },
@@ -87,7 +77,8 @@ const DEFAULT_PEQ_FILTERS_PRESET: PEQFilter[] = [
 
 /**
  * 「情绪化预设」系统
- * 每个预设包含 Graphic EQ 的 10-band 增益和推荐 PEQ 参数
+ * 纯 EQ 音色预设；不包含混响、声场拓宽、磁带噪声或降采样。
+ * 通过主频段增强和掩蔽频段衰减区分风格，保留原音作为对比基准。
  */
 export const EMOTION_PRESETS: EQPreset[] = [
   {
@@ -101,44 +92,44 @@ export const EMOTION_PRESETS: EQPreset[] = [
   {
     id: 'nyami',
     name: 'Nyami',
-    description: '哈基咪亲自调音，通吃',
-    graphicBands: [2, 2, 1, 0, 0, 1, 2, 2, 1, 0],
+    description: '低频扎实，人声明亮',
+    graphicBands: [4, 4, 2, -1, -2, 1, 3, 4, 2, 1],
   },
 
   {
     id: 'cat_bass',
     name: '低频',
     description: '柔弹下潜，不轰头',
-    graphicBands: [5, 4, 3, 1, 0, -1, -1, 0, 1, 1],
+    graphicBands: [6, 7, 4, -2, -3, -1, 0, 0, 1, 0],
   },
 
   {
     id: 'cyber_bass',
     name: '赛博震域',
-    description: '电子/EDM/Sub Bass',
-    graphicBands: [7, 5, 3, 1, -1, -2, 0, 2, 3, 2],
+    description: '超低频重击，鼓点突出',
+    graphicBands: [9, 7, 3, -3, -4, -3, 0, 3, 4, 1],
   },
 
   // ===== Vocal =====
   {
     id: 'girl_band',
     name: '少女乐队',
-    description: '女声贴耳，明亮通透',
-    graphicBands: [-1, 0, 0, 1, 2, 3, 4, 3, 2, 1],
+    description: '女声前置，吉他明亮',
+    graphicBands: [-4, -3, -2, -1, 1, 3, 6, 4, 1, 0],
   },
 
   {
     id: 'idol_stage',
     name: '偶像现场',
     description: '突出主唱与空气感',
-    graphicBands: [-1, -1, 0, 1, 2, 3, 3, 4, 4, 2],
+    graphicBands: [-3, -2, -1, -2, -1, 2, 4, 3, 6, 5],
   },
 
   {
     id: 'whisper',
     name: '贴耳模式',
-    description: '近距离',
-    graphicBands: [-2, -2, -1, 0, 2, 4, 5, 4, 2, 1],
+    description: '人声贴近，弱化两端',
+    graphicBands: [-6, -5, -3, 0, 3, 6, 5, 1, -3, -5],
   },
 
   // ===== Atmosphere =====
@@ -146,28 +137,28 @@ export const EMOTION_PRESETS: EQPreset[] = [
     id: 'midnight_radio',
     name: '深夜电台',
     description: '暖厚收敛，适合熄灯',
-    graphicBands: [3, 2, 2, 1, 0, -1, -2, -3, -3, -4],
+    graphicBands: [1, 3, 5, 4, 2, 0, -2, -4, -6, -7],
   },
 
   {
     id: 'tokyo_rain',
     name: '东京雨夜',
-    description: '湿润空气感',
-    graphicBands: [1, 1, 0, -1, -1, 0, 1, 2, 3, 2],
+    description: '低频轻收，雨声清亮',
+    graphicBands: [-3, -2, -1, -3, -2, -1, 0, 2, 5, 6],
   },
 
   {
     id: 'vaporwave',
     name: 'Vaporwave',
-    description: '朦胧复古磁带',
-    graphicBands: [4, 3, 2, 1, 0, -1, -2, -1, 0, -1],
+    description: '低频绵厚，高频朦胧',
+    graphicBands: [5, 6, 3, 1, -2, -3, -4, -3, -5, -8],
   },
 
   {
     id: 'lofi_cafe',
     name: 'Lo-fi Café',
-    description: '旧磁带颗粒感',
-    graphicBands: [2, 2, 1, 0, -1, -1, -2, -2, -3, -4],
+    description: '复古窄频，柔暗耐听',
+    graphicBands: [-5, -3, 1, 4, 3, 1, -2, -5, -8, -10],
   },
 
   // ===== Electronic =====
@@ -175,44 +166,44 @@ export const EMOTION_PRESETS: EQPreset[] = [
     id: 'cyberpunk',
     name: 'Cyberpunk',
     description: '锐利未来电子',
-    graphicBands: [-2, -1, 0, 1, 1, 2, 3, 4, 5, 4],
+    graphicBands: [-4, -2, 0, -2, -3, 0, 4, 7, 5, 2],
   },
 
   {
     id: 'neon_drive',
     name: '霓虹疾驰',
-    description: 'Synthwave 速度感',
-    graphicBands: [3, 2, 1, 0, -1, 0, 2, 4, 5, 3],
+    description: '鼓点有力，合成器闪亮',
+    graphicBands: [3, 6, 4, -2, -4, -2, 1, 4, 6, 3],
   },
 
   // ===== Live =====
   {
     id: 'live',
     name: 'Live现场',
-    description: '空间拓宽',
-    graphicBands: [1, 1, 0, 0, 0, 1, 2, 3, 3, 2],
+    description: '鼓声有力，现场细节鲜明',
+    graphicBands: [0, 3, 5, 1, -3, -1, 3, 5, 3, 1],
   },
 
   {
     id: 'hall',
     name: '星穹大厅',
-    description: '古典厅堂空间感',
-    graphicBands: [2, 1, 0, -1, -1, 0, 1, 2, 2, 3],
+    description: '弦乐舒展，高频开阔',
+    graphicBands: [1, 0, -1, -3, -2, 0, 1, 1, 4, 6],
   },
 
   // ===== Fun =====
   {
     id: '8bit',
     name: '8-Bit猫机',
-    description: '像素复古',
-    graphicBands: [-5, -4, -2, 0, 2, 4, 5, 4, 2, -1],
+    description: '中频突出，复古掌机音色',
+    graphicBands: [-10, -8, -5, -1, 4, 7, 5, 1, -5, -9],
   },
 
   {
     id: 'crystal',
     name: '水晶薄荷',
     description: '极致解析空气感',
-    graphicBands: [-2, -2, -1, 0, 0, 1, 3, 5, 5, 4],
+    graphicBands: [-6, -5, -3, -2, -1, 0, 2, 5, 7, 7],
   },
 ];
 
@@ -245,6 +236,35 @@ interface EQState {
   resetToFlat: () => void;
 }
 
+const FILTER_TYPES: Record<FilterType, number> = {
+  Peak: 0, LowShelf: 1, HighShelf: 2,
+  LowPass: 3, HighPass: 4, Notch: 5, BandPass: 6,
+};
+
+/** 原生有 8 个连续槽位；禁用、删除的槽位必须显式恢复平直。 */
+function syncPEQFilters(filters: PEQFilter[]) {
+  for (let index = 0; index < 8; index++) {
+    const filter = filters[index];
+    const enabled = filter?.enabled;
+    audioDSP.updatePEQFilter(
+      index,
+      enabled ? FILTER_TYPES[filter.type] : 0,
+      enabled ? filter.frequency : 1000,
+      enabled ? filter.gain : 0,
+      enabled ? filter.q : 1,
+    );
+  }
+}
+
+function syncNativeState(state: EQState) {
+  try {
+    audioDSP.updateGraphicEQ(state.graphicBands);
+    syncPEQFilters(state.peqFilters);
+    audioDSP.setMode(state.mode === 'graphic' ? 0 : 1);
+    audioDSP.setEnabled(state.enabled);
+  } catch {}
+}
+
 // ========== Store ==========
 
 export const useEQStore = create<EQState>()(
@@ -275,7 +295,7 @@ export const useEQStore = create<EQState>()(
       },
 
       setGraphicBands: (bands) => {
-        set({ graphicBands: bands });
+        set({ graphicBands: bands, activePresetId: null });
         try { audioDSP.updateGraphicEQ(bands); } catch {}
       },
 
@@ -291,11 +311,13 @@ export const useEQStore = create<EQState>()(
           enabled: true,
         };
         set({ peqFilters: [...filters, newFilter], activePresetId: null });
+        try { syncPEQFilters(get().peqFilters); } catch {}
       },
 
       removeFilter: (id) => {
         const filters = get().peqFilters.filter(f => f.id !== id);
         set({ peqFilters: filters, activePresetId: null });
+        try { syncPEQFilters(filters); } catch {}
       },
 
       updatePEQFilter: (id, params) => {
@@ -303,23 +325,7 @@ export const useEQStore = create<EQState>()(
           f.id === id ? { ...f, ...params } : f,
         );
         set({ peqFilters: filters, activePresetId: null });
-        // 同步到原生 DSP
-        const filter = filters.find(f => f.id === id);
-        if (filter && filter.enabled) {
-          const typeMap: Record<string, number> = {
-            Peak: 0, LowShelf: 1, HighShelf: 2,
-            LowPass: 3, HighPass: 4, Notch: 5, BandPass: 6,
-          };
-          try {
-            audioDSP.updatePEQFilter(
-              filter.id - 1,
-              typeMap[filter.type] ?? 0,
-              filter.frequency,
-              filter.gain,
-              filter.q,
-            );
-          } catch {}
-        }
+        try { syncPEQFilters(filters); } catch {}
       },
 
       setEditingFilterId: (id) => set({ editingFilterId: id }),
@@ -333,6 +339,7 @@ export const useEQStore = create<EQState>()(
         };
 
         if (preset.graphicBands) {
+          updates.mode = 'graphic';
           updates.graphicBands = [...preset.graphicBands] as GraphicBands;
         }
 
@@ -344,22 +351,35 @@ export const useEQStore = create<EQState>()(
 
         // 同步到原生 DSP
         if (preset.graphicBands) {
-          try { audioDSP.applyPreset(preset.graphicBands); } catch {}
+          try {
+            audioDSP.applyPreset(preset.graphicBands);
+            audioDSP.setMode(0);
+          } catch {}
         }
       },
 
       resetToFlat: () => {
         set({
+          mode: 'graphic',
           graphicBands: [...FLAT_BANDS] as GraphicBands,
           activePresetId: 'flat',
           peqFilters: DEFAULT_PEQ_FILTERS_PRESET.map(f => ({ ...f })),
         });
-        try { audioDSP.reset(); } catch {}
+        try {
+          audioDSP.reset();
+          audioDSP.setMode(0);
+        } catch {}
       },
     }),
     {
       name: 'eqStore',
       storage: createJSONStorage(() => mmkvStorage),
+      onRehydrateStorage: () => state => {
+        // 恢复实际保存的曲线，不能仅恢复预设名称或用新版预设覆盖用户调节。
+        if (state) {
+          syncNativeState(state);
+        }
+      },
     },
   ),
 );

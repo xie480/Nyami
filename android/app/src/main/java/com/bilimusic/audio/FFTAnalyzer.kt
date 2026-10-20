@@ -96,14 +96,14 @@ class FFTAnalyzer(private val fftSize: Int = 1024) {
      * @param pcmBuffer PCM Float32 音频数据
      * @param channels 声道数 (1=mono, 2=stereo)
      */
-    fun analyze(pcmBuffer: FloatArray, channels: Int = 2) {
+    fun analyze(pcmBuffer: FloatArray, channels: Int = 2, sampleCount: Int = pcmBuffer.size) {
         val nowNs = System.nanoTime()
         if (lastAnalysisAtNs != 0L && nowNs - lastAnalysisAtNs < minimumAnalysisIntervalNs) return
         lastAnalysisAtNs = nowNs
 
         // 将多声道混合为单声道，填充 FFT 缓冲区
-        val step = if (channels >= 2) 2 else 1
-        val len = min(pcmBuffer.size / step, fftSize)
+        val step = channels.coerceAtLeast(1)
+        val len = min(sampleCount.coerceIn(0, pcmBuffer.size) / step, fftSize)
 
         for (i in 0 until len) {
             real[i] = pcmBuffer[i * step] * window[i]
