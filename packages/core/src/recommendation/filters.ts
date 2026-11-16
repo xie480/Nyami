@@ -6,6 +6,7 @@ import type {
 /** 统一推荐标题比较键，去除大小写和常见空白。 */
 export function normalizeRecommendationTitleKey(title: string): string {
   return title
+    .normalize('NFKC')
     .replace(/<[^>]*>/g, '')
     .replace(/[\s\u3000]+/g, '')
     .toLocaleLowerCase();
@@ -13,7 +14,10 @@ export function normalizeRecommendationTitleKey(title: string): string {
 
 /** 统一推荐 tag 比较键。 */
 export function normalizeRecommendationTagKey(tag: string): string {
-  return tag.trim().replace(/[\s\u3000]+/g, '').toLocaleLowerCase();
+  return tag
+    .trim()
+    .replace(/[\s\u3000]+/g, '')
+    .toLocaleLowerCase();
 }
 
 export type RecommendationFilterOptions = {
@@ -34,7 +38,10 @@ export function filterRecommendedVideos(
 ): TagRecommendation[] {
   const excludedIds = new Set(options.excludedVideoIds ?? []);
   const excludedTitles = new Set(
-    Array.from(options.excludedVideoTitles ?? [], normalizeRecommendationTitleKey),
+    Array.from(
+      options.excludedVideoTitles ?? [],
+      normalizeRecommendationTitleKey,
+    ),
   );
   const blacklist = Array.from(
     options.tagBlacklist ?? [],

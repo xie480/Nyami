@@ -11,6 +11,9 @@ import {
   upsertVideoTagCacheBatch,
 } from '../db/operations';
 import {biliApi} from './biliApi';
+import {
+  normalizeRecommendationTitleKey as normalizeSharedRecommendationTitleKey,
+} from '../../packages/core/src/recommendation/filters';
 import LoggerService from './LoggerService';
 import {trimSearchVideo, trimVideoTags} from './transformers';
 import {useAuthStore} from '../store/authStore';
@@ -117,7 +120,7 @@ function normalizedTagKey(tagName: string): string {
 }
 
 export function normalizeRecommendationTitleKey(title: string): string {
-  return title.normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
+  return normalizeSharedRecommendationTitleKey(title);
 }
 
 function decodeTags(entry: VideoTagCacheEntry | undefined): VideoTag[] {
