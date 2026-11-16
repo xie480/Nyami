@@ -32,6 +32,10 @@ export class QrLoginController {
 
   private session: QrSession | null = null;
 
+  /**
+   * 创建二维码登录控制器并绑定当前桌面窗口。
+   * @param window 用于发送脱敏认证事件的桌面窗口
+   */
   constructor(private readonly window: BrowserWindow) {
     this.trustedLoginView = new TrustedLoginViewController(
       window,

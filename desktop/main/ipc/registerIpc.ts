@@ -8,6 +8,11 @@ import {QrLoginController} from '../auth/qrLoginController';
 /**
  * 注册阶段 0 的类型化 IPC 命令。
  * Renderer 只能调用白名单方法，不能直接接触 ipcRenderer、Cookie 或 Node API。
+ * @param window 当前桌面窗口
+ * @param qrLogin 二维码登录控制器
+ * @param audioProbe 音频探测器
+ * @param recorder 音频请求脱敏记录器
+ * @returns 清理 IPC handler 和主进程资源的函数
  */
 export function registerIpcHandlers(
   window: BrowserWindow,

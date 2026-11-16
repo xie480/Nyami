@@ -29,6 +29,11 @@ export class TrustedLoginViewController {
     this.resize();
   };
 
+  /**
+   * 创建受控登录视图控制器。
+   * @param window 承载 WebContentsView 的桌面窗口
+   * @param onCookie 捕获到完整登录 Cookie 后的主进程回调
+   */
   constructor(
     private readonly window: BrowserWindow,
     private readonly onCookie: CookieReader,

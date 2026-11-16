@@ -50,6 +50,8 @@ export function isAllowedBiliAudioUrl(value: string): boolean {
 
 /**
  * 删除 URL 查询参数后返回可写入日志的地址，避免泄露签名和 Cookie。
+ * @param value 原始 URL
+ * @returns 只包含 origin 和 pathname 的脱敏 URL
  */
 export function redactUrl(value: string): string {
   try {
