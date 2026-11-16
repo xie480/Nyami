@@ -253,7 +253,7 @@ async function queueLocalFavoriteMutation(
 ): Promise<FavoriteMutation[]> {
   const now = Date.now();
   const queue = readFavoriteMutationQueue();
-  const queued: FavoriteMutation[] = [];
+  const queued: SetFavoriteMutation[] = [];
   for (const folderId of folderIds) {
     const id = `favorite:${uid}:${folderId}:${video.bvid}`;
     const existing = queue.find(

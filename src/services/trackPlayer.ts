@@ -26,12 +26,15 @@ import {useAuthStore} from '../store/authStore';
 import {loadMorePersonalizedSongs} from './homeRecommendationService';
 import {searchVideoToFavoriteVideo} from './transformers';
 import {consumeExpiredSleepTimer} from './sleepTimer';
+import {QueueController} from '../../packages/core/src/player';
 
 let _ready = false;
 
 const MIN_NATIVE_BUFFER = 8;
 const TARGET_NATIVE_BUFFER = 12;
 let queueRevision = 0;
+/** 共享队列控制器负责 revision 和逻辑队列快照，TrackPlayer 仅作为原生执行器。 */
+const queueController = new QueueController<FavoriteVideo>();
 const videoPartsLoadPromises = new Map<string, Promise<void>>();
 const hydratedTrackCache = new Map<string, {tracks: Track[]; expiresAt: number}>();
 const trackHydrationPromises = new Map<string, Promise<Track[]>>();
@@ -228,13 +231,21 @@ function handlePlaybackProgress(
 }
 
 function advanceQueueRevision(): number {
-  queueRevision += 1;
+  queueRevision = queueController.beginOperation();
   clearPendingSkipRequests();
   personalizedPageController?.abort();
   personalizedPageController = null;
   usePlayerStore.getState().setQueueLoading(false);
   playbackErrorAttempts.clear();
   return queueRevision;
+}
+
+/** 将移动端 Store 的逻辑队列同步到共享控制器，不改变当前 revision。 */
+function syncQueueController(
+  queue: FavoriteVideo[],
+  currentBvid?: string | null,
+): void {
+  queueController.syncSnapshot(queue, currentBvid);
 }
 
 function withNativeQueueMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -824,6 +835,7 @@ export async function loadQueue(
     }
 
     usePlayerStore.getState().setCurrentQueue(videos, startBvid);
+    syncQueueController(videos, startBvid);
 
     // 3. 触发后台水合后续轨道 (Slow Path)
     // 依赖 maintainQueueBuffer 自动补齐 TARGET_NATIVE_BUFFER
@@ -1005,6 +1017,7 @@ export async function insertNext(video: FavoriteVideo): Promise<void> {
     video,
   );
   usePlayerStore.setState({queue: logicalQueue, originalQueue});
+  syncQueueController(logicalQueue, currentBvid);
 
   const realTracks = await hydrateVideo(video);
   if (revision !== queueRevision) {
@@ -1036,6 +1049,7 @@ export async function removeFromQueue(bvid: string): Promise<void> {
     cur.originalQueue.length > 0 ? cur.originalQueue : cur.queue
   ).filter(video => video.bvid !== bvid);
   usePlayerStore.setState({queue: filtered, originalQueue});
+  syncQueueController(filtered, cur.currentBvid);
 
   // 工业级方案：禁止在运行时 remove native queue，仅更新 logical queue
   maintainQueueBuffer().catch(() => {});
@@ -1048,6 +1062,7 @@ export async function reorderQueue(
   advanceQueueRevision();
   if (videos.length === 0) {
     usePlayerStore.getState().setQueue([], undefined);
+    syncQueueController([]);
     const audioRevision = beginAudioTransition();
     await withNativeQueueMutation(async () => {
       await fadeOutForTransition(audioRevision);
@@ -1060,6 +1075,7 @@ export async function reorderQueue(
 
   const cur = usePlayerStore.getState();
   cur.setCurrentQueue(videos, startBvid ?? cur.currentBvid ?? undefined);
+  syncQueueController(videos, startBvid ?? cur.currentBvid ?? undefined);
 
   const activeTrack = await TrackPlayer.getActiveTrack();
   const currentBvid = activeTrack?.id as string | undefined;
@@ -1097,6 +1113,7 @@ export async function appendQueue(
     ...videos,
   ];
   usePlayerStore.setState({queue: combined, originalQueue});
+  syncQueueController(combined, cur.currentBvid ?? startBvid);
 
   maintainQueueBuffer().catch(() => {});
 }
