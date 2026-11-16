@@ -1,5 +1,6 @@
 import {
   BILIBILI_AUDIO_HOST_SUFFIXES,
+  BILIBILI_REQUIRED_LOGIN_COOKIE_NAMES,
   BILIBILI_TRUSTED_HOSTS,
 } from '../constants';
 
@@ -67,5 +68,7 @@ export function extractBiliUid(cookie: string): string | null {
  * 判断 Cookie 是否包含最小登录凭证集合。
  */
 export function hasRequiredLoginCookies(cookie: string): boolean {
-  return /(?:^|;\s*)SESSDATA=([^;]+)/.test(cookie);
+  return BILIBILI_REQUIRED_LOGIN_COOKIE_NAMES.every(name =>
+    new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).test(cookie),
+  );
 }

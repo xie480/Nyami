@@ -33,7 +33,7 @@ export class CredentialStore {
   async save(cookie: string, refreshToken: string | null): Promise<void> {
     const normalizedCookie = cookie.trim();
     if (!hasRequiredLoginCookies(normalizedCookie)) {
-      throw new Error('登录 Cookie 缺少 SESSDATA');
+      throw new Error('登录 Cookie 缺少 SESSDATA、DedeUserID 或 bili_jct');
     }
 
     if (!safeStorage.isEncryptionAvailable()) {

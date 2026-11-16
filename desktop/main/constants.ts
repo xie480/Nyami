@@ -36,6 +36,12 @@ export const BILIBILI_LOGIN_COOKIE_NAMES = new Set([
   'sid',
 ]);
 
+export const BILIBILI_REQUIRED_LOGIN_COOKIE_NAMES = [
+  'SESSDATA',
+  'DedeUserID',
+  'bili_jct',
+] as const;
+
 export const BILIBILI_TRUSTED_HOSTS = [
   'bilibili.com',
   'biligame.com',
