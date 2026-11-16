@@ -33,11 +33,7 @@ const mobileHttp: BiliHttpPort = {
     body: string,
     options: BiliHttpRequestOptions = {},
   ): Promise<T> {
-    return biliPost<T>(
-      url,
-      body,
-      options as Parameters<typeof biliPost>[2],
-    );
+    return biliPost<T>(url, body, options as Parameters<typeof biliPost>[2]);
   },
 };
 
