@@ -2,6 +2,7 @@
   "name": "BiliMusic",
   "version": "0.0.1",
   "private": true,
+  "main": "desktop/out/main/index.js",
   "scripts": {
     "android": "set \"PATH=%PATH%;E:\\AndroidSDK\\platform-tools\" && react-native run-android",
     "android:phone": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-android-phone.ps1",
