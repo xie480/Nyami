@@ -11,6 +11,7 @@
     "postinstall": "patch-package",
     "start": "react-native start",
     "test": "jest",
+    "test:core": "jest --config packages/core/jest.config.cjs --runInBand",
     "desktop:dev": "electron-vite dev --config desktop/electron.vite.config.ts",
     "desktop:typecheck": "tsc -p desktop/tsconfig.json --noEmit",
     "desktop:build": "electron-vite build --config desktop/electron.vite.config.ts",
