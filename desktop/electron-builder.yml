@@ -1,0 +1,30 @@
+appId: com.nyami.desktop
+productName: Nyami
+directories:
+  output: ../release/desktop
+  buildResources: ../resource
+files:
+  - out/**
+extraResources:
+  - from: ../resource/silence_10s.wav
+    to: resource/silence_10s.wav
+asar: true
+asarUnpack:
+  - '**/*.node'
+npmRebuild: false
+buildDependenciesFromSource: false
+artifactName: Nyami-${version}-${arch}.${ext}
+electronVersion: 45.3.3
+win:
+  target:
+    - nsis
+    - portable
+  requestedExecutionLevel: asInvoker
+nsis:
+  artifactName: Nyami-${version}-${arch}-setup.${ext}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Nyami
+portable:
+  artifactName: Nyami-${version}-${arch}-portable.${ext}

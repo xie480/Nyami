@@ -65,6 +65,12 @@ yarn-error.log
 # testing
 /coverage
 
+# Windows desktop spike build output
+/desktop/out/
+/desktop/.runtime-check/
+/desktop/.swc-cache/
+/release/desktop/
+
 # Yarn
 .yarn/*
 !.yarn/patches

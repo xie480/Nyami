@@ -1,0 +1,8 @@
+{
+  "name": "nyami-desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Nyami Windows desktop spike",
+  "author": "Nyami",
+  "main": "out/main/index.js"
+}
