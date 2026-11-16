@@ -7,6 +7,8 @@ import {
 /**
  * 校验 B 站受控页面地址。
  * 只允许 HTTPS 和固定主域名，避免 WebContentsView 被导航到任意站点。
+ * @param value 待校验的页面地址
+ * @returns 是否属于可信 B 站 HTTPS 地址
  */
 export function isTrustedBiliUrl(value: string): boolean {
   try {
@@ -27,6 +29,8 @@ export function isTrustedBiliUrl(value: string): boolean {
 /**
  * 校验音频探测和请求头注入目标。
  * 音频 CDN 只按固定后缀匹配，防止主进程成为任意 URL 的 SSRF 代理。
+ * @param value 待校验的音频地址
+ * @returns 是否属于允许的 B 站音频 CDN 地址
  */
 export function isAllowedBiliAudioUrl(value: string): boolean {
   try {
@@ -58,6 +62,8 @@ export function redactUrl(value: string): string {
 
 /**
  * 从 Cookie 字符串中提取 B 站 UID，只返回脱敏后的状态字段。
+ * @param cookie 主进程内部的 Cookie 字符串
+ * @returns B 站 UID；未找到时返回 null
  */
 export function extractBiliUid(cookie: string): string | null {
   const match = cookie.match(/(?:^|;\s*)DedeUserID=([0-9]+)/);
@@ -66,6 +72,8 @@ export function extractBiliUid(cookie: string): string | null {
 
 /**
  * 判断 Cookie 是否包含最小登录凭证集合。
+ * @param cookie 主进程内部的 Cookie 字符串
+ * @returns 是否同时包含 SESSDATA、DedeUserID 和 bili_jct
  */
 export function hasRequiredLoginCookies(cookie: string): boolean {
   return BILIBILI_REQUIRED_LOGIN_COOKIE_NAMES.every(name =>

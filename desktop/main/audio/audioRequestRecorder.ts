@@ -93,6 +93,9 @@ export class AudioRequestRecorder {
 
   /**
    * 读取大小写不敏感的 HTTP Header。
+   * @param headers HTTP 头集合
+   * @param name 待读取的头名称
+   * @returns 头值；不存在时返回 null
    */
   private readHeader(
     headers: Record<string, string | string[] | undefined>,
@@ -110,6 +113,7 @@ export class AudioRequestRecorder {
 
   /**
    * 限制内存中请求摘要数量。
+   * 不返回值；只保留最近的固定数量记录。
    */
   private trim(): void {
     if (this.records.length > AUDIO_REQUEST_LOG_LIMIT) {

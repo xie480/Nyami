@@ -6,6 +6,7 @@ const LOCAL_AUDIO_SCHEME = 'nyami-local';
 
 /**
  * 在 app ready 前注册安全的本地音频协议权限。
+ * 不接收参数，不返回值。
  */
 export function registerLocalAudioScheme(): void {
   protocol.registerSchemesAsPrivileged([
@@ -24,6 +25,7 @@ export function registerLocalAudioScheme(): void {
 /**
  * 注册阶段 0 的离线样例音频处理器。
  * 只暴露仓库内固定的 silence_10s.wav，不接受任意文件路径。
+ * 不接收参数，不返回值。
  */
 export function registerLocalAudioHandler(): void {
   protocol.handle(LOCAL_AUDIO_SCHEME, request => {
