@@ -40,6 +40,16 @@ button:disabled {
   padding: 32px 0 24px;
 }
 
+.error-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+}
+
+.error-card {
+  width: min(520px, 100%);
+}
+
 .topbar,
 .card-heading,
 .button-row,
