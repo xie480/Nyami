@@ -6,7 +6,9 @@ import {
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {AudioProbe} from '../audio/audioProbe';
+import {BiliAudioResolver} from '../audio/biliAudioResolver';
 import {AudioRequestRecorder} from '../audio/audioRequestRecorder';
+import {registerAudioCacheHandler} from '../audio/localAudioProtocol';
 import {registerAudioInterception} from '../audio/registerAudioInterception';
 import {QrLoginController} from '../auth/qrLoginController';
 import {CredentialStore} from '../auth/credentialStore';
@@ -14,6 +16,7 @@ import {BiliContentRuntime} from '../content/biliContentRuntime';
 import {AppLogger} from '../logging/appLogger';
 import {registerIpcHandlers} from '../ipc/registerIpc';
 import {CacheManager} from '../runtime/cacheManager';
+import {AudioCacheStore} from '../runtime/audioCacheStore';
 import {PlaybackRuntime} from '../runtime/playbackRuntime';
 import {SyncRuntime} from '../runtime/syncRuntime';
 import type {AppDirectories} from '../storage/appDirectories';
@@ -77,8 +80,21 @@ export function createMainWindow(
     dependencies.logger,
   );
   const audioProbe = new AudioProbe();
-  const cacheManager = new CacheManager(dependencies.directories);
-  const playbackRuntime = new PlaybackRuntime();
+  const audioCache = new AudioCacheStore(
+    dependencies.directories,
+    dependencies.logger,
+  );
+  registerAudioCacheHandler(audioCache);
+  const cacheManager = new CacheManager(
+    dependencies.directories,
+    audioCache,
+  );
+  const playbackRuntime = new PlaybackRuntime({
+    resolver: new BiliAudioResolver(credentialStore, dependencies.logger),
+    cache: audioCache,
+    logger: dependencies.logger,
+    statePath: path.join(dependencies.directories.settings, 'playback.json'),
+  });
   const syncRuntime = new SyncRuntime();
   const disposeIpc = registerIpcHandlers(
     window,

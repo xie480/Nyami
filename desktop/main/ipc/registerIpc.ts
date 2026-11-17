@@ -11,7 +11,14 @@ import {
   type DiscoverContentRequest,
   type FavoriteFolderContentRequest,
   type FavoriteVideoContentRequest,
+  type PlaybackAudioEvent,
+  type PlaybackModeRequest,
+  type PlaybackQueueItemRequest,
+  type PlaybackQueueRequest,
+  type PlaybackRemoveRequest,
+  type PlaybackReorderRequest,
   type PlaybackSeekRequest,
+  type PlaybackSleepTimerRequest,
   type PlaybackVolumeRequest,
   type RendererErrorReport,
   type SearchContentRequest,
@@ -84,6 +91,23 @@ export function registerIpcHandlers(
       window.webContents.send(channel, payload);
     }
   };
+  const disposePlaybackEvents = dependencies.playbackRuntime.subscribe(event => {
+    if (event.type === 'state') {
+      send(IPC_CHANNELS.playback.stateChanged, {
+        snapshot: event.snapshot,
+      });
+      return;
+    }
+    if (event.type === 'source') {
+      send(IPC_CHANNELS.playback.sourceChanged, {
+        source: event.source,
+      });
+      return;
+    }
+    send(IPC_CHANNELS.playback.command, {
+      command: event.command,
+    });
+  });
 
   register(IPC_CHANNELS.auth.startQrLogin, () => qrLogin.start());
   register(IPC_CHANNELS.auth.cancelQrLogin, () => {
@@ -109,42 +133,56 @@ export function registerIpcHandlers(
   register(IPC_CHANNELS.playback.getState, () =>
     dependencies.playbackRuntime.getState(),
   );
-  register(IPC_CHANNELS.playback.play, () => {
-    const snapshot = dependencies.playbackRuntime.play();
-    send(IPC_CHANNELS.playback.stateChanged, {snapshot});
-    return snapshot;
+  register(IPC_CHANNELS.playback.loadQueue, async (_event, request) => {
+    assertPlaybackQueueRequest(request);
+    return dependencies.playbackRuntime.loadQueue(request);
   });
-  register(IPC_CHANNELS.playback.pause, () => {
-    const snapshot = dependencies.playbackRuntime.pause();
-    send(IPC_CHANNELS.playback.stateChanged, {snapshot});
-    return snapshot;
+  register(IPC_CHANNELS.playback.addToQueue, async (_event, request) => {
+    assertPlaybackQueueItemRequest(request);
+    return dependencies.playbackRuntime.addToQueue(request);
   });
-  register(IPC_CHANNELS.playback.stop, () => {
-    const snapshot = dependencies.playbackRuntime.stop();
-    send(IPC_CHANNELS.playback.stateChanged, {snapshot});
-    return snapshot;
+  register(IPC_CHANNELS.playback.removeFromQueue, async (_event, request) => {
+    assertPlaybackRemoveRequest(request);
+    return dependencies.playbackRuntime.removeFromQueue(request);
   });
+  register(IPC_CHANNELS.playback.reorderQueue, async (_event, request) => {
+    assertPlaybackReorderRequest(request);
+    return dependencies.playbackRuntime.reorderQueue(request);
+  });
+  register(IPC_CHANNELS.playback.setMode, async (_event, request) => {
+    assertPlaybackModeRequest(request);
+    return dependencies.playbackRuntime.setMode(request);
+  });
+  register(IPC_CHANNELS.playback.setSleepTimer, async (_event, request) => {
+    assertPlaybackSleepTimerRequest(request);
+    return dependencies.playbackRuntime.setSleepTimer(request);
+  });
+  register(IPC_CHANNELS.playback.reportAudioEvent, async (_event, event) => {
+    assertPlaybackAudioEvent(event);
+    return dependencies.playbackRuntime.reportAudioEvent(event);
+  });
+  register(IPC_CHANNELS.playback.play, () =>
+    dependencies.playbackRuntime.play(),
+  );
+  register(IPC_CHANNELS.playback.pause, () =>
+    dependencies.playbackRuntime.pause(),
+  );
+  register(IPC_CHANNELS.playback.stop, () =>
+    dependencies.playbackRuntime.stop(),
+  );
   register(IPC_CHANNELS.playback.seek, (_event, request) => {
     assertPlaybackSeekRequest(request);
-    const snapshot = dependencies.playbackRuntime.seek(request);
-    send(IPC_CHANNELS.playback.stateChanged, {snapshot});
-    return snapshot;
+    return dependencies.playbackRuntime.seek(request);
   });
-  register(IPC_CHANNELS.playback.skipNext, () => {
-    const snapshot = dependencies.playbackRuntime.skipNext();
-    send(IPC_CHANNELS.playback.stateChanged, {snapshot});
-    return snapshot;
-  });
-  register(IPC_CHANNELS.playback.skipPrevious, () => {
-    const snapshot = dependencies.playbackRuntime.skipPrevious();
-    send(IPC_CHANNELS.playback.stateChanged, {snapshot});
-    return snapshot;
-  });
+  register(IPC_CHANNELS.playback.skipNext, () =>
+    dependencies.playbackRuntime.skipNext(),
+  );
+  register(IPC_CHANNELS.playback.skipPrevious, () =>
+    dependencies.playbackRuntime.skipPrevious(),
+  );
   register(IPC_CHANNELS.playback.setVolume, (_event, request) => {
     assertPlaybackVolumeRequest(request);
-    const snapshot = dependencies.playbackRuntime.setVolume(request);
-    send(IPC_CHANNELS.playback.stateChanged, {snapshot});
-    return snapshot;
+    return dependencies.playbackRuntime.setVolume(request);
   });
 
   register(IPC_CHANNELS.sync.getStatus, () =>
@@ -233,6 +271,7 @@ export function registerIpcHandlers(
     for (const channel of channels) {
       ipcMain.removeHandler(channel);
     }
+    disposePlaybackEvents();
     qrLogin.dispose();
   };
 }
@@ -365,6 +404,184 @@ function assertPlaybackSeekRequest(
     value.position > 86400
   ) {
     throw new Error('播放位置必须是 0 到 86400 秒之间的数字');
+  }
+}
+
+/** 校验替换播放队列请求，限制项目数量和文本长度。 */
+function assertPlaybackQueueRequest(
+  value: unknown,
+): asserts value is PlaybackQueueRequest {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    throw new Error('播放队列参数格式无效');
+  }
+  if (value.items.length > 500) {
+    throw new Error('播放队列一次最多包含 500 项');
+  }
+  value.items.forEach(assertPlaybackQueueItem);
+  if (
+    value.startIndex !== undefined &&
+    (!Number.isSafeInteger(value.startIndex) || value.startIndex < 0)
+  ) {
+    throw new Error('播放起始索引无效');
+  }
+  if (value.autoplay !== undefined && typeof value.autoplay !== 'boolean') {
+    throw new Error('播放自动开始参数无效');
+  }
+  if (
+    value.expandParts !== undefined &&
+    typeof value.expandParts !== 'boolean'
+  ) {
+    throw new Error('多 P 展开参数无效');
+  }
+}
+
+/** 校验追加单项队列请求。 */
+function assertPlaybackQueueItemRequest(
+  value: unknown,
+): asserts value is PlaybackQueueItemRequest {
+  if (!isRecord(value)) {
+    throw new Error('播放队列项目参数格式无效');
+  }
+  assertPlaybackQueueItem(value.item);
+  if (value.autoplay !== undefined && typeof value.autoplay !== 'boolean') {
+    throw new Error('播放自动开始参数无效');
+  }
+}
+
+/** 校验单个播放队列项目。 */
+function assertPlaybackQueueItem(value: unknown): void {
+  if (!isRecord(value)) {
+    throw new Error('播放队列项目格式无效');
+  }
+  for (const key of ['id', 'bvid', 'title', 'artist']) {
+    if (!isBoundedString(value[key], 512)) {
+      throw new Error('播放队列文本字段无效');
+    }
+  }
+  if (typeof value.artwork !== 'string') {
+    throw new Error('播放封面地址无效');
+  }
+  if (
+    value.duration !== undefined &&
+    (typeof value.duration !== 'number' ||
+      !Number.isFinite(value.duration) ||
+      value.duration < 0 ||
+      value.duration > 86400)
+  ) {
+    throw new Error('播放时长无效');
+  }
+  for (const key of ['cid', 'page']) {
+    if (
+      value[key] !== undefined &&
+      (!Number.isSafeInteger(value[key]) || value[key] < 1)
+    ) {
+      throw new Error('播放分 P 参数无效');
+    }
+  }
+  if (
+    value.source !== undefined &&
+    !['search', 'popular', 'favorite'].includes(String(value.source))
+  ) {
+    throw new Error('播放来源无效');
+  }
+}
+
+/** 校验删除队列项目请求。 */
+function assertPlaybackRemoveRequest(
+  value: unknown,
+): asserts value is PlaybackRemoveRequest {
+  if (!isRecord(value) || !isBoundedString(value.trackId, 512)) {
+    throw new Error('待删除播放项目无效');
+  }
+}
+
+/** 校验队列重排请求。 */
+function assertPlaybackReorderRequest(
+  value: unknown,
+): asserts value is PlaybackReorderRequest {
+  if (!isRecord(value) || !Array.isArray(value.trackIds)) {
+    throw new Error('播放队列排序参数无效');
+  }
+  if (value.trackIds.length > 500 || value.trackIds.some(id => !isBoundedString(id, 512))) {
+    throw new Error('播放队列排序项目无效');
+  }
+}
+
+/** 校验播放模式切换请求。 */
+function assertPlaybackModeRequest(
+  value: unknown,
+): asserts value is PlaybackModeRequest {
+  if (
+    !isRecord(value) ||
+    !['sequential', 'shuffle'].includes(String(value.mode))
+  ) {
+    throw new Error('播放模式无效');
+  }
+}
+
+/** 校验睡眠定时器请求，最多允许 24 小时。 */
+function assertPlaybackSleepTimerRequest(
+  value: unknown,
+): asserts value is PlaybackSleepTimerRequest {
+  if (!isRecord(value)) {
+    throw new Error('睡眠定时器参数无效');
+  }
+  if (
+    value.seconds !== null &&
+    (!Number.isSafeInteger(value.seconds) ||
+      value.seconds < 1 ||
+      value.seconds > 86400)
+  ) {
+    throw new Error('睡眠定时器必须是 1 到 86400 秒或 null');
+  }
+}
+
+/** 校验 Renderer 音频元素事件，拒绝未知字段以外的危险内容。 */
+function assertPlaybackAudioEvent(
+  value: unknown,
+): asserts value is PlaybackAudioEvent {
+  const allowedTypes = [
+    'loadedmetadata',
+    'canplay',
+    'playing',
+    'pause',
+    'waiting',
+    'stalled',
+    'timeupdate',
+    'ended',
+    'error',
+    'network-online',
+    'network-offline',
+  ];
+  if (!isRecord(value) || !allowedTypes.includes(String(value.type))) {
+    throw new Error('播放器事件类型无效');
+  }
+  if (
+    value.trackId !== undefined &&
+    value.trackId !== null &&
+    !isBoundedString(value.trackId, 512)
+  ) {
+    throw new Error('播放器事件项目无效');
+  }
+  for (const key of ['position', 'duration', 'buffered']) {
+    if (
+      value[key] !== undefined &&
+      (typeof value[key] !== 'number' ||
+        !Number.isFinite(value[key]) ||
+        value[key] < 0 ||
+        value[key] > 86400)
+    ) {
+      throw new Error('播放器进度参数无效');
+    }
+  }
+  if (value.message !== undefined && !isBoundedString(value.message, 1000)) {
+    throw new Error('播放器错误信息无效');
+  }
+  if (
+    value.code !== undefined &&
+    (!Number.isSafeInteger(value.code) || value.code < 0)
+  ) {
+    throw new Error('播放器错误码无效');
   }
 }
 

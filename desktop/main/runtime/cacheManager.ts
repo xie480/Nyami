@@ -2,6 +2,7 @@ import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import type {CacheSummary} from '../../shared/types';
 import type {AppDirectories} from '../storage/appDirectories';
+import type {AudioCacheStore} from './audioCacheStore';
 
 /**
  * 桌面音频和图片缓存目录管理器。
@@ -12,7 +13,10 @@ export class CacheManager {
    * 创建缓存管理器。
    * @param directories 应用数据目录
    */
-  constructor(private readonly directories: AppDirectories) {}
+  constructor(
+    private readonly directories: AppDirectories,
+    private readonly audioCache?: AudioCacheStore,
+  ) {}
 
   /**
    * 扫描缓存目录并返回脱敏摘要。
@@ -37,7 +41,9 @@ export class CacheManager {
    */
   async clear(): Promise<CacheSummary> {
     await Promise.all([
-      this.clearDirectory(this.directories.audioCache),
+      this.audioCache
+        ? this.audioCache.clear()
+        : this.clearDirectory(this.directories.audioCache),
       this.clearDirectory(this.directories.imageCache),
     ]);
     return this.getSummary();

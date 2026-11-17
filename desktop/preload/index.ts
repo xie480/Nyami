@@ -10,7 +10,16 @@ import type {
   FavoriteFolderContentRequest,
   FavoriteVideoContentRequest,
   NyamiDesktopApi,
+  PlaybackAudioEvent,
+  PlaybackCommandEvent,
+  PlaybackModeRequest,
+  PlaybackQueueItemRequest,
+  PlaybackQueueRequest,
+  PlaybackRemoveRequest,
+  PlaybackReorderRequest,
   PlaybackSeekRequest,
+  PlaybackSleepTimerRequest,
+  PlaybackSourceEvent,
   PlaybackStateEvent,
   PlaybackVolumeRequest,
   QrStatusEvent,
@@ -73,6 +82,20 @@ const api: NyamiDesktopApi = {
   },
   playback: {
     getState: () => ipcRenderer.invoke(CHANNELS.playback.getState),
+    loadQueue: (request: PlaybackQueueRequest) =>
+      ipcRenderer.invoke(CHANNELS.playback.loadQueue, request),
+    addToQueue: (request: PlaybackQueueItemRequest) =>
+      ipcRenderer.invoke(CHANNELS.playback.addToQueue, request),
+    removeFromQueue: (request: PlaybackRemoveRequest) =>
+      ipcRenderer.invoke(CHANNELS.playback.removeFromQueue, request),
+    reorderQueue: (request: PlaybackReorderRequest) =>
+      ipcRenderer.invoke(CHANNELS.playback.reorderQueue, request),
+    setMode: (request: PlaybackModeRequest) =>
+      ipcRenderer.invoke(CHANNELS.playback.setMode, request),
+    setSleepTimer: (request: PlaybackSleepTimerRequest) =>
+      ipcRenderer.invoke(CHANNELS.playback.setSleepTimer, request),
+    reportAudioEvent: (event: PlaybackAudioEvent) =>
+      ipcRenderer.invoke(CHANNELS.playback.reportAudioEvent, event),
     play: () => ipcRenderer.invoke(CHANNELS.playback.play),
     pause: () => ipcRenderer.invoke(CHANNELS.playback.pause),
     stop: () => ipcRenderer.invoke(CHANNELS.playback.stop),
@@ -85,6 +108,16 @@ const api: NyamiDesktopApi = {
     onStateChanged: listener =>
       subscribe<PlaybackStateEvent>(
         CHANNELS.playback.stateChanged,
+        listener,
+      ),
+    onSourceChanged: listener =>
+      subscribe<PlaybackSourceEvent>(
+        CHANNELS.playback.sourceChanged,
+        listener,
+      ),
+    onCommand: listener =>
+      subscribe<PlaybackCommandEvent>(
+        CHANNELS.playback.command,
         listener,
       ),
   },
