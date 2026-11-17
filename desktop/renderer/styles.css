@@ -42,12 +42,11 @@ body,
 }
 
 html {
-  overflow-x: auto;
+  overflow: hidden;
 }
 
 body {
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
   background:
     radial-gradient(circle at 85% 0%, rgba(70, 112, 178, 0.22), transparent 32%),
     linear-gradient(140deg, var(--bg), #121a27 58%, var(--bg));
@@ -82,7 +81,9 @@ img {
 
 .desktop-app {
   width: 100%;
+  height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
   border: 1px solid var(--window-border);
   border-radius: 12px;
   background:
@@ -230,15 +231,19 @@ img {
 
 .desktop-frame {
   display: flex;
+  height: calc(100vh - var(--window-titlebar-height) - 2px);
   min-width: 0;
   min-height: calc(100vh - var(--window-titlebar-height) - 2px);
+  overflow: hidden;
 }
 
 .sidebar {
   display: flex;
   flex: 0 0 236px;
   flex-direction: column;
+  height: 100%;
   min-height: calc(100vh - var(--window-titlebar-height) - 2px);
+  overflow: hidden;
   border-right: 1px solid var(--border);
   background: rgba(8, 13, 21, 0.42);
   padding: 28px 16px 18px;
@@ -439,10 +444,12 @@ img {
 
 .workspace {
   display: flex;
+  height: 100%;
   min-width: 0;
   min-height: calc(100vh - var(--window-titlebar-height) - 2px);
   flex: 1;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .workspace-header {
@@ -738,8 +745,33 @@ kbd {
 .page-scroll {
   min-height: 0;
   flex: 1;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 30px 32px 116px;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.page-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.page-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.page-scroll::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--border-strong);
+  background-clip: content-box;
+}
+
+.page-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  background-clip: content-box;
 }
 
 .page-stack {

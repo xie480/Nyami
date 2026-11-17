@@ -71,4 +71,9 @@ export const BILIBILI_AUDIO_HOST_SUFFIXES = [
   '.akamaized.net',
 ] as const;
 
+export const BILIBILI_IMAGE_HOST_SUFFIXES = [
+  '.hdslb.com',
+  '.bilibili.com',
+] as const;
+
 export const AUDIO_REQUEST_LOG_LIMIT = 40;

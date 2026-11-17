@@ -17,6 +17,7 @@ import {
 import {FavoriteSyncTask} from '../../../packages/core/src/favorites/syncTask';
 import type {CredentialStore} from '../auth/credentialStore';
 import type {AppLogger} from '../logging/appLogger';
+import {normalizeBiliAssetUrl} from '../security/urlPolicy';
 import {
   DesktopLibraryRepository,
   type PlaylistCatalogRecord,
@@ -633,7 +634,7 @@ function toDesktopVideo(video: TagRecommendation): DesktopVideo {
     aid: video.aid,
     bvid: video.bvid,
     title: video.title,
-    cover: video.cover,
+    cover: normalizeBiliAssetUrl(video.cover),
     duration: video.duration,
     pubtime: video.pubtime,
     authorId: video.authorId,

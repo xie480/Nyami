@@ -15,7 +15,10 @@ import type {
 import type {PlaybackQueueItem} from '../../shared/types';
 import {CredentialStore} from '../auth/credentialStore';
 import {AppLogger} from '../logging/appLogger';
-import {isAllowedBiliAudioUrl} from '../security/urlPolicy';
+import {
+  isAllowedBiliAudioUrl,
+  normalizeBiliAssetUrl,
+} from '../security/urlPolicy';
 
 type AudioQuality = 'low' | 'medium' | 'high';
 
@@ -144,7 +147,9 @@ export class BiliAudioResolver {
         duration: track.duration || info.duration,
         title: track.title || info.title,
         artist: track.artist || info.owner?.name || '未知 UP 主',
-        artwork: track.artwork || info.pic,
+        artwork:
+          normalizeBiliAssetUrl(track.artwork) ||
+          normalizeBiliAssetUrl(info.pic),
       },
       cid,
       url,
@@ -207,7 +212,7 @@ function toQueueParts(
     page: part.page,
     title: part.part || info.title,
     artist: info.owner?.name || '未知 UP 主',
-    artwork: info.pic,
+    artwork: normalizeBiliAssetUrl(info.pic),
     duration: part.duration,
   }));
 }

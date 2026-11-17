@@ -27,6 +27,7 @@ import {
 } from '../audio/biliAudioResolver';
 import {AppLogger} from '../logging/appLogger';
 import {AudioCacheStore, type AudioCacheRequest} from './audioCacheStore';
+import {normalizeBiliAssetUrl} from '../security/urlPolicy';
 
 const AUDIO_CACHE_QUALITY = 'high';
 const FADE_IN_MS = 180;
@@ -175,7 +176,8 @@ export class PlaybackRuntime {
       if (isAbortError(error) || !this.queueController.isCurrent(revision)) {
         return this.getState();
       }
-      return this.failPlayback(error, 'playback-error', true);
+      const kind = !net.isOnline() ? 'network-offline' : 'playback-error';
+      return this.failPlayback(error, kind, false);
     } finally {
       if (this.operationController === controller) {
         this.operationController = null;
@@ -570,6 +572,12 @@ export class PlaybackRuntime {
         autoplay,
         controller.signal,
       );
+    } catch (error) {
+      if (isAbortError(error) || !this.queueController.isCurrent(revision)) {
+        return this.getState();
+      }
+      const kind = !net.isOnline() ? 'network-offline' : 'playback-error';
+      return this.failPlayback(error, kind, false);
     } finally {
       if (this.operationController === controller) {
         this.operationController = null;
@@ -984,7 +992,7 @@ function normalizeQueueItems(items: PlaybackQueueItem[]): PlaybackQueueItem[] {
       ...(item.page !== undefined ? {page: item.page} : {}),
       title: item.title.trim() || bvid,
       artist: item.artist.trim() || '未知 UP 主',
-      artwork: item.artwork.trim(),
+      artwork: normalizeBiliAssetUrl(item.artwork),
       duration: clampNumber(item.duration, 0, 86400),
       ...(item.source ? {source: item.source} : {}),
     });

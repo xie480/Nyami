@@ -223,6 +223,22 @@ export function App(): JSX.Element {
     }
   }, [pushNotice]);
 
+  /** 关闭网页登录视图并返回登录方式选择弹窗。 */
+  const closeWebLoginAndReturn = useCallback(async (): Promise<void> => {
+    const mode = webViewState.mode;
+    try {
+      await window.nyamiDesktop.auth.closeWebLogin();
+      if (mode === 'login') {
+        setQrImageDataUrl('');
+        setQrExpiresAt(null);
+        setQrStatus('准备登录');
+        setLoginOpen(true);
+      }
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '关闭网页登录失败'));
+    }
+  }, [pushNotice, webViewState.mode]);
+
   /** 请求 Bilibili Cookie 续期。 */
   const renewLogin = useCallback(async (): Promise<void> => {
     setLoginOpen(false);
@@ -271,11 +287,18 @@ export function App(): JSX.Element {
       pushNotice('info', '请先从内容卡片选择一首歌曲');
       return;
     }
-    const next =
-      playback.state === 'playing'
-        ? await window.nyamiDesktop.playback.pause()
-        : await window.nyamiDesktop.playback.play();
-    setPlayback(next);
+    try {
+      const next =
+        playback.state === 'playing'
+          ? await window.nyamiDesktop.playback.pause()
+          : await window.nyamiDesktop.playback.play();
+      setPlayback(next);
+      if (next.error) {
+        pushNotice('error', next.error);
+      }
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '播放失败'));
+    }
   }, [playback.state, playback.trackId, pushNotice]);
 
   /** 从内容卡片创建队列项目并立即播放。 */
@@ -289,7 +312,12 @@ export function App(): JSX.Element {
           expandParts: true,
           context: getRecommendationContext(video),
         })
-        .then(setPlayback)
+        .then(snapshot => {
+          setPlayback(snapshot);
+          if (snapshot.error) {
+            pushNotice('error', snapshot.error);
+          }
+        })
         .catch(error => {
           pushNotice('error', getErrorMessage(error, '音频加载失败'));
         });
@@ -392,7 +420,12 @@ export function App(): JSX.Element {
           expandParts: false,
           context: playback.queueContext,
         })
-        .then(setPlayback)
+        .then(snapshot => {
+          setPlayback(snapshot);
+          if (snapshot.error) {
+            pushNotice('error', snapshot.error);
+          }
+        })
         .catch(error => {
           pushNotice('error', getErrorMessage(error, '切换队列项目失败'));
         });
@@ -752,12 +785,12 @@ export function App(): JSX.Element {
               {webViewState.open ? (
                 <button
                   className="webview-close-button"
-                  onClick={() => {
-                    void window.nyamiDesktop.auth.closeWebLogin();
-                  }}
+                  onClick={() => void closeWebLoginAndReturn()}
                   type="button">
                   <Icon name="x" size={16} />
-                  关闭网页登录
+                  {webViewState.mode === 'login'
+                    ? '返回登录方式'
+                    : '关闭网页登录'}
                 </button>
               ) : null}
               <div className="task-center-wrap">
@@ -2100,8 +2133,8 @@ function VideoCard({
         onClick={onPlay}
         type="button">
         <div className="video-cover-wrap">
-        {item.cover ? <img alt="" className="video-cover" loading="lazy" src={item.cover} /> : <div className="cover-placeholder"><Icon name="play" size={22} /></div>}
-        <span className="duration-chip">{formatDuration(item.duration)}</span>
+          <VideoCoverImage src={item.cover} />
+          <span className="duration-chip">{formatDuration(item.duration)}</span>
         </div>
       </button>
       <div className="video-card-body">
@@ -2121,6 +2154,33 @@ function VideoCard({
         </div>
       </div>
     </article>
+  );
+}
+
+/** 加载视频封面，失败时回退到稳定占位图，避免显示原生破图图标。 */
+function VideoCoverImage({src}: {src: string}): JSX.Element {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (!src || failed) {
+    return (
+      <div aria-label="视频封面暂不可用" className="cover-placeholder">
+        <Icon name="play" size={22} />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      alt=""
+      className="video-cover"
+      loading="lazy"
+      onError={() => setFailed(true)}
+      src={src}
+    />
   );
 }
 
@@ -2337,11 +2397,7 @@ function PlayerPlaceholder({
   return (
     <footer className="player-placeholder">
       <div className="player-track">
-        {playback.artwork ? (
-          <img alt="" className="player-art player-art-image" src={playback.artwork} />
-        ) : (
-          <div className="player-art"><Icon name="play" size={18} /></div>
-        )}
+        <PlayerArtworkImage src={playback.artwork} />
         <div>
           <strong>{playback.trackTitle ?? '尚未选择歌曲'}</strong>
           <span>
@@ -2451,6 +2507,28 @@ function PlayerPlaceholder({
         </div>
       ) : null}
     </footer>
+  );
+}
+
+/** 加载播放器封面，失败时回退到统一占位图。 */
+function PlayerArtworkImage({src}: {src: string | null}): JSX.Element {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (!src || failed) {
+    return <div className="player-art"><Icon name="play" size={18} /></div>;
+  }
+
+  return (
+    <img
+      alt=""
+      className="player-art player-art-image"
+      onError={() => setFailed(true)}
+      src={src}
+    />
   );
 }
 

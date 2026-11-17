@@ -16,6 +16,9 @@ import {
 
 type CookieReader = (cookie: string, refreshToken?: string | null) => Promise<void>;
 
+const LOGIN_VIEW_BOTTOM_GAP = 24;
+const LOGIN_VIEW_TOP = 158;
+
 /**
  * 受控 Bilibili 登录页面适配器。
  * 页面只允许 B 站白名单导航，Cookie 由主进程 Session API 读取后立即交给安全存储。
@@ -184,9 +187,12 @@ export class TrustedLoginViewController {
     const bounds = this.window.getContentBounds();
     this.view.setBounds({
       x: 24,
-      y: 72,
+      y: LOGIN_VIEW_TOP,
       width: Math.max(320, bounds.width - 48),
-      height: Math.max(240, bounds.height - 96),
+      height: Math.max(
+        240,
+        bounds.height - LOGIN_VIEW_TOP - LOGIN_VIEW_BOTTOM_GAP,
+      ),
     });
   }
 

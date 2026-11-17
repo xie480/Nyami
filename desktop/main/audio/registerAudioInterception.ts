@@ -4,14 +4,18 @@ import {
   DESKTOP_USER_AGENT,
 } from '../constants';
 import {AudioRequestRecorder} from './audioRequestRecorder';
-import {isAllowedBiliAudioUrl} from '../security/urlPolicy';
+import {
+  isAllowedBiliAudioUrl,
+  isAllowedBiliImageUrl,
+} from '../security/urlPolicy';
 
-const AUDIO_REQUEST_FILTER = {
+const BILIBILI_MEDIA_REQUEST_FILTER = {
   urls: [
     'https://*.bilivideo.com/*',
     'https://*.mcdn.bilivideo.cn/*',
     'https://*.hdslb.com/*',
     'https://*.akamaized.net/*',
+    'https://*.bilibili.com/*',
   ],
 };
 
@@ -31,11 +35,15 @@ export function registerAudioInterception(
   }
   registeredSessions.add(targetSession);
   targetSession.webRequest.onBeforeSendHeaders(
-    AUDIO_REQUEST_FILTER,
+    BILIBILI_MEDIA_REQUEST_FILTER,
     (details, callback) => {
-      if (isAllowedBiliAudioUrl(details.url)) {
+      const isAudio = isAllowedBiliAudioUrl(details.url);
+      const isImage = isAllowedBiliImageUrl(details.url);
+      if (isAudio || isImage) {
         details.requestHeaders.Referer = BILIBILI_REFERER;
         details.requestHeaders['User-Agent'] = DESKTOP_USER_AGENT;
+      }
+      if (isAudio) {
         recorder.recordRequest(
           String(details.id),
           details.url,
@@ -48,7 +56,7 @@ export function registerAudioInterception(
   );
 
   targetSession.webRequest.onHeadersReceived(
-    AUDIO_REQUEST_FILTER,
+    BILIBILI_MEDIA_REQUEST_FILTER,
     (details, callback) => {
       if (isAllowedBiliAudioUrl(details.url)) {
         recorder.recordResponse(

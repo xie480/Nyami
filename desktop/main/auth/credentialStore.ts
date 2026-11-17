@@ -37,7 +37,7 @@ export class CredentialStore {
       throw new Error('登录 Cookie 缺少 SESSDATA、DedeUserID 或 bili_jct');
     }
 
-    if (!safeStorage.isEncryptionAvailable()) {
+    if (!(await safeStorage.isAsyncEncryptionAvailable())) {
       throw new Error('Windows 安全存储尚未可用');
     }
 
@@ -85,7 +85,7 @@ export class CredentialStore {
    */
   async readInternal(): Promise<StoredCredentials | null> {
     try {
-      if (!safeStorage.isEncryptionAvailable()) {
+      if (!(await safeStorage.isAsyncEncryptionAvailable())) {
         return null;
       }
 

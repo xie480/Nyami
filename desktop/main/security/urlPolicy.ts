@@ -1,5 +1,6 @@
 import {
   BILIBILI_AUDIO_HOST_SUFFIXES,
+  BILIBILI_IMAGE_HOST_SUFFIXES,
   BILIBILI_REQUIRED_LOGIN_COOKIE_NAMES,
   BILIBILI_TRUSTED_HOSTS,
 } from '../constants';
@@ -45,6 +46,52 @@ export function isAllowedBiliAudioUrl(value: string): boolean {
     );
   } catch {
     return false;
+  }
+}
+
+/**
+ * 校验 B 站图片 CDN 地址，供 Renderer 图片请求头注入使用。
+ * @param value 待校验的图片地址
+ * @returns 是否属于允许的 B 站图片 CDN 地址
+ */
+export function isAllowedBiliImageUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:') {
+      return false;
+    }
+
+    const hostname = url.hostname.toLowerCase();
+    return BILIBILI_IMAGE_HOST_SUFFIXES.some(suffix =>
+      hostname.endsWith(suffix),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 规范化 B 站媒体资源地址，兼容 API 返回的协议相对 URL。
+ * @param value 原始资源地址
+ * @returns HTTPS 资源地址；无法解析时返回空字符串
+ */
+export function normalizeBiliAssetUrl(value: string | undefined): string {
+  const trimmed = value?.trim() ?? '';
+  if (!trimmed) {
+    return '';
+  }
+
+  const candidate = trimmed.startsWith('//')
+    ? `https:${trimmed}`
+    : trimmed;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol === 'http:') {
+      url.protocol = 'https:';
+    }
+    return url.protocol === 'https:' ? url.toString() : '';
+  } catch {
+    return '';
   }
 }
 

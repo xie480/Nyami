@@ -28,6 +28,7 @@ import type {
 } from '../../shared/types';
 import {CredentialStore} from '../auth/credentialStore';
 import {AppLogger} from '../logging/appLogger';
+import {normalizeBiliAssetUrl} from '../security/urlPolicy';
 
 /** 桌面端 WBI 密钥缓存，生命周期与主进程一致。 */
 class MemoryKeyValueStore implements KeyValueStore {
@@ -131,7 +132,7 @@ export class BiliContentRuntime {
     return {
       uid: info.uid,
       name: info.name,
-      avatar: info.avatar,
+      avatar: normalizeBiliAssetUrl(info.avatar),
       vipStatus: info.vipStatus,
     };
   }
@@ -299,7 +300,7 @@ function toDesktopVideo(
     aid: video.aid,
     bvid: video.bvid,
     title: video.title,
-    cover: video.cover,
+    cover: normalizeBiliAssetUrl(video.cover),
     duration: video.duration,
     pubtime: video.pubtime,
     authorId: video.authorId,
@@ -315,7 +316,7 @@ function toFavoriteDesktopVideo(video: ReturnType<typeof trimFavoriteVideo>): De
     aid: video.aid,
     bvid: video.bvid,
     title: video.title,
-    cover: video.cover,
+    cover: normalizeBiliAssetUrl(video.cover),
     duration: video.duration,
     pubtime: video.pubtime,
     authorId: video.upper.mid,
