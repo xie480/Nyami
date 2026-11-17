@@ -6,6 +6,7 @@ import type {
   ContentRequestBase,
   DesktopSettings,
   DesktopSettingsPatch,
+  DesktopUpdateInfo,
   DiscoverContentRequest,
   FavoriteFolderContentRequest,
   FavoriteVideoContentRequest,
@@ -169,6 +170,14 @@ const api: NyamiDesktopApi = {
       ipcRenderer.invoke(CHANNELS.logs.export),
     reportRendererError: (report: RendererErrorReport) =>
       ipcRenderer.invoke(CHANNELS.logs.reportRendererError, report),
+  },
+  updates: {
+    getStatus: (): Promise<DesktopUpdateInfo> =>
+      ipcRenderer.invoke(CHANNELS.updates.getStatus),
+    check: (): Promise<DesktopUpdateInfo> =>
+      ipcRenderer.invoke(CHANNELS.updates.check),
+    openDownload: (): Promise<boolean> =>
+      ipcRenderer.invoke(CHANNELS.updates.openDownload),
   },
 };
 

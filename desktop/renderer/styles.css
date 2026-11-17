@@ -1218,6 +1218,24 @@ kbd {
   gap: 18px;
 }
 
+.update-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.update-summary strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.update-summary small {
+  color: var(--muted);
+}
+
 .audio-settings-card {
   gap: 16px;
 }

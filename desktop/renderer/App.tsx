@@ -24,6 +24,7 @@ import type {
   DesktopPage,
   DesktopSettings,
   DesktopTheme,
+  DesktopUpdateInfo,
   DesktopVideo,
   DiscoverContentRequest,
   FavoriteFolderContentRequest,
@@ -118,6 +119,21 @@ const EMPTY_SYNC: SyncSnapshot = {
   error: null,
 };
 
+const EMPTY_UPDATE: DesktopUpdateInfo = {
+  status: 'idle',
+  currentVersion: '1.0.0',
+  latestVersion: null,
+  releaseDate: null,
+  notes: null,
+  downloadUrl: null,
+  portableUrl: null,
+  sha256: null,
+  blockmapUrl: null,
+  source: null,
+  checkedAt: null,
+  error: null,
+};
+
 /** 阶段 3 桌面端应用根组件，负责导航、认证状态和全局任务通知。 */
 export function App(): JSX.Element {
   const [route, setRoute] = useState<Route>('home');
@@ -142,6 +158,7 @@ export function App(): JSX.Element {
   const [searchTrigger, setSearchTrigger] = useState(0);
   const [playback, setPlayback] = useState<PlaybackSnapshot>(EMPTY_PLAYBACK);
   const [sync, setSync] = useState<SyncSnapshot>(EMPTY_SYNC);
+  const [updateInfo, setUpdateInfo] = useState<DesktopUpdateInfo>(EMPTY_UPDATE);
   const [spectrum, setSpectrum] = useState<number[]>([]);
   const [cacheSummary, setCacheSummary] = useState<CacheSummary | null>(null);
   const [cacheProgress, setCacheProgress] = useState<CacheProgressEvent | null>(null);
@@ -416,6 +433,43 @@ export function App(): JSX.Element {
     }
   }, [pushNotice]);
 
+  /** 手动检查发布清单，并把结果转换成设置页提示。 */
+  const checkForUpdates = useCallback(async (): Promise<void> => {
+    try {
+      const result = await window.nyamiDesktop.updates.check();
+      setUpdateInfo(result);
+      if (result.status === 'available' && result.latestVersion) {
+        pushNotice('success', `发现新版本 v${result.latestVersion}`);
+        return;
+      }
+      if (result.status === 'disabled') {
+        pushNotice('info', '尚未配置更新源');
+        return;
+      }
+      if (result.status === 'up-to-date') {
+        pushNotice('success', '当前已是最新版本');
+        return;
+      }
+      if (result.error) {
+        pushNotice('error', result.error);
+      }
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '检查更新失败'));
+    }
+  }, [pushNotice]);
+
+  /** 打开已校验的安装包地址，由用户手动下载和确认升级。 */
+  const openUpdateDownload = useCallback(async (): Promise<void> => {
+    try {
+      const opened = await window.nyamiDesktop.updates.openDownload();
+      if (!opened) {
+        pushNotice('info', '请先检查更新');
+      }
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '打开更新地址失败'));
+    }
+  }, [pushNotice]);
+
   /** 注册全局快捷键，支持 Ctrl+K、Space 和 Ctrl+方向键。 */
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent): void => {
@@ -558,6 +612,7 @@ export function App(): JSX.Element {
       window.nyamiDesktop.playback.getState().then(setPlayback),
       window.nyamiDesktop.sync.getStatus().then(setSync),
       window.nyamiDesktop.cache.getSummary().then(setCacheSummary),
+      window.nyamiDesktop.updates.getStatus().then(setUpdateInfo),
     ]).catch(error => {
       pushNotice('error', getErrorMessage(error, '桌面运行时初始化失败'));
     });
@@ -768,9 +823,12 @@ export function App(): JSX.Element {
                 onLogout={() => void logout()}
                 onRenew={() => void renewLogin()}
                 onRefreshCache={() => void refreshCacheSummary()}
+                onCheckForUpdates={() => void checkForUpdates()}
                 onUpdate={updateSettings}
+                onOpenUpdateDownload={() => void openUpdateDownload()}
                 profile={profile}
                 settings={settings}
+                updateInfo={updateInfo}
               />
             ) : null}
           </main>
@@ -1561,28 +1619,34 @@ function SettingsPage({
   cacheProgress,
   cacheSummary,
   onClearCache,
+  onCheckForUpdates,
   onExportLogs,
   onLogin,
   onLogout,
   onRenew,
   onRefreshCache,
+  onOpenUpdateDownload,
   onUpdate,
   profile,
   settings,
+  updateInfo,
 }: {
   auth: AuthStatus;
   cacheBusy: boolean;
   cacheProgress: CacheProgressEvent | null;
   cacheSummary: CacheSummary | null;
   onClearCache: () => void;
+  onCheckForUpdates: () => void;
   onExportLogs: () => void;
   onLogin: () => void;
   onLogout: () => void;
   onRenew: () => void;
   onRefreshCache: () => void;
+  onOpenUpdateDownload: () => void;
   onUpdate: (patch: Parameters<typeof window.nyamiDesktop.settings.update>[0]) => void;
   profile: UserProfile | null;
   settings: DesktopSettings | null;
+  updateInfo: DesktopUpdateInfo;
 }): JSX.Element {
   return (
     <div className="page-stack settings-page">
@@ -1702,6 +1766,49 @@ function SettingsPage({
             导出脱敏日志
           </button>
           <small>日志会过滤 Cookie、token、二维码密钥和 URL 查询参数。</small>
+        </div>
+      </section>
+      <section className="settings-card">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">RELEASE</p>
+            <h3>版本与更新</h3>
+          </div>
+          <span className="status-chip">v{updateInfo.currentVersion}</span>
+        </div>
+        <div className="update-summary" role="status">
+          <strong>{getUpdateStatusLabel(updateInfo)}</strong>
+          {updateInfo.latestVersion && updateInfo.status === 'available' ? (
+            <span>可升级到 v{updateInfo.latestVersion}</span>
+          ) : null}
+          {updateInfo.error ? <span>{updateInfo.error}</span> : null}
+          {updateInfo.notes && updateInfo.status === 'available' ? (
+            <small>{getReleaseNoteSummary(updateInfo.notes)}</small>
+          ) : null}
+        </div>
+        <div className="settings-actions-row">
+          <button
+            className="secondary-button"
+            disabled={updateInfo.status === 'checking'}
+            onClick={onCheckForUpdates}
+            type="button">
+            <Icon name="refresh" size={16} />
+            {updateInfo.status === 'checking' ? '检查中…' : '检查更新'}
+          </button>
+          {updateInfo.status === 'available' ? (
+            <button
+              className="primary-button"
+              onClick={onOpenUpdateDownload}
+              type="button">
+              <Icon name="download" size={16} />
+              打开下载页
+            </button>
+          ) : null}
+          <small>
+            {updateInfo.source
+              ? '更新源由 NYAMI_UPDATE_URL 配置；下载和安装由用户手动确认。'
+              : '未配置更新源时仍可使用当前版本，发布环境可通过 NYAMI_UPDATE_URL 接入 latest.json。'}
+          </small>
         </div>
       </section>
       <section className="settings-card account-settings-card">
@@ -2341,6 +2448,35 @@ function formatDuration(value: number): string {
 }
 
 /** 将缓存和导出文件大小转成便于设置页阅读的单位。 */
+/** 将更新状态转换为设置页的简短提示。 */
+function getUpdateStatusLabel(info: DesktopUpdateInfo): string {
+  if (info.status === 'available') {
+    return '发现可用更新';
+  }
+  if (info.status === 'checking') {
+    return '正在检查更新';
+  }
+  if (info.status === 'up-to-date') {
+    return '当前已是最新版本';
+  }
+  if (info.status === 'disabled') {
+    return '更新源未配置';
+  }
+  if (info.status === 'error') {
+    return '更新检查失败';
+  }
+  return '尚未检查更新';
+}
+
+/** 将发布说明压缩为设置页可读的一行摘要。 */
+function getReleaseNoteSummary(notes: string): string {
+  return notes
+    .replace(/[#>*`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240);
+}
+
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
     return '0 B';

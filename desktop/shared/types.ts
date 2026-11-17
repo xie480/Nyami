@@ -67,6 +67,11 @@ export const IPC_CHANNELS = {
     export: 'logs:export',
     reportRendererError: 'logs:report-renderer-error',
   },
+  updates: {
+    getStatus: 'updates:get-status',
+    check: 'updates:check',
+    openDownload: 'updates:open-download',
+  },
   probes: {
     inspectAudio: 'probe:inspect-audio',
     getSampleUrl: 'probe:get-sample-url',
@@ -434,6 +439,30 @@ export type LogExportResult = {
   bytes: number;
 };
 
+export type DesktopUpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'up-to-date'
+  | 'available'
+  | 'disabled'
+  | 'error';
+
+/** Renderer 可见的更新检查结果，不包含更新源认证信息。 */
+export type DesktopUpdateInfo = {
+  status: DesktopUpdateStatus;
+  currentVersion: string;
+  latestVersion: string | null;
+  releaseDate: string | null;
+  notes: string | null;
+  downloadUrl: string | null;
+  portableUrl: string | null;
+  sha256: string | null;
+  blockmapUrl: string | null;
+  source: string | null;
+  checkedAt: number | null;
+  error: string | null;
+};
+
 export type RendererErrorReport = {
   message: string;
   stack?: string;
@@ -639,5 +668,10 @@ export type NyamiDesktopApi = {
     clear: () => Promise<void>;
     export: () => Promise<LogExportResult>;
     reportRendererError: (report: RendererErrorReport) => Promise<void>;
+  };
+  updates: {
+    getStatus: () => Promise<DesktopUpdateInfo>;
+    check: () => Promise<DesktopUpdateInfo>;
+    openDownload: () => Promise<boolean>;
   };
 };

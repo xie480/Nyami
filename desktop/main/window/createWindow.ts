@@ -26,6 +26,7 @@ import type {AppDirectories} from '../storage/appDirectories';
 import {DesktopLibraryRepository} from '../storage/desktopLibraryRepository';
 import {SqliteDatabase} from '../storage/sqliteDatabase';
 import {SettingsStore} from '../storage/settingsStore';
+import {UpdateService} from '../updater/updateService';
 import type {
   PlaybackQueueContext,
   PlaybackQueueItem,
@@ -107,6 +108,7 @@ export function createMainWindow(
     libraryRuntime,
     dependencies.logger,
   );
+  const updateService = new UpdateService(dependencies.logger);
   const qrLogin = new QrLoginController(
     window,
     credentialStore,
@@ -175,6 +177,7 @@ export function createMainWindow(
       syncRuntime,
       contentRuntime,
       libraryRuntime,
+      updateService,
     },
   );
   let disposed = false;

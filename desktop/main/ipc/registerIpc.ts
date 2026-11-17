@@ -40,6 +40,7 @@ import {CacheManager} from '../runtime/cacheManager';
 import {PlaybackRuntime} from '../runtime/playbackRuntime';
 import {SyncRuntime} from '../runtime/syncRuntime';
 import {SettingsStore} from '../storage/settingsStore';
+import {UpdateService} from '../updater/updateService';
 
 /**
  * IPC 处理器依赖。
@@ -53,6 +54,7 @@ export type IpcRuntimeDependencies = {
   syncRuntime: SyncRuntime;
   contentRuntime: BiliContentRuntime;
   libraryRuntime: DesktopLibraryRuntime;
+  updateService: UpdateService;
 };
 
 /**
@@ -302,6 +304,16 @@ export function registerIpcHandlers(
       ...report,
     });
   });
+
+  register(IPC_CHANNELS.updates.getStatus, () =>
+    dependencies.updateService.getStatus(),
+  );
+  register(IPC_CHANNELS.updates.check, () =>
+    dependencies.updateService.check(),
+  );
+  register(IPC_CHANNELS.updates.openDownload, () =>
+    dependencies.updateService.openDownload(),
+  );
 
   return (): void => {
     for (const channel of channels) {
