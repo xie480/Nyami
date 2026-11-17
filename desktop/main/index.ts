@@ -22,6 +22,7 @@ const disposeProcessErrorBoundary = installProcessErrorBoundary(logger);
 const hasSingleInstance = app.requestSingleInstanceLock();
 
 let mainWindow: Electron.BrowserWindow | null = null;
+let desktopShell: import('./tray/desktopShell').DesktopShell | null = null;
 let disposeWindow: (() => void) | null = null;
 let shouldFocusWhenReady = false;
 let localAudioHandlerRegistered = false;
@@ -53,9 +54,11 @@ if (!hasSingleInstance) {
   });
 
   app.on('before-quit', () => {
+    desktopShell?.markQuitting();
     disposeWindow?.();
     disposeWindow = null;
     mainWindow = null;
+    desktopShell = null;
     disposeProcessErrorBoundary();
   });
 
@@ -97,6 +100,7 @@ async function bootstrap(): Promise<void> {
     settingsStore,
   });
   mainWindow = runtime.window;
+  desktopShell = runtime.shell;
   disposeWindow = runtime.dispose;
   globalThis.__nyamiMainWindow = runtime.window;
 

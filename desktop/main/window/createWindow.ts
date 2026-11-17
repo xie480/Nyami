@@ -21,6 +21,7 @@ import {CacheManager} from '../runtime/cacheManager';
 import {AudioCacheStore} from '../runtime/audioCacheStore';
 import {PlaybackRuntime} from '../runtime/playbackRuntime';
 import {SyncRuntime} from '../runtime/syncRuntime';
+import {DesktopShell} from '../tray/desktopShell';
 import type {AppDirectories} from '../storage/appDirectories';
 import {DesktopLibraryRepository} from '../storage/desktopLibraryRepository';
 import {SqliteDatabase} from '../storage/sqliteDatabase';
@@ -51,6 +52,7 @@ export function createMainWindow(
   dependencies: MainWindowDependencies,
 ): {
   window: BrowserWindow;
+  shell: DesktopShell;
   dispose: () => void;
 } {
   const settings = dependencies.settingsStore.get();
@@ -153,6 +155,13 @@ export function createMainWindow(
       };
     },
   });
+  const shell = new DesktopShell(
+    window,
+    dependencies.settingsStore,
+    playbackRuntime,
+    syncRuntime,
+    dependencies.logger,
+  );
   const disposeIpc = registerIpcHandlers(
     window,
     qrLogin,
@@ -173,7 +182,13 @@ export function createMainWindow(
   window.once('ready-to-show', () => {
     window.show();
   });
-  window.on('close', () => {
+  window.on('close', event => {
+    if (shell.shouldHideOnClose()) {
+      event.preventDefault();
+      window.hide();
+      dependencies.logger.info('window.minimized-to-tray');
+      return;
+    }
     if (!window.isDestroyed()) {
       void dependencies.settingsStore
         .updateWindowBounds(window.getBounds())
@@ -250,11 +265,13 @@ export function createMainWindow(
     disposeIpc();
     syncRuntime.dispose();
     libraryRepository.close();
+    shell.dispose();
   };
   window.on('closed', dispose);
 
   return {
     window,
+    shell,
     dispose,
   };
 }
