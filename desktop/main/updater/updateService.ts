@@ -125,7 +125,10 @@ export class UpdateService {
    * @returns 是否成功交给系统默认浏览器
    */
   async openDownload(): Promise<boolean> {
-    if (!this.lastResult.downloadUrl) {
+    if (
+      this.lastResult.status !== 'available' ||
+      !this.lastResult.downloadUrl
+    ) {
       return false;
     }
     await shell.openExternal(this.lastResult.downloadUrl);
