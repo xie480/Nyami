@@ -696,10 +696,10 @@ export function App(): JSX.Element {
     return unsubscribe;
   }, []);
 
-  /** 登录新账号后自动启动一次可恢复的增量同步。 */
+  /** 仅在设置开启且账号已有本地索引时自动执行增量同步。 */
   const autoSyncUidRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!auth.loggedIn || !auth.uid) {
+    if (!auth.loggedIn || !auth.uid || !settings?.autoSyncIndex) {
       autoSyncUidRef.current = null;
       return;
     }
@@ -708,12 +708,12 @@ export function App(): JSX.Element {
     }
     autoSyncUidRef.current = auth.uid;
     void window.nyamiDesktop.sync
-      .start({force: false})
+      .start({force: false, automatic: true})
       .then(setSync)
       .catch(error => {
         pushNotice('error', getErrorMessage(error, '收藏同步启动失败'));
       });
-  }, [auth.loggedIn, auth.uid, pushNotice]);
+  }, [auth.loggedIn, auth.uid, pushNotice, settings?.autoSyncIndex]);
 
   /** 登录弹窗打开后自动生成首张二维码。 */
   useEffect(() => {
@@ -1893,6 +1893,25 @@ function SettingsPage({
           <input
             checked={settings?.closeToTray ?? false}
             onChange={event => onUpdate({closeToTray: event.target.checked})}
+            type="checkbox"
+          />
+        </label>
+      </section>
+      <section className="settings-card">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">LIBRARY</p>
+            <h3>收藏索引</h3>
+          </div>
+        </div>
+        <label className="setting-row">
+          <span>
+            <strong>登录后自动同步收藏索引</strong>
+            <small>默认关闭；新账号首次同步必须在任务通知中手动执行。</small>
+          </span>
+          <input
+            checked={settings?.autoSyncIndex ?? false}
+            onChange={event => onUpdate({autoSyncIndex: event.target.checked})}
             type="checkbox"
           />
         </label>

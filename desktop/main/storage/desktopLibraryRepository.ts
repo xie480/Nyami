@@ -426,10 +426,12 @@ export class DesktopLibraryRepository implements FavoriteRepository {
     };
   }
 
-  /** 检查当前 UID 是否已经有本地业务数据，用于启动后的账号隔离。 */
+  /** 检查当前 UID 是否已经成功建立本地索引，用于自动同步门槛。 */
   hasAccountData(uid: string): boolean {
     const row = this.database.get<{count: number}>(
-      `SELECT COUNT(*) AS count FROM account_state WHERE uid = ?`,
+      `SELECT COUNT(*) AS count
+       FROM playlist_meta
+       WHERE uid = ? AND sync_status = 'success'`,
       [normalizeUid(uid)],
     );
     return (row?.count ?? 0) > 0;

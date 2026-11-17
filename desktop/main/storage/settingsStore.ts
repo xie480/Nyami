@@ -13,7 +13,7 @@ import type {
 import type {AppDirectories} from './appDirectories';
 
 const SETTINGS_FILE_NAME = 'desktop.json';
-const SETTINGS_VERSION = 2 as const;
+const SETTINGS_VERSION = 3 as const;
 const MIN_WINDOW_WIDTH = 960;
 const MIN_WINDOW_HEIGHT = 640;
 const MAX_WINDOW_WIDTH = 8192;
@@ -72,6 +72,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   version: SETTINGS_VERSION,
   theme: 'system',
   closeToTray: false,
+  autoSyncIndex: false,
   window: {
     width: 1280,
     height: 820,
@@ -216,6 +217,10 @@ export function normalizeSettings(value: unknown): DesktopSettings {
       typeof record.closeToTray === 'boolean'
         ? record.closeToTray
         : DEFAULT_DESKTOP_SETTINGS.closeToTray,
+    autoSyncIndex:
+      typeof record.autoSyncIndex === 'boolean'
+        ? record.autoSyncIndex
+        : DEFAULT_DESKTOP_SETTINGS.autoSyncIndex,
     window: {
       width: normalizeDimension(
         windowValue.width,

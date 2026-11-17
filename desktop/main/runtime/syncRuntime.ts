@@ -78,7 +78,11 @@ export class SyncRuntime {
     };
     this.controller = new AbortController();
     this.emit();
-    this.runningPromise = this.execute(taskId, request.force === true).finally(() => {
+    this.runningPromise = this.execute(
+      taskId,
+      request.force === true,
+      request.automatic === true,
+    ).finally(() => {
       this.runningPromise = null;
       this.controller = null;
     });
@@ -113,12 +117,25 @@ export class SyncRuntime {
   }
 
   /** 执行真实收藏同步并把阶段性进度映射到桌面快照。 */
-  private async execute(taskId: string, force: boolean): Promise<void> {
+  private async execute(
+    taskId: string,
+    force: boolean,
+    automatic: boolean,
+  ): Promise<void> {
     let status: AuthStatus;
     try {
       status = await this.credentials.getStatus();
       if (!status.loggedIn || !status.uid) {
         throw new Error('请先登录 Bilibili 账号再同步收藏');
+      }
+      if (automatic && !this.library.hasLocalIndex(status.uid)) {
+        this.snapshot = {
+          ...DEFAULT_SYNC_SNAPSHOT,
+          uid: status.uid,
+          message: '首次登录请手动执行收藏同步',
+        };
+        this.emit();
+        return;
       }
       this.snapshot = {
         ...this.snapshot,

@@ -86,6 +86,11 @@ export class DesktopLibraryRuntime {
     return this.repository.getGlobalIndex(uid);
   }
 
+  /** 判断账号是否已经成功建立过本地收藏索引。 */
+  hasLocalIndex(uid: string): boolean {
+    return this.repository.hasAccountData(uid);
+  }
+
   /** 在本地收藏索引中按标题、UP 主或收藏夹名称搜索。 */
   async searchFavorites(
     request: FavoriteSearchContentRequest,

@@ -290,6 +290,7 @@ export function registerIpcHandlers(
     dependencies.logger.info('settings.updated', {
       theme: settings.theme,
       closeToTray: settings.closeToTray,
+      autoSyncIndex: settings.autoSyncIndex,
     });
     return settings;
   });
@@ -754,7 +755,13 @@ function assertSettingsPatch(
   if (!isRecord(value)) {
     throw new Error('设置参数格式无效');
   }
-  const allowedKeys = new Set(['theme', 'closeToTray', 'window', 'audio']);
+  const allowedKeys = new Set([
+    'theme',
+    'closeToTray',
+    'autoSyncIndex',
+    'window',
+    'audio',
+  ]);
   if (Object.keys(value).some(key => !allowedKeys.has(key))) {
     throw new Error('设置包含不支持的字段');
   }
@@ -766,6 +773,9 @@ function assertSettingsPatch(
   }
   if (value.closeToTray !== undefined && typeof value.closeToTray !== 'boolean') {
     throw new Error('closeToTray 必须是布尔值');
+  }
+  if (value.autoSyncIndex !== undefined && typeof value.autoSyncIndex !== 'boolean') {
+    throw new Error('autoSyncIndex 必须是布尔值');
   }
   if (value.window !== undefined) {
     if (!isRecord(value.window)) {

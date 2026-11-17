@@ -363,6 +363,7 @@ export type SyncSnapshot = {
 
 export type SyncStartRequest = {
   force?: boolean;
+  automatic?: boolean;
 };
 
 export type CacheSummary = {
@@ -417,9 +418,10 @@ export type DesktopWindowState = {
 };
 
 export type DesktopSettings = {
-  version: 2;
+  version: 3;
   theme: DesktopTheme;
   closeToTray: boolean;
+  autoSyncIndex: boolean;
   window: WindowSettings;
   audio: DesktopAudioSettings;
 };
@@ -427,6 +429,7 @@ export type DesktopSettings = {
 export type DesktopSettingsPatch = {
   theme?: DesktopTheme;
   closeToTray?: boolean;
+  autoSyncIndex?: boolean;
   window?: Partial<WindowSettings>;
   audio?: Partial<DesktopAudioSettings> & {
     graphicGains?: number[];
