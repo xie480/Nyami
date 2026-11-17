@@ -27,6 +27,12 @@ export interface FavoriteRepository {
     remoteVideoCount: number;
     playlistSyncStatus?: FavoritePlaylistMeta['playlistSyncStatus'];
     needResync?: boolean;
+    kind?: 'owned' | 'collectedFavorite' | 'subscribedSeason';
+    ownerMid?: number;
+    ownerName?: string;
+    cover?: string;
+    description?: string;
+    remoteRevision?: string | null;
   }): Promise<void>;
   createSyncJob(
     playlistId: string,
@@ -59,6 +65,12 @@ export type FavoriteSyncTarget = {
   playlistId: string;
   title: string;
   remoteVideoCount: number;
+  kind?: 'owned' | 'collectedFavorite' | 'subscribedSeason';
+  ownerMid?: number;
+  ownerName?: string;
+  cover?: string;
+  description?: string;
+  remoteRevision?: string | null;
   fetchPage: (
     page: number,
     signal?: AbortSignal,

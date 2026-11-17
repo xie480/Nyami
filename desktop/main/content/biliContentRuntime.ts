@@ -112,6 +112,15 @@ export class BiliContentRuntime {
     });
   }
 
+  /**
+   * 向主进程其它业务运行时提供同一份 API 组合结果。
+   * Renderer 不会获得该引用，因此不会扩大 IPC 暴露面。
+   * @returns 已绑定主进程凭证的共享 BiliApi
+   */
+  getApiForMainProcess(): BiliApi {
+    return this.api;
+  }
+
   /** 读取登录账号的公开资料。 */
   async getProfile(): Promise<UserProfile | null> {
     const status = await this.credentials.getStatus();

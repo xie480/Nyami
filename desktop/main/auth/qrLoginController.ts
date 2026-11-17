@@ -45,6 +45,10 @@ export class QrLoginController {
     private readonly window: BrowserWindow,
     private readonly credentialStore: CredentialStore = new CredentialStore(),
     private readonly onWebViewState?: (event: AuthWebViewState) => void,
+    private readonly onAccountChanged?: (
+      previousUid: string | null,
+      nextUid: string | null,
+    ) => Promise<void> | void,
   ) {
     this.trustedLoginView = new TrustedLoginViewController(
       window,
@@ -106,10 +110,12 @@ export class QrLoginController {
    * 清除登录凭证和二维码会话。
    */
   async logout(): Promise<void> {
+    const previousUid = (await this.credentialStore.getStatus()).uid;
     this.stopSession();
     this.closeWebLogin();
     await this.trustedLoginView.clearSessionCookies();
     await this.credentialStore.clear();
+    await this.onAccountChanged?.(previousUid, null);
     this.emit({
       status: 'idle',
       message: '已退出登录',
@@ -275,6 +281,9 @@ export class QrLoginController {
       (extractUid(cookie) === extractUid(previous.cookie)
         ? previous.refreshToken
         : null);
+    const previousUid = extractUid(previous.cookie);
+    const nextUid = extractUid(cookie);
+    await this.onAccountChanged?.(previousUid, nextUid);
     await this.credentialStore.saveCredentials(cookie, nextRefreshToken);
     this.emit({
       status: 'success',

@@ -23,9 +23,11 @@ import type {
   PlaybackStateEvent,
   PlaybackVolumeRequest,
   QrStatusEvent,
+  RecommendationContentRequest,
   RendererErrorReport,
   SearchContentRequest,
   SyncStateEvent,
+  SyncStartRequest,
 } from '../shared/types';
 import {IPC_CHANNELS as CHANNELS} from '../shared/types';
 
@@ -123,7 +125,8 @@ const api: NyamiDesktopApi = {
   },
   sync: {
     getStatus: () => ipcRenderer.invoke(CHANNELS.sync.getStatus),
-    start: () => ipcRenderer.invoke(CHANNELS.sync.start),
+    start: (request?: SyncStartRequest) =>
+      ipcRenderer.invoke(CHANNELS.sync.start, request),
     cancel: () => ipcRenderer.invoke(CHANNELS.sync.cancel),
     onStateChanged: listener =>
       subscribe<SyncStateEvent>(CHANNELS.sync.stateChanged, listener),
@@ -135,6 +138,8 @@ const api: NyamiDesktopApi = {
       ipcRenderer.invoke(CHANNELS.content.getDiscover, request),
     search: (request: SearchContentRequest) =>
       ipcRenderer.invoke(CHANNELS.content.search, request),
+    getRecommendations: (request: RecommendationContentRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.getRecommendations, request),
     getFavoriteFolders: (request: FavoriteFolderContentRequest) =>
       ipcRenderer.invoke(CHANNELS.content.getFavoriteFolders, request),
     getFavoriteVideos: (request: FavoriteVideoContentRequest) =>

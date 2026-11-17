@@ -1,0 +1,840 @@
+import {randomUUID} from 'node:crypto';
+import type {
+  CollectionRecommendation,
+  FavoriteVideo,
+  TagRecommendation,
+  VideoPart,
+  VideoTag,
+  VideoTagCacheEntry,
+} from '../../../packages/core/src';
+import type {
+  FavoritePlaylistMeta,
+  FavoriteRepository,
+  FavoriteSyncPageResult,
+} from '../../../packages/core/src/favorites/contracts';
+import {normalizeRecommendationTitleKey} from '../../../packages/core/src/recommendation/filters';
+import type {AppLogger} from '../logging/appLogger';
+import {SqliteDatabase, type SqliteValue} from './sqliteDatabase';
+
+type PlaylistMetaInput = {
+  playlistId: string;
+  title: string;
+  remoteVideoCount: number;
+  playlistSyncStatus?: FavoritePlaylistMeta['playlistSyncStatus'];
+  needResync?: boolean;
+  kind?: 'owned' | 'collectedFavorite' | 'subscribedSeason';
+  ownerMid?: number;
+  ownerName?: string;
+  cover?: string;
+  description?: string;
+  remoteRevision?: string | null;
+};
+
+type PlaylistRow = {
+  uid: string;
+  playlist_id: string;
+  title: string;
+  kind: string;
+  remote_video_count: number;
+  local_synced_count: number;
+  sync_cursor: string | null;
+  sync_status: string;
+  need_resync: number;
+  owner_mid: number;
+  owner_name: string;
+  cover: string;
+  description: string;
+  remote_revision: string | null;
+  updated_at: number;
+};
+
+type VideoRow = {
+  uid: string;
+  playlist_id: string;
+  video_id: string;
+  aid: number | null;
+  title: string;
+  author_id: number;
+  author: string;
+  cover: string;
+  duration: number;
+  publish_time: number;
+  fav_time: number;
+  page: number;
+  attr: number;
+  folder_ids_json: string;
+  source_keys_json: string;
+  parts_json: string;
+  random_weight: number;
+  is_cached: number;
+  is_deleted: number;
+  synced_at: number;
+  updated_at: number;
+};
+
+type TagRow = {
+  video_id: string;
+  tags_json: string;
+  fetched_at: number | null;
+  retry_after: number | null;
+};
+
+type PlaylistCatalogRecord = {
+  playlistId: string;
+  title: string;
+  kind: 'owned' | 'collectedFavorite' | 'subscribedSeason';
+  remoteVideoCount: number;
+  ownerMid: number;
+  ownerName: string;
+  cover: string;
+  description: string;
+};
+
+type RecommendationCollectionRecord = CollectionRecommendation & {
+  expiresAt?: number;
+};
+
+const SYNC_STATUS_VALUES = new Set<FavoritePlaylistMeta['playlistSyncStatus']>([
+  'idle',
+  'syncing',
+  'success',
+  'failed',
+  'running',
+]);
+
+/**
+ * 桌面端收藏、全局索引、标签缓存和推荐历史仓储。
+ * 该类实现共享核心的 FavoriteRepository，并把账号 UID 作为每张表的隔离边界。
+ */
+export class DesktopLibraryRepository implements FavoriteRepository {
+  private activeUid: string | null = null;
+
+  /**
+   * 创建仓储并绑定主进程 SQLite 连接。
+   * @param database 已完成迁移的 SQLite 数据库
+   * @param logger 脱敏日志器
+   */
+  constructor(
+    private readonly database: SqliteDatabase,
+    private readonly logger: AppLogger,
+  ) {}
+
+  /** 切换当前账号，并清理数据库中其它账号的业务数据。 */
+  switchAccount(uid: string): void {
+    const normalizedUid = normalizeUid(uid);
+    if (!normalizedUid) {
+      throw new Error('同步账号 UID 无效');
+    }
+    this.database.transaction(() => {
+      const existingUids = this.database.all<{uid: string}>(
+        'SELECT uid FROM account_state WHERE uid <> ?',
+        [normalizedUid],
+      );
+      for (const row of existingUids) {
+        this.deleteAccountRows(row.uid);
+      }
+      this.database.run(
+        `INSERT INTO account_state (uid, updated_at)
+         VALUES (?, ?)
+         ON CONFLICT(uid) DO UPDATE SET updated_at = excluded.updated_at`,
+        [normalizedUid, Date.now()],
+      );
+    });
+    this.activeUid = normalizedUid;
+  }
+
+  /** 清理一个账号的收藏、推荐历史、标签和同步任务。 */
+  clearAccount(uid = this.activeUid): void {
+    const normalizedUid = normalizeUid(uid ?? '');
+    if (!normalizedUid) {
+      return;
+    }
+    this.database.transaction(() => {
+      this.deleteAccountRows(normalizedUid);
+    });
+    if (this.activeUid === normalizedUid) {
+      this.activeUid = null;
+    }
+  }
+
+  /** 清空桌面端所有账号业务数据，供退出登录和损坏恢复使用。 */
+  clearAll(): void {
+    this.database.transaction(() => {
+      this.database.run('DELETE FROM playlist_meta');
+      this.database.run('DELETE FROM video_meta');
+      this.database.run('DELETE FROM sync_job');
+      this.database.run('DELETE FROM video_tag_cache');
+      this.database.run('DELETE FROM recommendation_filter');
+      this.database.run('DELETE FROM account_state');
+    });
+    this.activeUid = null;
+  }
+
+  /** 读取一个收藏来源的断点元数据。 */
+  async getPlaylistMeta(
+    playlistId: string,
+  ): Promise<FavoritePlaylistMeta | null> {
+    const row = this.database.get<PlaylistRow>(
+      `SELECT * FROM playlist_meta WHERE uid = ? AND playlist_id = ?`,
+      [this.requireUid(), playlistId],
+    );
+    if (!row) {
+      return null;
+    }
+    return {
+      playlistId: row.playlist_id,
+      title: row.title,
+      remoteVideoCount: row.remote_video_count,
+      localSyncedCount: row.local_synced_count,
+      syncCursor: row.sync_cursor,
+      playlistSyncStatus: normalizeSyncStatus(row.sync_status),
+      needResync: row.need_resync === 1,
+    };
+  }
+
+  /** 写入收藏来源描述和同步状态，同时保留已有断点与本地计数。 */
+  async upsertPlaylistMeta(data: PlaylistMetaInput): Promise<void> {
+    const uid = this.requireUid();
+    const now = Date.now();
+    this.database.run(
+      `INSERT INTO playlist_meta (
+        uid, playlist_id, title, kind, remote_video_count,
+        local_synced_count, sync_cursor, sync_status, need_resync,
+        owner_mid, owner_name, cover, description, remote_revision, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(uid, playlist_id) DO UPDATE SET
+        title = excluded.title,
+        kind = excluded.kind,
+        remote_video_count = excluded.remote_video_count,
+        sync_status = excluded.sync_status,
+        need_resync = excluded.need_resync,
+        owner_mid = excluded.owner_mid,
+        owner_name = excluded.owner_name,
+        cover = excluded.cover,
+        description = excluded.description,
+        remote_revision = excluded.remote_revision,
+        updated_at = excluded.updated_at`,
+      [
+        uid,
+        data.playlistId,
+        data.title.trim(),
+        data.kind ?? inferPlaylistKind(data.playlistId),
+        Math.max(0, Math.floor(data.remoteVideoCount)),
+        normalizeSyncStatus(data.playlistSyncStatus ?? 'idle'),
+        data.needResync === true ? 1 : 0,
+        data.ownerMid ?? 0,
+        data.ownerName ?? '',
+        data.cover ?? '',
+        data.description ?? '',
+        data.remoteRevision ?? null,
+        now,
+      ],
+    );
+  }
+
+  /** 创建一个可追踪的同步任务记录。 */
+  async createSyncJob(
+    playlistId: string,
+    snapshotRevision: string | null,
+  ): Promise<string> {
+    const jobId = `sync-job-${randomUUID()}`;
+    const now = Date.now();
+    this.database.run(
+      `INSERT INTO sync_job (
+        job_id, uid, playlist_id, status, cursor_start,
+        cursor_end, snapshot_revision, synced_count, started_at
+      ) VALUES (?, ?, ?, 'running', NULL, NULL, ?, 0, ?)`,
+      [jobId, this.requireUid(), playlistId, snapshotRevision, now],
+    );
+    return jobId;
+  }
+
+  /** 在一个事务内写入一页视频、更新游标和本地计数。 */
+  async syncPlaylistVideosPage(
+    playlistId: string,
+    videos: FavoriteVideo[],
+    options: {
+      force: boolean;
+      cursor: string;
+      previousSyncedCount: number;
+      fullScanCount?: number;
+    },
+  ): Promise<FavoriteSyncPageResult> {
+    const uid = this.requireUid();
+    const uniqueVideos = Array.from(
+      new Map(
+        videos
+          .filter(video => Boolean(video.bvid.trim()))
+          .map(video => [video.bvid.trim(), video]),
+      ).values(),
+    );
+    const existingRows = this.findVideoRows(uid, playlistId, uniqueVideos.map(video => video.bvid));
+    const existingBvids = new Set(
+      existingRows
+        .filter(row => row.is_deleted === 0)
+        .map(row => row.video_id),
+    );
+    const videosToUpsert = options.force
+      ? uniqueVideos
+      : uniqueVideos.filter(video => !existingBvids.has(video.bvid));
+    const syncedCount =
+      options.fullScanCount ??
+      options.previousSyncedCount + videosToUpsert.length;
+    const now = Date.now();
+
+    this.database.transaction(() => {
+      for (const video of videosToUpsert) {
+        this.upsertVideo(uid, playlistId, video, now);
+      }
+      this.database.run(
+        `UPDATE playlist_meta
+         SET sync_cursor = ?, local_synced_count = ?, updated_at = ?
+         WHERE uid = ? AND playlist_id = ?`,
+        [options.cursor, syncedCount, now, uid, playlistId],
+      );
+      this.database.run(
+        `UPDATE sync_job
+         SET cursor_end = ?, synced_count = ?
+         WHERE uid = ? AND playlist_id = ? AND status = 'running'`,
+        [options.cursor, syncedCount, uid, playlistId],
+      );
+    });
+
+    return {
+      existingBvids,
+      videosToUpsert,
+      syncedCount,
+    };
+  }
+
+  /** 更新同步任务状态，并保留有限长度的错误摘要。 */
+  async finishSyncJob(
+    jobId: string,
+    status: 'success' | 'failed' | 'cancelled',
+    failedReason?: string,
+  ): Promise<void> {
+    this.database.run(
+      `UPDATE sync_job
+       SET status = ?, failed_reason = ?, finished_at = ?
+       WHERE job_id = ? AND uid = ?`,
+      [
+        status,
+        failedReason ? failedReason.slice(0, 500) : null,
+        Date.now(),
+        jobId,
+        this.requireUid(),
+      ],
+    );
+  }
+
+  /** 标记来源完成，清除断点使下次相同远端计数可以跳过。 */
+  async markPlaylistSyncSuccess(playlistId: string): Promise<void> {
+    const uid = this.requireUid();
+    this.database.run(
+      `UPDATE playlist_meta
+       SET sync_status = 'success', sync_cursor = NULL,
+           need_resync = 0, updated_at = ?
+       WHERE uid = ? AND playlist_id = ?`,
+      [Date.now(), uid, playlistId],
+    );
+    this.database.run(
+      `UPDATE sync_job
+       SET synced_count = COALESCE(
+         (SELECT local_synced_count FROM playlist_meta
+          WHERE uid = ? AND playlist_id = ?),
+         synced_count
+       )
+       WHERE uid = ? AND playlist_id = ? AND status = 'running'`,
+      [uid, playlistId, uid, playlistId],
+    );
+  }
+
+  /** 全量扫描完成后软删除远端已经不存在的视频关系。 */
+  async softDeleteMissingVideos(
+    playlistId: string,
+    remoteVideoIds: string[],
+  ): Promise<void> {
+    const uid = this.requireUid();
+    const ids = Array.from(new Set(remoteVideoIds.filter(Boolean)));
+    if (ids.length === 0) {
+      this.database.run(
+        `UPDATE video_meta SET is_deleted = 1, updated_at = ?
+         WHERE uid = ? AND playlist_id = ?`,
+        [Date.now(), uid, playlistId],
+      );
+      return;
+    }
+    const placeholders = ids.map(() => '?').join(', ');
+    this.database.run(
+      `UPDATE video_meta SET is_deleted = 1, updated_at = ?
+       WHERE uid = ? AND playlist_id = ? AND video_id NOT IN (${placeholders})`,
+      [Date.now(), uid, playlistId, ...ids],
+    );
+  }
+
+  /** 读取当前账号所有有效收藏关系并合并为去重全局索引。 */
+  async getGlobalIndex(uid = this.requireUid()): Promise<FavoriteVideo[]> {
+    const normalizedUid = normalizeUid(uid);
+    if (!normalizedUid) {
+      return [];
+    }
+    const rows = this.database.all<VideoRow & {kind: string}>(
+      `SELECT video_meta.*, playlist_meta.kind
+       FROM video_meta
+       INNER JOIN playlist_meta
+         ON playlist_meta.uid = video_meta.uid
+        AND playlist_meta.playlist_id = video_meta.playlist_id
+       WHERE video_meta.uid = ? AND video_meta.is_deleted = 0
+       ORDER BY video_meta.fav_time DESC, video_meta.updated_at DESC`,
+      [normalizedUid],
+    );
+    const merged = new Map<string, FavoriteVideo>();
+    for (const row of rows) {
+      const current = rowToFavoriteVideo(row);
+      const previous = merged.get(current.bvid);
+      if (!previous) {
+        merged.set(current.bvid, current);
+        continue;
+      }
+      previous.folderIds = Array.from(
+        new Set([...(previous.folderIds ?? []), ...(current.folderIds ?? [])]),
+      );
+      previous.sourceKeys = Array.from(
+        new Set([...(previous.sourceKeys ?? []), ...(current.sourceKeys ?? [])]),
+      );
+      previous.favTime = Math.max(previous.favTime, current.favTime);
+      if (!previous.parts?.length && current.parts?.length) {
+        previous.parts = current.parts;
+      }
+    }
+    return Array.from(merged.values());
+  }
+
+  /** 读取同步后的来源目录，供合集推荐和同步诊断使用。 */
+  getPlaylistCatalog(uid = this.requireUid()): PlaylistCatalogRecord[] {
+    const rows = this.database.all<PlaylistRow>(
+      `SELECT * FROM playlist_meta WHERE uid = ? ORDER BY updated_at DESC, title COLLATE NOCASE`,
+      [uid],
+    );
+    return rows.map(row => ({
+      playlistId: row.playlist_id,
+      title: row.title,
+      kind: normalizePlaylistKind(row.kind),
+      remoteVideoCount: row.remote_video_count,
+      ownerMid: row.owner_mid,
+      ownerName: row.owner_name,
+      cover: row.cover,
+      description: row.description,
+    }));
+  }
+
+  /** 读取标签缓存，并把不存在的 BVID 返回为 null。 */
+  getVideoTagCache(
+    uid: string,
+    videoIds: readonly string[],
+  ): Map<string, VideoTagCacheEntry | null> {
+    const normalizedUid = normalizeUid(uid);
+    const result = new Map<string, VideoTagCacheEntry | null>();
+    const ids = Array.from(new Set(videoIds.filter(Boolean)));
+    for (const videoId of ids) {
+      result.set(videoId, null);
+    }
+    if (!normalizedUid || ids.length === 0) {
+      return result;
+    }
+    const placeholders = ids.map(() => '?').join(', ');
+    const rows = this.database.all<TagRow>(
+      `SELECT video_id, tags_json, fetched_at, retry_after
+       FROM video_tag_cache
+       WHERE uid = ? AND video_id IN (${placeholders})`,
+      [normalizedUid, ...ids],
+    );
+    for (const row of rows) {
+      result.set(row.video_id, {
+        videoId: row.video_id,
+        tags: parseJsonArray<VideoTag>(row.tags_json),
+        fetchedAt: row.fetched_at,
+        retryAfter: row.retry_after,
+      });
+    }
+    return result;
+  }
+
+  /** 批量写入视频标签成功结果或下一次重试时间。 */
+  upsertVideoTagCache(
+    uid: string,
+    entries: readonly VideoTagCacheEntry[],
+  ): void {
+    const normalizedUid = normalizeUid(uid);
+    if (!normalizedUid || entries.length === 0) {
+      return;
+    }
+    this.database.transaction(() => {
+      for (const entry of entries) {
+        this.database.run(
+          `INSERT INTO video_tag_cache (
+            uid, video_id, tags_json, fetched_at, retry_after
+          ) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(uid, video_id) DO UPDATE SET
+            tags_json = excluded.tags_json,
+            fetched_at = excluded.fetched_at,
+            retry_after = excluded.retry_after`,
+          [
+            normalizedUid,
+            entry.videoId,
+            JSON.stringify(entry.tags),
+            entry.fetchedAt,
+            entry.retryAfter,
+          ],
+        );
+      }
+    });
+  }
+
+  /** 按 UID 清理过期推荐历史，避免推荐过滤表无限增长。 */
+  cleanupExpiredRecommendationHistory(
+    uid: string,
+    now = Date.now(),
+  ): void {
+    this.database.run(
+      `DELETE FROM recommendation_filter WHERE uid = ? AND expires_at <= ?`,
+      [normalizeUid(uid), now],
+    );
+  }
+
+  /** 过滤七日内已展示的视频，并在同一事务中写入本轮历史。 */
+  filterAndRecordVideos(
+    uid: string,
+    candidates: readonly TagRecommendation[],
+    limit: number,
+    ttlMs: number,
+  ): TagRecommendation[] {
+    return this.filterAndRecord(
+      uid,
+      candidates.map(candidate => ({
+        itemType: 'video',
+        itemId: candidate.bvid,
+        titleKey: normalizeRecommendationTitleKey(candidate.title),
+        candidate,
+      })),
+      limit,
+      ttlMs,
+    ).map(item => item.candidate);
+  }
+
+  /** 过滤七日内已展示的合集，并在同一事务中写入本轮历史。 */
+  filterAndRecordCollections(
+    uid: string,
+    candidates: readonly RecommendationCollectionRecord[],
+    limit: number,
+    ttlMs: number,
+  ): RecommendationCollectionRecord[] {
+    return this.filterAndRecord(
+      uid,
+      candidates.map(candidate => ({
+        itemType: 'collection',
+        itemId: candidate.sourceKey,
+        titleKey: null,
+        candidate,
+      })),
+      limit,
+      ttlMs,
+    ).map(item => item.candidate);
+  }
+
+  /** 检查当前 UID 是否已经有本地业务数据，用于启动后的账号隔离。 */
+  hasAccountData(uid: string): boolean {
+    const row = this.database.get<{count: number}>(
+      `SELECT COUNT(*) AS count FROM account_state WHERE uid = ?`,
+      [normalizeUid(uid)],
+    );
+    return (row?.count ?? 0) > 0;
+  }
+
+  /** 关闭仓储使用的数据库连接。 */
+  close(): void {
+    this.database.close();
+  }
+
+  /** 在数据库事务内删除账号所有业务表数据。 */
+  private deleteAccountRows(uid: string): void {
+    const tables = [
+      'playlist_meta',
+      'video_meta',
+      'sync_job',
+      'video_tag_cache',
+      'recommendation_filter',
+      'account_state',
+    ];
+    for (const table of tables) {
+      this.database.run(`DELETE FROM ${table} WHERE uid = ?`, [uid]);
+    }
+  }
+
+  /** 写入单个视频关系，保留下载缓存标志和稳定随机权重。 */
+  private upsertVideo(
+    uid: string,
+    playlistId: string,
+    video: FavoriteVideo,
+    now: number,
+  ): void {
+    const kind = inferPlaylistKind(playlistId);
+    const folderIds = video.folderIds ?? ownedFolderIds(playlistId);
+    const sourceKeys =
+      video.sourceKeys ?? (kind === 'owned' ? [] : [playlistId]);
+    const parts = video.parts ?? [];
+    this.database.run(
+      `INSERT INTO video_meta (
+        uid, playlist_id, video_id, aid, title, author_id, author, cover,
+        duration, publish_time, fav_time, page, attr, folder_ids_json,
+        source_keys_json, parts_json, random_weight, is_cached, is_deleted,
+        synced_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+      ON CONFLICT(uid, playlist_id, video_id) DO UPDATE SET
+        aid = excluded.aid,
+        title = excluded.title,
+        author_id = excluded.author_id,
+        author = excluded.author,
+        cover = excluded.cover,
+        duration = excluded.duration,
+        publish_time = excluded.publish_time,
+        fav_time = excluded.fav_time,
+        page = excluded.page,
+        attr = excluded.attr,
+        folder_ids_json = excluded.folder_ids_json,
+        source_keys_json = excluded.source_keys_json,
+        parts_json = excluded.parts_json,
+        is_deleted = 0,
+        synced_at = excluded.synced_at,
+        updated_at = excluded.updated_at`,
+      [
+        uid,
+        playlistId,
+        video.bvid,
+        video.aid ?? null,
+        video.title,
+        video.upper.mid,
+        video.upper.name,
+        video.cover,
+        video.duration,
+        video.pubtime,
+        video.favTime,
+        video.page,
+        video.attr,
+        JSON.stringify(folderIds),
+        JSON.stringify(sourceKeys),
+        JSON.stringify(parts),
+        Math.random(),
+        now,
+        now,
+      ],
+    );
+  }
+
+  /** 查询指定关系中的已存在记录，避免为每页视频逐条查询数据库。 */
+  private findVideoRows(
+    uid: string,
+    playlistId: string,
+    videoIds: readonly string[],
+  ): VideoRow[] {
+    if (videoIds.length === 0) {
+      return [];
+    }
+    const placeholders = videoIds.map(() => '?').join(', ');
+    return this.database.all<VideoRow>(
+      `SELECT * FROM video_meta
+       WHERE uid = ? AND playlist_id = ? AND video_id IN (${placeholders})`,
+      [uid, playlistId, ...videoIds],
+    );
+  }
+
+  /** 在一个事务内应用推荐历史过滤和写入。 */
+  private filterAndRecord<T>(
+    uid: string,
+    candidates: ReadonlyArray<{
+      itemType: 'video' | 'collection';
+      itemId: string;
+      titleKey: string | null;
+      candidate: T;
+    }>,
+    limit: number,
+    ttlMs: number,
+  ): Array<{candidate: T}> {
+    const normalizedUid = normalizeUid(uid);
+    const now = Date.now();
+    const expiresAt = now + Math.max(0, ttlMs);
+    const maxItems = Math.max(0, Math.floor(limit));
+    if (!normalizedUid || maxItems === 0) {
+      return [];
+    }
+    return this.database.transaction(() => {
+      this.cleanupExpiredRecommendationHistory(normalizedUid, now);
+      const existing = this.database.all<{
+        item_type: string;
+        item_id: string;
+        title_key: string | null;
+      }>(
+        `SELECT item_type, item_id, title_key
+         FROM recommendation_filter WHERE uid = ? AND expires_at > ?`,
+        [normalizedUid, now],
+      );
+      const ids = new Set(
+        existing.map(item => `${item.item_type}:${item.item_id}`),
+      );
+      const titles = new Set(
+        existing
+          .map(item => item.title_key)
+          .filter((title): title is string => Boolean(title)),
+      );
+      const selected: Array<{candidate: T}> = [];
+      const writes: Array<{
+        itemType: string;
+        itemId: string;
+        titleKey: string | null;
+      }> = [];
+      for (const item of candidates) {
+        const itemId = item.itemId.trim();
+        const titleKey = item.titleKey?.trim() || null;
+        if (!itemId || ids.has(`${item.itemType}:${itemId}`)) {
+          continue;
+        }
+        if (titleKey && titles.has(titleKey)) {
+          continue;
+        }
+        selected.push({candidate: item.candidate});
+        ids.add(`${item.itemType}:${itemId}`);
+        if (titleKey) {
+          titles.add(titleKey);
+        }
+        writes.push({
+          itemType: item.itemType,
+          itemId,
+          titleKey,
+        });
+        if (selected.length >= maxItems) {
+          break;
+        }
+      }
+      for (const write of writes) {
+        this.database.run(
+          `INSERT INTO recommendation_filter (
+            uid, item_type, item_id, title_key, expires_at
+          ) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(uid, item_type, item_id) DO UPDATE SET
+            title_key = excluded.title_key,
+            expires_at = excluded.expires_at`,
+          [
+            normalizedUid,
+            write.itemType,
+            write.itemId,
+            write.titleKey,
+            expiresAt,
+          ],
+        );
+      }
+      return selected;
+    });
+  }
+
+  /** 获取已绑定账号，防止调用方把未绑定请求写入数据库。 */
+  private requireUid(): string {
+    if (!this.activeUid) {
+      throw new Error('本地数据库尚未绑定 B 站账号');
+    }
+    return this.activeUid;
+  }
+}
+
+/** 规范化账号 UID，拒绝超长或包含控制字符的值。 */
+function normalizeUid(value: string): string {
+  const normalized = value.trim();
+  return /^[0-9]{1,32}$/.test(normalized) ? normalized : '';
+}
+
+/** 将未知同步状态收敛到共享核心允许的状态集合。 */
+function normalizeSyncStatus(
+  value: string,
+): FavoritePlaylistMeta['playlistSyncStatus'] {
+  return SYNC_STATUS_VALUES.has(value as FavoritePlaylistMeta['playlistSyncStatus'])
+    ? (value as FavoritePlaylistMeta['playlistSyncStatus'])
+    : 'idle';
+}
+
+/** 根据来源键推断同步对象类型。 */
+function inferPlaylistKind(
+  playlistId: string,
+): 'owned' | 'collectedFavorite' | 'subscribedSeason' {
+  if (playlistId.startsWith('subscribedSeason:')) {
+    return 'subscribedSeason';
+  }
+  if (playlistId.startsWith('collectedFavorite:')) {
+    return 'collectedFavorite';
+  }
+  return 'owned';
+}
+
+/** 将数据库中的来源类型收敛为领域枚举。 */
+function normalizePlaylistKind(
+  value: string,
+): 'owned' | 'collectedFavorite' | 'subscribedSeason' {
+  if (value === 'subscribedSeason' || value === 'collectedFavorite') {
+    return value;
+  }
+  return 'owned';
+}
+
+/** 从自有收藏夹来源键恢复数字 folderId。 */
+function ownedFolderIds(playlistId: string): number[] {
+  const match = playlistId.match(/^ownedFavorite:(\d+)$/);
+  return match ? [Number(match[1])] : [];
+}
+
+/** 安全解析数组字段，损坏时返回空数组并记录到调用方日志之外。 */
+function parseJsonArray<T>(value: string | null | undefined): T[] {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed as T[] : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 将数据库视频关系还原为共享 FavoriteVideo，并保留来源去重信息。 */
+function rowToFavoriteVideo(
+  row: VideoRow & {kind: string},
+): FavoriteVideo {
+  const sourceKeys = parseJsonArray<string>(row.source_keys_json);
+  const folderIds = parseJsonArray<number>(row.folder_ids_json);
+  if (row.kind !== 'owned' && !sourceKeys.includes(row.playlist_id)) {
+    sourceKeys.push(row.playlist_id);
+  }
+  if (row.kind === 'owned' && folderIds.length === 0) {
+    folderIds.push(...ownedFolderIds(row.playlist_id));
+  }
+  return {
+    bvid: row.video_id,
+    aid: row.aid ?? undefined,
+    title: row.title,
+    cover: row.cover,
+    duration: row.duration,
+    page: row.page,
+    pubtime: row.publish_time,
+    favTime: row.fav_time,
+    upper: {
+      mid: row.author_id,
+      name: row.author,
+    },
+    attr: row.attr,
+    folderIds,
+    sourceKeys,
+    parts: parseJsonArray<VideoPart>(row.parts_json),
+  };
+}
+
+export type {
+  PlaylistCatalogRecord,
+  RecommendationCollectionRecord,
+};

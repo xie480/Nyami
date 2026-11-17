@@ -115,6 +115,8 @@ export class FavoriteSyncTask {
   ): Promise<{skipped: boolean}> {
     const force = options.force === true;
     let meta = await this.repository.getPlaylistMeta(target.playlistId);
+    const remoteCountDecreased =
+      meta !== null && target.remoteVideoCount < meta.remoteVideoCount;
     const needsSync =
       force ||
       !meta ||
@@ -137,6 +139,12 @@ export class FavoriteSyncTask {
       remoteVideoCount: target.remoteVideoCount,
       playlistSyncStatus: 'syncing',
       needResync: force || meta?.needResync || false,
+      kind: target.kind,
+      ownerMid: target.ownerMid,
+      ownerName: target.ownerName,
+      cover: target.cover,
+      description: target.description,
+      remoteRevision: target.remoteRevision,
     });
     meta = await this.repository.getPlaylistMeta(target.playlistId);
     const jobId = await this.repository.createSyncJob(target.playlistId, null);
@@ -145,12 +153,13 @@ export class FavoriteSyncTask {
     let syncedCount = meta?.localSyncedCount ?? 0;
     let hasMore = true;
 
-    if (!force && meta?.syncCursor?.startsWith('page_')) {
+    if (!force && !remoteCountDecreased && meta?.syncCursor?.startsWith('page_')) {
       const cursorPage = Number.parseInt(meta.syncCursor.slice(5), 10);
       if (Number.isSafeInteger(cursorPage) && cursorPage > 0) {
         page = cursorPage + 1;
       }
     }
+    const fullScan = force || page === 1;
 
     try {
       while (hasMore && !options.signal?.aborted) {
@@ -187,21 +196,45 @@ export class FavoriteSyncTask {
         return {skipped: false};
       }
 
-      await this.repository.softDeleteMissingVideos(
-        target.playlistId,
-        Array.from(remoteVideoIds),
-      );
+      if (fullScan) {
+        await this.repository.softDeleteMissingVideos(
+          target.playlistId,
+          Array.from(remoteVideoIds),
+        );
+      }
       await this.repository.finishSyncJob(jobId, 'success');
       await this.repository.markPlaylistSyncSuccess(target.playlistId);
       return {skipped: false};
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (options.signal?.aborted) {
+        await this.repository.finishSyncJob(jobId, 'cancelled', message);
+        await this.repository.upsertPlaylistMeta({
+          playlistId: target.playlistId,
+          title: target.title,
+          remoteVideoCount: target.remoteVideoCount,
+          playlistSyncStatus: 'idle',
+          kind: target.kind,
+          ownerMid: target.ownerMid,
+          ownerName: target.ownerName,
+          cover: target.cover,
+          description: target.description,
+          remoteRevision: target.remoteRevision,
+        });
+        return {skipped: false};
+      }
       await this.repository.finishSyncJob(jobId, 'failed', message);
       await this.repository.upsertPlaylistMeta({
         playlistId: target.playlistId,
         title: target.title,
         remoteVideoCount: target.remoteVideoCount,
         playlistSyncStatus: 'failed',
+        kind: target.kind,
+        ownerMid: target.ownerMid,
+        ownerName: target.ownerName,
+        cover: target.cover,
+        description: target.description,
+        remoteRevision: target.remoteRevision,
       });
       throw error;
     }

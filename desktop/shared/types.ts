@@ -46,6 +46,7 @@ export const IPC_CHANNELS = {
     getHome: 'content:get-home',
     getDiscover: 'content:get-discover',
     search: 'content:search',
+    getRecommendations: 'content:get-recommendations',
     getFavoriteFolders: 'content:get-favorite-folders',
     getFavoriteVideos: 'content:get-favorite-videos',
     cancel: 'content:cancel',
@@ -323,12 +324,34 @@ export type SyncState =
   | 'failed'
   | 'cancelled';
 
+export type SyncPhase =
+  | 'idle'
+  | 'catalog'
+  | 'favorites'
+  | 'tags'
+  | 'recommendations'
+  | 'completed';
+
 export type SyncSnapshot = {
   state: SyncState;
   taskId: string | null;
   completed: number;
   total: number;
+  phase: SyncPhase;
+  uid: string | null;
+  processedVideos: number;
+  totalVideos: number;
+  skippedTasks: number;
+  failedTasks: number;
+  message: string | null;
+  canRetry: boolean;
+  startedAt: number | null;
+  finishedAt: number | null;
   error: string | null;
+};
+
+export type SyncStartRequest = {
+  force?: boolean;
 };
 
 export type CacheSummary = {
@@ -413,6 +436,11 @@ export type FavoriteVideoContentRequest = ContentRequestBase & {
   page: number;
 };
 
+export type RecommendationContentRequest = ContentRequestBase & {
+  uid: string;
+  page?: number;
+};
+
 /** 桌面内容卡片使用的统一视频模型。 */
 export type DesktopVideo = {
   aid?: number;
@@ -426,7 +454,38 @@ export type DesktopVideo = {
   tags: string[];
   page?: number;
   favTime?: number;
-  source?: 'search' | 'popular' | 'favorite';
+  source?: 'search' | 'popular' | 'favorite' | 'recommendation';
+};
+
+export type RecommendationCollection = {
+  sourceKey: string;
+  title: string;
+  cover: string;
+  mediaCount: number;
+  ownerName: string;
+  description?: string;
+  score: number;
+};
+
+export type RecommendationProfile = {
+  totalVideoCount: number;
+  resolvedVideoCount: number;
+  taggedVideoCount: number;
+  pendingVideoCount: number;
+  preferences: Array<{
+    tagId: number;
+    tagName: string;
+    videoCount: number;
+    score: number;
+  }>;
+};
+
+export type RecommendationSnapshot = {
+  videos: DesktopVideo[];
+  collections: RecommendationCollection[];
+  profile: RecommendationProfile;
+  hasMore: boolean;
+  updatedAt: number;
 };
 
 export type DesktopPage<T> = {
@@ -500,7 +559,7 @@ export type NyamiDesktopApi = {
   };
   sync: {
     getStatus: () => Promise<SyncSnapshot>;
-    start: () => Promise<SyncSnapshot>;
+    start: (request?: SyncStartRequest) => Promise<SyncSnapshot>;
     cancel: () => Promise<SyncSnapshot>;
     onStateChanged: (listener: (event: SyncStateEvent) => void) => () => void;
   };
@@ -512,6 +571,9 @@ export type NyamiDesktopApi = {
     search: (
       request: SearchContentRequest,
     ) => Promise<DesktopPage<DesktopVideo>>;
+    getRecommendations: (
+      request: RecommendationContentRequest,
+    ) => Promise<RecommendationSnapshot>;
     getFavoriteFolders: (
       request: FavoriteFolderContentRequest,
     ) => Promise<FavoriteFolderSummary[]>;

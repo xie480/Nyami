@@ -21,14 +21,17 @@ import {
   type PlaybackSeekRequest,
   type PlaybackSleepTimerRequest,
   type PlaybackVolumeRequest,
+  type RecommendationContentRequest,
   type RendererErrorReport,
   type SearchContentRequest,
+  type SyncStartRequest,
 } from '../../shared/types';
 import {AudioProbe} from '../audio/audioProbe';
 import {AudioRequestRecorder} from '../audio/audioRequestRecorder';
 import {getSampleAudioUrl} from '../audio/localAudioProtocol';
 import {QrLoginController} from '../auth/qrLoginController';
 import {BiliContentRuntime} from '../content/biliContentRuntime';
+import {DesktopLibraryRuntime} from '../content/desktopLibraryRuntime';
 import {AppLogger} from '../logging/appLogger';
 import {CacheManager} from '../runtime/cacheManager';
 import {PlaybackRuntime} from '../runtime/playbackRuntime';
@@ -46,6 +49,7 @@ export type IpcRuntimeDependencies = {
   playbackRuntime: PlaybackRuntime;
   syncRuntime: SyncRuntime;
   contentRuntime: BiliContentRuntime;
+  libraryRuntime: DesktopLibraryRuntime;
 };
 
 /**
@@ -108,6 +112,9 @@ export function registerIpcHandlers(
     send(IPC_CHANNELS.playback.command, {
       command: event.command,
     });
+  });
+  const disposeSyncEvents = dependencies.syncRuntime.subscribe(snapshot => {
+    send(IPC_CHANNELS.sync.stateChanged, {snapshot});
   });
 
   register(IPC_CHANNELS.auth.startQrLogin, () => qrLogin.start());
@@ -189,15 +196,12 @@ export function registerIpcHandlers(
   register(IPC_CHANNELS.sync.getStatus, () =>
     dependencies.syncRuntime.getStatus(),
   );
-  register(IPC_CHANNELS.sync.start, () => {
-    const snapshot = dependencies.syncRuntime.start();
-    send(IPC_CHANNELS.sync.stateChanged, {snapshot});
-    return snapshot;
+  register(IPC_CHANNELS.sync.start, (_event, request) => {
+    assertSyncStartRequest(request);
+    return dependencies.syncRuntime.start(request);
   });
   register(IPC_CHANNELS.sync.cancel, () => {
-    const snapshot = dependencies.syncRuntime.cancel();
-    send(IPC_CHANNELS.sync.stateChanged, {snapshot});
-    return snapshot;
+    return dependencies.syncRuntime.cancel();
   });
 
   register(IPC_CHANNELS.content.getHome, (_event, request) => {
@@ -211,6 +215,10 @@ export function registerIpcHandlers(
   register(IPC_CHANNELS.content.search, (_event, request) => {
     assertSearchContentRequest(request);
     return dependencies.contentRuntime.search(request);
+  });
+  register(IPC_CHANNELS.content.getRecommendations, (_event, request) => {
+    assertRecommendationContentRequest(request);
+    return dependencies.libraryRuntime.getRecommendations(request);
   });
   register(IPC_CHANNELS.content.getFavoriteFolders, (_event, request) => {
     assertFavoriteFolderContentRequest(request);
@@ -273,6 +281,7 @@ export function registerIpcHandlers(
       ipcMain.removeHandler(channel);
     }
     disposePlaybackEvents();
+    disposeSyncEvents();
     qrLogin.dispose();
   };
 }
@@ -381,6 +390,41 @@ function assertFavoriteVideoContentRequest(
   }
   if (!isPositiveInteger(request.page) || request.page > 1000) {
     throw new Error('收藏视频页码无效');
+  }
+}
+
+/** 校验推荐请求，保证推荐数据只为当前登录账号生成。 */
+function assertRecommendationContentRequest(
+  value: unknown,
+): asserts value is RecommendationContentRequest {
+  assertContentRequestBase(value);
+  const request = value as ContentRequestBase & {
+    uid?: unknown;
+    page?: unknown;
+  };
+  if (!isBoundedString(request.uid, 64) || !request.uid.trim()) {
+    throw new Error('推荐账号 UID 无效');
+  }
+  if (
+    request.page !== undefined &&
+    (!isPositiveInteger(request.page) || request.page > 1000)
+  ) {
+    throw new Error('推荐页码无效');
+  }
+}
+
+/** 校验同步启动参数，拒绝 Renderer 传入未知结构。 */
+function assertSyncStartRequest(
+  value: unknown,
+): asserts value is SyncStartRequest {
+  if (value === undefined) {
+    return;
+  }
+  if (!isRecord(value)) {
+    throw new Error('同步启动参数格式无效');
+  }
+  if (value.force !== undefined && typeof value.force !== 'boolean') {
+    throw new Error('同步全量参数无效');
   }
 }
 

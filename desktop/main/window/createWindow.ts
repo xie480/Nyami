@@ -14,6 +14,7 @@ import {registerAudioInterception} from '../audio/registerAudioInterception';
 import {QrLoginController} from '../auth/qrLoginController';
 import {CredentialStore} from '../auth/credentialStore';
 import {BiliContentRuntime} from '../content/biliContentRuntime';
+import {DesktopLibraryRuntime} from '../content/desktopLibraryRuntime';
 import {AppLogger} from '../logging/appLogger';
 import {registerIpcHandlers} from '../ipc/registerIpc';
 import {CacheManager} from '../runtime/cacheManager';
@@ -21,6 +22,8 @@ import {AudioCacheStore} from '../runtime/audioCacheStore';
 import {PlaybackRuntime} from '../runtime/playbackRuntime';
 import {SyncRuntime} from '../runtime/syncRuntime';
 import type {AppDirectories} from '../storage/appDirectories';
+import {DesktopLibraryRepository} from '../storage/desktopLibraryRepository';
+import {SqliteDatabase} from '../storage/sqliteDatabase';
 import {SettingsStore} from '../storage/settingsStore';
 import type {
   PlaybackQueueContext,
@@ -79,10 +82,39 @@ export function createMainWindow(
   const recorder = new AudioRequestRecorder();
   registerAudioInterception(session.defaultSession, recorder);
   const credentialStore = new CredentialStore();
-  const qrLogin = new QrLoginController(window, credentialStore);
   const contentRuntime = new BiliContentRuntime(
     credentialStore,
     dependencies.logger,
+  );
+  const database = new SqliteDatabase(
+    path.join(dependencies.directories.db, 'nyami.sqlite'),
+    dependencies.logger,
+  );
+  const libraryRepository = new DesktopLibraryRepository(
+    database,
+    dependencies.logger,
+  );
+  const libraryRuntime = new DesktopLibraryRuntime(
+    contentRuntime.getApiForMainProcess(),
+    credentialStore,
+    libraryRepository,
+    dependencies.logger,
+  );
+  const syncRuntime = new SyncRuntime(
+    credentialStore,
+    libraryRuntime,
+    dependencies.logger,
+  );
+  const qrLogin = new QrLoginController(
+    window,
+    credentialStore,
+    undefined,
+    async (previousUid, nextUid) => {
+      if (previousUid !== nextUid) {
+        await syncRuntime.cancel();
+      }
+      libraryRuntime.handleAccountChanged(previousUid, nextUid);
+    },
   );
   const audioProbe = new AudioProbe();
   const audioCache = new AudioCacheStore(
@@ -121,7 +153,6 @@ export function createMainWindow(
       };
     },
   });
-  const syncRuntime = new SyncRuntime();
   const disposeIpc = registerIpcHandlers(
     window,
     qrLogin,
@@ -134,6 +165,7 @@ export function createMainWindow(
       playbackRuntime,
       syncRuntime,
       contentRuntime,
+      libraryRuntime,
     },
   );
   let disposed = false;
@@ -216,6 +248,8 @@ export function createMainWindow(
     }
     disposed = true;
     disposeIpc();
+    syncRuntime.dispose();
+    libraryRepository.close();
   };
   window.on('closed', dispose);
 
@@ -279,7 +313,7 @@ function toPlaybackQueueItem(video: {
   author: string;
   cover: string;
   duration: number;
-  source?: 'search' | 'popular' | 'favorite';
+  source?: 'search' | 'popular' | 'favorite' | 'recommendation';
   page?: number;
 }): PlaybackQueueItem {
   return {
