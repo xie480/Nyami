@@ -12,6 +12,7 @@ import {
   type DesktopAudioSettings,
   type DesktopPeqBand,
   type DiscoverContentRequest,
+  type DesktopWindowState,
   type FavoriteFolderContentRequest,
   type FavoriteVideoContentRequest,
   type PlaybackAudioEvent,
@@ -101,6 +102,14 @@ export function registerIpcHandlers(
       window.webContents.send(channel, payload);
     }
   };
+  const notifyWindowState = (): void => {
+    send(IPC_CHANNELS.window.stateChanged, getWindowState(window));
+  };
+  const handleWindowStateChange = (): void => {
+    notifyWindowState();
+  };
+  window.on('maximize', handleWindowStateChange);
+  window.on('unmaximize', handleWindowStateChange);
   const disposePlaybackEvents = dependencies.playbackRuntime.subscribe(event => {
     if (event.type === 'state') {
       send(IPC_CHANNELS.playback.stateChanged, {
@@ -120,6 +129,22 @@ export function registerIpcHandlers(
   });
   const disposeSyncEvents = dependencies.syncRuntime.subscribe(snapshot => {
     send(IPC_CHANNELS.sync.stateChanged, {snapshot});
+  });
+
+  register(IPC_CHANNELS.window.getState, () => getWindowState(window));
+  register(IPC_CHANNELS.window.minimize, () => {
+    window.minimize();
+  });
+  register(IPC_CHANNELS.window.toggleMaximize, () => {
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+    return getWindowState(window);
+  });
+  register(IPC_CHANNELS.window.close, () => {
+    window.close();
   });
 
   register(IPC_CHANNELS.auth.startQrLogin, () => qrLogin.start());
@@ -321,7 +346,16 @@ export function registerIpcHandlers(
     }
     disposePlaybackEvents();
     disposeSyncEvents();
+    window.removeListener('maximize', handleWindowStateChange);
+    window.removeListener('unmaximize', handleWindowStateChange);
     qrLogin.dispose();
+  };
+}
+
+/** 读取 Renderer 自绘窗口边框所需的当前窗口状态。 */
+function getWindowState(window: BrowserWindow): DesktopWindowState {
+  return {
+    isMaximized: window.isMaximized(),
   };
 }
 

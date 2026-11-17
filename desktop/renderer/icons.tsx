@@ -16,10 +16,13 @@ export type IconName =
   | 'loader'
   | 'log-in'
   | 'log-out'
+  | 'maximize'
+  | 'minus'
   | 'pause'
   | 'play'
   | 'plus'
   | 'refresh'
+  | 'restore'
   | 'search'
   | 'settings'
   | 'sparkles'
@@ -88,6 +91,8 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M6 12h11" />
     </>
   ),
+  maximize: <path d="M5 5h14v14H5Z" />,
+  minus: <path d="M5 12h14" />,
   pause: (
     <>
       <path d="M9 5v14" />
@@ -107,6 +112,12 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M3 4v6h6" />
       <path d="M4 13a8 8 0 0 0 14.8 4L21 14" />
       <path d="M21 20v-6h-6" />
+    </>
+  ),
+  restore: (
+    <>
+      <path d="M8 8h11v11H8Z" />
+      <path d="M5 16V5h11" />
     </>
   ),
   search: (

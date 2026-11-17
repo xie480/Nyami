@@ -72,6 +72,13 @@ export const IPC_CHANNELS = {
     check: 'updates:check',
     openDownload: 'updates:open-download',
   },
+  window: {
+    getState: 'window:get-state',
+    minimize: 'window:minimize',
+    toggleMaximize: 'window:toggle-maximize',
+    close: 'window:close',
+    stateChanged: 'window:state-changed',
+  },
   probes: {
     inspectAudio: 'probe:inspect-audio',
     getSampleUrl: 'probe:get-sample-url',
@@ -406,6 +413,11 @@ export type WindowSettings = {
   y: number | null;
 };
 
+/** Renderer 可见的窗口状态，只描述自绘窗口控制所需信息。 */
+export type DesktopWindowState = {
+  isMaximized: boolean;
+};
+
 export type DesktopSettings = {
   version: 2;
   theme: DesktopTheme;
@@ -673,5 +685,14 @@ export type NyamiDesktopApi = {
     getStatus: () => Promise<DesktopUpdateInfo>;
     check: () => Promise<DesktopUpdateInfo>;
     openDownload: () => Promise<boolean>;
+  };
+  window: {
+    getState: () => Promise<DesktopWindowState>;
+    minimize: () => Promise<void>;
+    toggleMaximize: () => Promise<DesktopWindowState>;
+    close: () => Promise<void>;
+    onStateChanged: (
+      listener: (state: DesktopWindowState) => void,
+    ) => () => void;
   };
 };

@@ -26,6 +26,7 @@ import type {
   DesktopTheme,
   DesktopUpdateInfo,
   DesktopVideo,
+  DesktopWindowState,
   DiscoverContentRequest,
   FavoriteFolderContentRequest,
   FavoriteFolderSummary,
@@ -163,6 +164,7 @@ export function App(): JSX.Element {
   const [cacheSummary, setCacheSummary] = useState<CacheSummary | null>(null);
   const [cacheProgress, setCacheProgress] = useState<CacheProgressEvent | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const audioAdapterRef = useRef<ElectronAudioPlayerAdapter | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -626,6 +628,21 @@ export function App(): JSX.Element {
     };
   }, [pushNotice, refreshAuth]);
 
+  /** 初始化自绘窗口边框状态，并订阅主进程的最大化变化。 */
+  useEffect(() => {
+    const handleWindowState = (state: DesktopWindowState): void => {
+      setIsWindowMaximized(state.isMaximized);
+    };
+    const unsubscribe = window.nyamiDesktop.window.onStateChanged(
+      handleWindowState,
+    );
+    void window.nyamiDesktop.window
+      .getState()
+      .then(handleWindowState)
+      .catch(() => undefined);
+    return unsubscribe;
+  }, []);
+
   /** 登录新账号后自动启动一次可恢复的增量同步。 */
   const autoSyncUidRef = useRef<string | null>(null);
   useEffect(() => {
@@ -670,8 +687,37 @@ export function App(): JSX.Element {
     [pushNotice],
   );
 
+  /** 请求主进程最小化当前窗口。 */
+  const minimizeWindow = useCallback((): void => {
+    void window.nyamiDesktop.window.minimize();
+  }, []);
+
+  /** 切换当前窗口的最大化状态，并同步自绘边框状态。 */
+  const toggleWindowMaximize = useCallback(async (): Promise<void> => {
+    try {
+      const state = await window.nyamiDesktop.window.toggleMaximize();
+      setIsWindowMaximized(state.isMaximized);
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '窗口状态切换失败'));
+    }
+  }, [pushNotice]);
+
+  /** 请求主进程关闭当前窗口，关闭到托盘策略仍由主进程统一处理。 */
+  const closeWindow = useCallback((): void => {
+    void window.nyamiDesktop.window.close();
+  }, []);
+
   return (
-    <div className={`desktop-app ${themeClassName}`}>
+    <div
+      className={`desktop-app ${themeClassName} ${
+        isWindowMaximized ? 'window-maximized' : 'window-restored'
+      }`}>
+      <WindowTitlebar
+        isMaximized={isWindowMaximized}
+        onClose={closeWindow}
+        onMinimize={minimizeWindow}
+        onToggleMaximize={() => void toggleWindowMaximize()}
+      />
       <div className="desktop-frame">
         <Sidebar
           auth={auth}
@@ -877,6 +923,63 @@ export function App(): JSX.Element {
         />
       ) : null}
     </div>
+  );
+}
+
+/** 自绘桌面窗口标题栏，承载拖拽区域和 Windows 窗口控制按钮。 */
+function WindowTitlebar({
+  isMaximized,
+  onClose,
+  onMinimize,
+  onToggleMaximize,
+}: {
+  isMaximized: boolean;
+  onClose: () => void;
+  onMinimize: () => void;
+  onToggleMaximize: () => void;
+}): JSX.Element {
+  return (
+    <header
+      className="window-titlebar"
+      onDoubleClick={event => {
+        if ((event.target as HTMLElement).closest('button')) {
+          return;
+        }
+        onToggleMaximize();
+      }}>
+      <div className="window-titlebar-caption">
+        <span className="window-titlebar-mark">N</span>
+        <strong>Nyami</strong>
+        <span>桌面播放器</span>
+      </div>
+      <div className="window-titlebar-controls">
+        <button
+          aria-label="最小化窗口"
+          className="window-control"
+          onClick={onMinimize}
+          title="最小化"
+          type="button">
+          <Icon name="minus" size={16} />
+        </button>
+        <button
+          aria-label={isMaximized ? '还原窗口' : '最大化窗口'}
+          aria-pressed={isMaximized}
+          className="window-control"
+          onClick={onToggleMaximize}
+          title={isMaximized ? '还原' : '最大化'}
+          type="button">
+          <Icon name={isMaximized ? 'restore' : 'maximize'} size={15} />
+        </button>
+        <button
+          aria-label="关闭窗口"
+          className="window-control window-control-close"
+          onClick={onClose}
+          title="关闭"
+          type="button">
+          <Icon name="x" size={16} />
+        </button>
+      </div>
+    </header>
   );
 }
 

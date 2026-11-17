@@ -7,6 +7,7 @@ import type {
   DesktopSettings,
   DesktopSettingsPatch,
   DesktopUpdateInfo,
+  DesktopWindowState,
   DiscoverContentRequest,
   FavoriteFolderContentRequest,
   FavoriteVideoContentRequest,
@@ -178,6 +179,16 @@ const api: NyamiDesktopApi = {
       ipcRenderer.invoke(CHANNELS.updates.check),
     openDownload: (): Promise<boolean> =>
       ipcRenderer.invoke(CHANNELS.updates.openDownload),
+  },
+  window: {
+    getState: (): Promise<DesktopWindowState> =>
+      ipcRenderer.invoke(CHANNELS.window.getState),
+    minimize: (): Promise<void> => ipcRenderer.invoke(CHANNELS.window.minimize),
+    toggleMaximize: (): Promise<DesktopWindowState> =>
+      ipcRenderer.invoke(CHANNELS.window.toggleMaximize),
+    close: (): Promise<void> => ipcRenderer.invoke(CHANNELS.window.close),
+    onStateChanged: listener =>
+      subscribe<DesktopWindowState>(CHANNELS.window.stateChanged, listener),
   },
 };
 

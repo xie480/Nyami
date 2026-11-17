@@ -63,6 +63,8 @@ export function createMainWindow(
     minWidth: 960,
     minHeight: 640,
     show: false,
+    frame: false,
+    autoHideMenuBar: true,
     backgroundColor: '#10131a',
     webPreferences: {
       preload: path.join(currentDir, '../preload/index.js'),
