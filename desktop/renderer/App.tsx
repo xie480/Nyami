@@ -1,67 +1,252 @@
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type {
-  AudioProbeResult,
-  AudioRequestRecord,
+  ChangeEvent,
+  FormEvent,
+  KeyboardEvent,
+  ReactNode,
+} from 'react';
+import {
+  Icon,
+  type IconName,
+} from './icons';
+import type {
   AuthStatus,
+  AuthWebViewState,
+  DesktopPage,
+  DesktopSettings,
+  DesktopTheme,
+  DesktopVideo,
+  DiscoverContentRequest,
+  FavoriteFolderContentRequest,
+  FavoriteFolderSummary,
+  FavoriteVideoContentRequest,
+  HomeSnapshot,
+  PlaybackSnapshot,
   QrStatusEvent,
+  SearchContentRequest,
+  UserProfile,
 } from '../shared/types';
 
-type Panel = 'login' | 'audio';
+type Route = 'home' | 'discover' | 'search' | 'favorites' | 'settings';
+type NoticeTone = 'info' | 'success' | 'error';
 
-/**
- * 阶段 0 桌面验证工作台。
- * 用两个独立面板验证登录、受控 WebContentsView、远程音频请求和离线样例播放。
- */
+type Notice = {
+  id: number;
+  tone: NoticeTone;
+  message: string;
+};
+
+type AsyncState = 'idle' | 'loading' | 'success' | 'error';
+
+const NAV_ITEMS: Array<{
+  route: Route;
+  label: string;
+  icon: IconName;
+}> = [
+  {route: 'home', label: '首页', icon: 'home'},
+  {route: 'discover', label: '发现', icon: 'compass'},
+  {route: 'search', label: '搜索', icon: 'search'},
+  {route: 'favorites', label: '收藏夹', icon: 'heart'},
+];
+
+const THEME_OPTIONS: Array<{
+  value: DesktopTheme;
+  label: string;
+  description: string;
+}> = [
+  {value: 'system', label: '跟随系统', description: '使用 Windows 当前外观'},
+  {value: 'light', label: '浅色', description: '适合明亮环境'},
+  {value: 'dark', label: '深色', description: '降低夜间眩光'},
+  {value: 'glass', label: '玻璃', description: '保留半透明层次'},
+];
+
+const EMPTY_PLAYBACK: PlaybackSnapshot = {
+  state: 'idle',
+  trackId: null,
+  position: 0,
+  duration: 0,
+  volume: 1,
+  queueLength: 0,
+  error: null,
+};
+
+/** 阶段 3 桌面端应用根组件，负责导航、认证状态和全局任务通知。 */
 export function App(): JSX.Element {
-  const [panel, setPanel] = useState<Panel>('login');
+  const [route, setRoute] = useState<Route>('home');
   const [auth, setAuth] = useState<AuthStatus>({
     loggedIn: false,
     uid: null,
   });
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [settings, setSettings] = useState<DesktopSettings | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
   const [qrImageDataUrl, setQrImageDataUrl] = useState('');
-  const [qrStatus, setQrStatus] = useState('准备生成二维码');
   const [qrExpiresAt, setQrExpiresAt] = useState<number | null>(null);
-  const [loginBusy, setLoginBusy] = useState(false);
-  const [remoteUrl, setRemoteUrl] = useState('');
-  const [retryUrl, setRetryUrl] = useState('');
-  const [audioSrc, setAudioSrc] = useState('');
-  const [probeResult, setProbeResult] = useState<AudioProbeResult | null>(null);
-  const [probeError, setProbeError] = useState('');
-  const [requestRecords, setRequestRecords] = useState<AudioRequestRecord[]>([]);
-  const [localFileName, setLocalFileName] = useState('');
-  const localObjectUrlRef = useRef<string | null>(null);
-  const qrStartedRef = useRef(false);
+  const [qrStatus, setQrStatus] = useState('准备登录');
+  const [qrBusy, setQrBusy] = useState(false);
+  const [webViewState, setWebViewState] = useState<AuthWebViewState>({
+    open: false,
+    mode: null,
+  });
+  const [notices, setNotices] = useState<Notice[]>([]);
+  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchTrigger, setSearchTrigger] = useState(0);
+  const [playback, setPlayback] = useState<PlaybackSnapshot>(EMPTY_PLAYBACK);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const noticeSequenceRef = useRef(0);
 
-  /**
-   * 刷新主进程脱敏登录状态。
-   */
-  const refreshAuthStatus = useCallback(async () => {
-    setAuth(await window.nyamiDesktop.auth.getStatus());
+  /** 追加全局任务通知，并保留最近的通知历史。 */
+  const pushNotice = useCallback((tone: NoticeTone, message: string): void => {
+    const id = ++noticeSequenceRef.current;
+    setNotices(current => [...current, {id, tone, message}].slice(-12));
+    window.setTimeout(() => {
+      setNotices(current => current.filter(notice => notice.id !== id));
+    }, 5000);
   }, []);
 
-  /**
-   * 请求主进程生成二维码并开始轮询。
-   */
-  const startQrLogin = useCallback(async () => {
-    setLoginBusy(true);
-    setQrStatus('正在生成二维码');
+  /** 刷新脱敏登录状态和公开账号资料。 */
+  const refreshAuth = useCallback(async (): Promise<void> => {
+    const status = await window.nyamiDesktop.auth.getStatus();
+    setAuth(status);
+    if (!status.loggedIn) {
+      setProfile(null);
+      return;
+    }
+    try {
+      setProfile(await window.nyamiDesktop.auth.getProfile());
+    } catch (error) {
+      setProfile(null);
+      pushNotice('error', getErrorMessage(error, '账号资料加载失败'));
+    }
+  }, [pushNotice]);
+
+  /** 启动二维码登录并更新登录弹窗状态。 */
+  const startQrLogin = useCallback(async (): Promise<void> => {
+    setQrBusy(true);
+    setQrStatus('正在生成二维码…');
     try {
       const result = await window.nyamiDesktop.auth.startQrLogin();
       setQrImageDataUrl(result.qrImageDataUrl);
       setQrExpiresAt(result.expiresAt);
       setQrStatus('请使用 Bilibili 客户端扫码');
     } catch (error) {
-      setQrStatus(error instanceof Error ? error.message : '二维码生成失败');
+      setQrStatus(getErrorMessage(error, '二维码生成失败'));
+      pushNotice('error', getErrorMessage(error, '二维码生成失败'));
     } finally {
-      setLoginBusy(false);
+      setQrBusy(false);
+    }
+  }, [pushNotice]);
+
+  /** 打开网页登录视图。 */
+  const openWebLogin = useCallback(async (): Promise<void> => {
+    setLoginOpen(false);
+    try {
+      await window.nyamiDesktop.auth.openWebLogin();
+      pushNotice('info', '网页登录已打开，请在页面内完成登录');
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '网页登录打开失败'));
+    }
+  }, [pushNotice]);
+
+  /** 请求 Bilibili Cookie 续期。 */
+  const renewLogin = useCallback(async (): Promise<void> => {
+    setLoginOpen(false);
+    try {
+      await window.nyamiDesktop.auth.renew();
+      await refreshAuth();
+      pushNotice('success', '登录状态已续期');
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '登录续期失败'));
+    }
+  }, [pushNotice, refreshAuth]);
+
+  /** 退出登录并清理当前账号在 Renderer 中的展示状态。 */
+  const logout = useCallback(async (): Promise<void> => {
+    try {
+      await window.nyamiDesktop.auth.logout();
+      setAuth({loggedIn: false, uid: null});
+      setProfile(null);
+      setLoginOpen(false);
+      setQrImageDataUrl('');
+      pushNotice('success', '已退出登录');
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '退出登录失败'));
+    }
+  }, [pushNotice]);
+
+  /** 聚焦全局搜索并切换到搜索页。 */
+  const focusSearch = useCallback((): void => {
+    setRoute('search');
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, []);
+
+  /** 提交全局搜索条件。 */
+  const submitSearch = useCallback((value: string): void => {
+    const normalized = value.trim();
+    setSearchQuery(normalized);
+    setRoute('search');
+    if (normalized) {
+      setSearchTrigger(current => current + 1);
     }
   }, []);
 
-  /**
-   * 注册二维码状态事件并在启动时读取登录状态。
-   */
+  /** 执行占位播放器的播放/暂停控制。 */
+  const togglePlayback = useCallback(async (): Promise<void> => {
+    if (!playback.trackId) {
+      pushNotice('info', '播放器将在阶段 4 接入真实音频');
+      return;
+    }
+    const next =
+      playback.state === 'playing'
+        ? await window.nyamiDesktop.playback.pause()
+        : await window.nyamiDesktop.playback.play();
+    setPlayback(next);
+  }, [playback.state, playback.trackId, pushNotice]);
+
+  /** 注册全局快捷键，支持 Ctrl+K、Space 和 Ctrl+方向键。 */
   useEffect(() => {
-    const unsubscribe = window.nyamiDesktop.auth.onQrStatus(
+    const handleKeyDown = (event: globalThis.KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable;
+      if (event.ctrlKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        focusSearch();
+        return;
+      }
+      if (isTyping) {
+        return;
+      }
+      if (event.code === 'Space') {
+        event.preventDefault();
+        void togglePlayback();
+        return;
+      }
+      if (event.ctrlKey && event.key === 'ArrowLeft') {
+        event.preventDefault();
+        void window.nyamiDesktop.playback.skipPrevious().then(setPlayback);
+      }
+      if (event.ctrlKey && event.key === 'ArrowRight') {
+        event.preventDefault();
+        void window.nyamiDesktop.playback.skipNext().then(setPlayback);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [focusSearch, togglePlayback]);
+
+  /** 初始化认证、设置、播放状态和跨进程事件订阅。 */
+  useEffect(() => {
+    const unsubscribeQr = window.nyamiDesktop.auth.onQrStatus(
       (event: QrStatusEvent) => {
         setQrStatus(event.message);
         if (event.expiresAt) {
@@ -71,314 +256,1371 @@ export function App(): JSX.Element {
           setAuth(event.auth);
         }
         if (event.status === 'success') {
-          setLoginBusy(false);
+          setQrBusy(false);
+          setLoginOpen(false);
+          void refreshAuth();
+          pushNotice('success', event.message);
+        }
+        if (event.status === 'error' || event.status === 'expired') {
+          pushNotice('error', event.message);
         }
       },
     );
-    void refreshAuthStatus();
-    if (!qrStartedRef.current) {
-      qrStartedRef.current = true;
+    const unsubscribeWebView = window.nyamiDesktop.auth.onWebViewState(
+      (event: AuthWebViewState) => {
+        setWebViewState(event);
+      },
+    );
+    const unsubscribeSettings = window.nyamiDesktop.settings.onChanged(
+      setSettings,
+    );
+    const unsubscribePlayback = window.nyamiDesktop.playback.onStateChanged(
+      event => setPlayback(event.snapshot),
+    );
+    void Promise.all([
+      refreshAuth(),
+      window.nyamiDesktop.settings.get().then(setSettings),
+      window.nyamiDesktop.playback.getState().then(setPlayback),
+    ]).catch(error => {
+      pushNotice('error', getErrorMessage(error, '桌面运行时初始化失败'));
+    });
+    return () => {
+      unsubscribeQr();
+      unsubscribeWebView();
+      unsubscribeSettings();
+      unsubscribePlayback();
+    };
+  }, [pushNotice, refreshAuth]);
+
+  /** 登录弹窗打开后自动生成首张二维码。 */
+  useEffect(() => {
+    if (loginOpen && !auth.loggedIn && !qrImageDataUrl && !qrBusy) {
       void startQrLogin();
     }
-    return unsubscribe;
-  }, [refreshAuthStatus, startQrLogin]);
+  }, [auth.loggedIn, loginOpen, qrBusy, qrImageDataUrl, startQrLogin]);
 
-  /**
-   * 释放本地对象 URL，避免重复选择文件后积累 Blob 引用。
-   */
-  useEffect(
-    () => () => {
-      if (localObjectUrlRef.current) {
-        URL.revokeObjectURL(localObjectUrlRef.current);
-      }
-    },
-    [],
+  /** 根据用户设置将页面映射为桌面主题类名。 */
+  const themeClassName = useMemo(
+    () => `theme-${settings?.theme ?? 'dark'}`,
+    [settings?.theme],
   );
 
-  /**
-   * 触发一次远程音频 Range 探测，并在提供新地址时验证过期重取。
-   */
-  const inspectAudio = useCallback(async () => {
-    setProbeError('');
-    setProbeResult(null);
-    try {
-      const result = await window.nyamiDesktop.probes.inspectAudio({
-        url: remoteUrl,
-        retryUrl: retryUrl || undefined,
-      });
-      setProbeResult(result);
-      if (result.ok) {
-        setAudioSrc(result.retried && retryUrl ? retryUrl : remoteUrl);
-      } else {
-        setAudioSrc('');
+  /** 修改桌面设置，并在失败时恢复可见提示。 */
+  const updateSettings = useCallback(
+    async (patch: Parameters<typeof window.nyamiDesktop.settings.update>[0]) => {
+      try {
+        setSettings(await window.nyamiDesktop.settings.update(patch));
+      } catch (error) {
+        pushNotice('error', getErrorMessage(error, '设置保存失败'));
       }
-      setRequestRecords(
-        await window.nyamiDesktop.probes.getRecentAudioRequests(),
-      );
-    } catch (error) {
-      setProbeError(error instanceof Error ? error.message : '音频探测失败');
-    }
-  }, [remoteUrl, retryUrl]);
-
-  /**
-   * 读取 Chromium 播放器产生的脱敏请求摘要。
-   */
-  const refreshRequestRecords = useCallback(async () => {
-    setRequestRecords(
-      await window.nyamiDesktop.probes.getRecentAudioRequests(),
-    );
-  }, []);
-
-  /**
-   * 播放仓库内固定样例，验证完全离线时的本地协议播放。
-   */
-  const playOfflineSample = useCallback(async () => {
-    setProbeError('');
-    setAudioSrc(await window.nyamiDesktop.probes.getSampleAudioUrl());
-  }, []);
-
-  /**
-   * 处理用户选择的本地音频文件。
-   * @param event 文件输入事件
-   */
-  const handleLocalFile = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-    if (localObjectUrlRef.current) {
-      URL.revokeObjectURL(localObjectUrlRef.current);
-    }
-    localObjectUrlRef.current = URL.createObjectURL(file);
-    setLocalFileName(file.name);
-    setAudioSrc(localObjectUrlRef.current);
-  };
-
-  /**
-   * 退出登录并刷新脱敏状态。
-   */
-  const logout = useCallback(async () => {
-    await window.nyamiDesktop.auth.logout();
-    await refreshAuthStatus();
-    setQrImageDataUrl('');
-  }, [refreshAuthStatus]);
+    },
+    [pushNotice],
+  );
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">NYAMI / WINDOWS SPIKE</p>
-          <h1>桌面关键链路验证台</h1>
-        </div>
-        <div className="auth-chip" aria-live="polite">
-          <span className={auth.loggedIn ? 'status-dot online' : 'status-dot'} />
-          {auth.loggedIn ? `已登录 · UID ${auth.uid ?? '未知'}` : '未登录'}
-        </div>
-      </header>
+    <div className={`desktop-app ${themeClassName}`}>
+      <div className="desktop-frame">
+        <Sidebar
+          auth={auth}
+          profile={profile}
+          route={route}
+          onLogin={() => setLoginOpen(true)}
+          onRouteChange={setRoute}
+        />
+        <section className="workspace">
+          <header className="workspace-header">
+            <div className="breadcrumb-block">
+              <p className="section-kicker">NYAMI / WINDOWS</p>
+              <h1>{getRouteTitle(route)}</h1>
+            </div>
+            <form
+              className="global-search"
+              onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                event.preventDefault();
+                submitSearch(searchQuery);
+              }}>
+              <Icon name="search" size={18} />
+              <input
+                aria-label="搜索 Bilibili 视频"
+                onChange={event => setSearchQuery(event.target.value)}
+                placeholder="搜索视频、音乐或 UP 主"
+                ref={searchInputRef}
+                value={searchQuery}
+              />
+              <kbd>Ctrl K</kbd>
+            </form>
+            <div className="header-actions">
+              {webViewState.open ? (
+                <button
+                  className="webview-close-button"
+                  onClick={() => {
+                    void window.nyamiDesktop.auth.closeWebLogin();
+                  }}
+                  type="button">
+                  <Icon name="x" size={16} />
+                  关闭网页登录
+                </button>
+              ) : null}
+              <div className="task-center-wrap">
+                <button
+                  aria-expanded={taskCenterOpen}
+                  aria-label="打开任务通知"
+                  className="icon-button notification-button"
+                  onClick={() => setTaskCenterOpen(current => !current)}
+                  title="任务通知"
+                  type="button">
+                  <Icon name="alert" size={18} />
+                  {notices.length ? (
+                    <span className="notification-count">{notices.length}</span>
+                  ) : null}
+                </button>
+                {taskCenterOpen ? (
+                  <TaskCenter
+                    notices={notices}
+                    onDismiss={id =>
+                      setNotices(current =>
+                        current.filter(notice => notice.id !== id),
+                      )
+                    }
+                  />
+                ) : null}
+              </div>
+              <button
+                className="account-trigger"
+                onClick={() => setLoginOpen(true)}
+                type="button">
+                <Avatar profile={profile} />
+                <span>{profile?.name ?? '登录 Bilibili'}</span>
+                <Icon name="chevron-down" size={14} />
+              </button>
+            </div>
+          </header>
 
-      <nav className="tabs" aria-label="阶段 0 验证面板">
+          {webViewState.open ? (
+            <div className="webview-banner" role="status">
+              <span className="status-dot online" />
+              {webViewState.mode === 'refresh'
+                ? '正在安全续期 Bilibili 登录状态…'
+                : 'Bilibili 网页已打开，请在上方页面完成登录'}
+            </div>
+          ) : null}
+
+          <main className="page-scroll">
+            {route === 'home' ? (
+              <HomePage
+                onNavigate={setRoute}
+                onNotice={pushNotice}
+                onSearch={submitSearch}
+              />
+            ) : null}
+            {route === 'discover' ? <DiscoverPage onNotice={pushNotice} /> : null}
+            {route === 'search' ? (
+              <SearchPage
+                initialTrigger={searchTrigger}
+                inputRef={searchInputRef}
+                onNotice={pushNotice}
+                onSearch={submitSearch}
+                query={searchQuery}
+                setQuery={setSearchQuery}
+              />
+            ) : null}
+            {route === 'favorites' ? (
+              <FavoritesPage
+                auth={auth}
+                onLogin={() => setLoginOpen(true)}
+                onNotice={pushNotice}
+                profile={profile}
+              />
+            ) : null}
+            {route === 'settings' ? (
+              <SettingsPage
+                auth={auth}
+                onLogin={() => setLoginOpen(true)}
+                onLogout={() => void logout()}
+                onRenew={() => void renewLogin()}
+                onUpdate={updateSettings}
+                profile={profile}
+                settings={settings}
+              />
+            ) : null}
+          </main>
+
+          <PlayerPlaceholder
+            playback={playback}
+            onNext={() =>
+              void window.nyamiDesktop.playback.skipNext().then(setPlayback)
+            }
+            onPause={() =>
+              void window.nyamiDesktop.playback.pause().then(setPlayback)
+            }
+            onPlay={() => void togglePlayback()}
+            onPrevious={() =>
+              void window.nyamiDesktop.playback.skipPrevious().then(setPlayback)
+            }
+          />
+        </section>
+      </div>
+
+      <NoticeStack notices={notices.slice(-3)} />
+
+      {loginOpen ? (
+        <LoginDialog
+          auth={auth}
+          busy={qrBusy}
+          expiresAt={qrExpiresAt}
+          imageDataUrl={qrImageDataUrl}
+          onClose={() => setLoginOpen(false)}
+          onLogout={() => void logout()}
+          onRenew={() => void renewLogin()}
+          onStartQr={() => void startQrLogin()}
+          onWebLogin={() => void openWebLogin()}
+          profile={profile}
+          status={qrStatus}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** 渲染桌面端侧边栏导航和账号入口。 */
+function Sidebar({
+  auth,
+  profile,
+  route,
+  onLogin,
+  onRouteChange,
+}: {
+  auth: AuthStatus;
+  profile: UserProfile | null;
+  route: Route;
+  onLogin: () => void;
+  onRouteChange: (route: Route) => void;
+}): JSX.Element {
+  return (
+    <aside className="sidebar">
+      <div className="brand-lockup">
+        <div className="brand-mark">N</div>
+        <div>
+          <strong>Nyami</strong>
+          <span>桌面播放器</span>
+        </div>
+      </div>
+      <nav aria-label="主导航" className="primary-nav">
+        <p className="nav-label">浏览</p>
+        {NAV_ITEMS.map(item => (
+          <button
+            aria-current={route === item.route ? 'page' : undefined}
+            className={route === item.route ? 'nav-item active' : 'nav-item'}
+            key={item.route}
+            onClick={() => onRouteChange(item.route)}
+            type="button">
+            <Icon name={item.icon} size={18} />
+            <span>{item.label}</span>
+            {item.route === 'favorites' && auth.loggedIn ? (
+              <span className="nav-hint">账号</span>
+            ) : null}
+          </button>
+        ))}
+        <p className="nav-label nav-label-spaced">应用</p>
         <button
-          className={panel === 'login' ? 'tab active' : 'tab'}
-          onClick={() => setPanel('login')}
+          className={route === 'settings' ? 'nav-item active' : 'nav-item'}
+          onClick={() => onRouteChange('settings')}
           type="button">
-          登录与 WebContentsView
-        </button>
-        <button
-          className={panel === 'audio' ? 'tab active' : 'tab'}
-          onClick={() => setPanel('audio')}
-          type="button">
-          音频与离线播放
+          <Icon name="settings" size={18} />
+          <span>设置</span>
         </button>
       </nav>
+      <div className="sidebar-bottom">
+        {profile ? (
+          <button className="sidebar-account" onClick={onLogin} type="button">
+            <Avatar profile={profile} />
+            <span className="sidebar-account-copy">
+              <strong>{profile.name}</strong>
+              <small>UID {profile.uid}</small>
+            </span>
+            <Icon name="chevron-right" size={15} />
+          </button>
+        ) : (
+          <button className="sidebar-login" onClick={onLogin} type="button">
+            <Icon name="log-in" size={17} />
+            <span>登录 Bilibili</span>
+          </button>
+        )}
+        <p className="sidebar-footnote">阶段 3 · 桌面骨架</p>
+      </div>
+    </aside>
+  );
+}
 
-      {panel === 'login' ? (
-        <section className="panel-grid">
-          <section className="card qr-card">
-            <div className="card-heading">
-              <div>
-                <p className="eyebrow">AUTH PROBE</p>
-                <h2>二维码登录</h2>
-              </div>
-              <span className="badge">主进程轮询</span>
+/** 首页展示公开热门内容，并提供到搜索和发现页的快捷入口。 */
+function HomePage({
+  onNavigate,
+  onNotice,
+  onSearch,
+}: {
+  onNavigate: (route: Route) => void;
+  onNotice: (tone: NoticeTone, message: string) => void;
+  onSearch: (value: string) => void;
+}): JSX.Element {
+  const [state, setState] = useState<AsyncState>('loading');
+  const [data, setData] = useState<HomeSnapshot | null>(null);
+  const [error, setError] = useState('');
+  const requestIdRef = useRef(makeRequestId('home'));
+
+  /** 加载首页热门公开内容。 */
+  const load = useCallback(async (): Promise<void> => {
+    const requestId = makeRequestId('home');
+    requestIdRef.current = requestId;
+    setState('loading');
+    setError('');
+    try {
+      const result = await window.nyamiDesktop.content.getHome({requestId});
+      setData(result);
+      setState('success');
+    } catch (requestError) {
+      if (isAbortError(requestError)) {
+        return;
+      }
+      const message = getErrorMessage(requestError, '首页内容加载失败');
+      setError(message);
+      setState('error');
+      onNotice('error', message);
+    }
+  }, [onNotice]);
+
+  useEffect(() => {
+    void load();
+    return () => {
+      void window.nyamiDesktop.content.cancel({requestId: requestIdRef.current});
+    };
+  }, [load]);
+
+  return (
+    <div className="page-stack">
+      <section className="welcome-hero">
+        <div className="hero-copy">
+          <p className="section-kicker">YOUR DAILY LISTENING DESK</p>
+          <h2>把 Bilibili 的声音，放到桌面上。</h2>
+          <p>
+            在更宽的画布里浏览音乐视频、搜索收藏内容，并为之后的播放队列准备好入口。
+          </p>
+          <div className="hero-actions">
+            <button className="primary-button" onClick={() => onNavigate('discover')} type="button">
+              <Icon name="compass" size={17} />
+              浏览热门内容
+            </button>
+            <button className="secondary-button" onClick={() => onSearch('音乐')} type="button">
+              <Icon name="search" size={17} />
+              搜索音乐
+            </button>
+          </div>
+        </div>
+        <div className="hero-orbit" aria-hidden="true">
+          <span className="orbit-ring orbit-ring-one" />
+          <span className="orbit-ring orbit-ring-two" />
+          <div className="orbit-core"><Icon name="sparkles" size={27} /></div>
+        </div>
+      </section>
+
+      <section className="section-block">
+        <SectionHeading
+          action={
+            <button className="text-button" onClick={() => onNavigate('discover')} type="button">
+              查看全部 <Icon name="arrow-right" size={15} />
+            </button>
+          }
+          eyebrow="OPEN DISCOVERY"
+          title="今日热门"
+        />
+        {state === 'loading' ? <LoadingState label="正在加载热门内容" /> : null}
+        {state === 'error' ? <ErrorState message={error} onRetry={() => void load()} /> : null}
+        {state === 'success' && data?.featured.length === 0 && data.popular.length === 0 ? (
+          <EmptyState icon="compass" message="暂时没有可展示的公开内容" />
+        ) : null}
+        {state === 'success' ? (
+          <VideoGrid items={[...(data?.featured ?? []), ...(data?.popular ?? [])].slice(0, 8)} />
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+/** 发现页展示热门视频分页，并提供统一分页和重试反馈。 */
+function DiscoverPage({
+  onNotice,
+}: {
+  onNotice: (tone: NoticeTone, message: string) => void;
+}): JSX.Element {
+  const [page, setPage] = useState(1);
+  const [state, setState] = useState<AsyncState>('loading');
+  const [result, setResult] = useState<DesktopPage<DesktopVideo> | null>(null);
+  const [error, setError] = useState('');
+  const requestIdRef = useRef(makeRequestId('discover'));
+
+  /** 请求发现页指定分页。 */
+  const load = useCallback(async (targetPage: number): Promise<void> => {
+    const requestId = makeRequestId('discover');
+    requestIdRef.current = requestId;
+    setState('loading');
+    setError('');
+    const request: DiscoverContentRequest = {
+      requestId,
+      page: targetPage,
+    };
+    try {
+      const next = await window.nyamiDesktop.content.getDiscover(request);
+      setResult(next);
+      setPage(targetPage);
+      setState('success');
+    } catch (requestError) {
+      if (isAbortError(requestError)) {
+        return;
+      }
+      const message = getErrorMessage(requestError, '发现内容加载失败');
+      setError(message);
+      setState('error');
+      onNotice('error', message);
+    }
+  }, [onNotice]);
+
+  useEffect(() => {
+    void load(1);
+    return () => {
+      void window.nyamiDesktop.content.cancel({requestId: requestIdRef.current});
+    };
+  }, [load]);
+
+  return (
+    <div className="page-stack">
+      <PageIntro
+        eyebrow="DISCOVER"
+        title="发现新声音"
+        description="公开热门内容无需登录即可浏览；登录后可在收藏夹页继续整理自己的列表。"
+      />
+      {state === 'loading' ? <LoadingState label="正在加载热门视频" /> : null}
+      {state === 'error' ? <ErrorState message={error} onRetry={() => void load(page)} /> : null}
+      {state === 'success' && result?.items.length === 0 ? (
+        <EmptyState icon="compass" message="这一页暂时没有内容" />
+      ) : null}
+      {state === 'success' && result?.items.length ? (
+        <>
+          <VideoGrid items={result.items} />
+          <Pagination
+            hasMore={result.hasMore}
+            loading={false}
+            onNext={() => void load(page + 1)}
+            onPrevious={() => void load(page - 1)}
+            page={page}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** 搜索页支持分页、取消请求、重试和公开结果浏览。 */
+function SearchPage({
+  initialTrigger,
+  inputRef,
+  onNotice,
+  onSearch,
+  query,
+  setQuery,
+}: {
+  initialTrigger: number;
+  inputRef: React.RefObject<HTMLInputElement>;
+  onNotice: (tone: NoticeTone, message: string) => void;
+  onSearch: (value: string) => void;
+  query: string;
+  setQuery: (value: string) => void;
+}): JSX.Element {
+  const [page, setPage] = useState(1);
+  const [state, setState] = useState<AsyncState>('idle');
+  const [result, setResult] = useState<DesktopPage<DesktopVideo> | null>(null);
+  const [error, setError] = useState('');
+  const requestIdRef = useRef<string | null>(null);
+  const queryRef = useRef(query);
+  queryRef.current = query;
+
+  /** 取消上一笔搜索请求，避免旧结果覆盖当前关键词。 */
+  const cancelActiveRequest = useCallback((): void => {
+    const requestId = requestIdRef.current;
+    if (requestId) {
+      void window.nyamiDesktop.content.cancel({requestId});
+      requestIdRef.current = null;
+    }
+  }, []);
+
+  /** 请求搜索分页，并将取消视为正常的交互结果。 */
+  const load = useCallback(async (targetPage: number): Promise<void> => {
+    const normalized = queryRef.current.trim();
+    if (!normalized) {
+      setState('idle');
+      setResult(null);
+      return;
+    }
+    cancelActiveRequest();
+    const requestId = makeRequestId('search');
+    requestIdRef.current = requestId;
+    setState('loading');
+    setError('');
+    const request: SearchContentRequest = {
+      requestId,
+      keyword: normalized,
+      page: targetPage,
+    };
+    try {
+      const next = await window.nyamiDesktop.content.search(request);
+      if (requestIdRef.current !== requestId) {
+        return;
+      }
+      setResult(next);
+      setPage(targetPage);
+      setState('success');
+    } catch (requestError) {
+      if (requestIdRef.current !== requestId || isAbortError(requestError)) {
+        return;
+      }
+      const message = getErrorMessage(requestError, '搜索失败');
+      setError(message);
+      setState('error');
+      onNotice('error', message);
+    } finally {
+      if (requestIdRef.current === requestId) {
+        requestIdRef.current = null;
+      }
+    }
+  }, [cancelActiveRequest, onNotice]);
+
+  useEffect(() => {
+    if (initialTrigger > 0) {
+      void load(1);
+    }
+  }, [initialTrigger, load]);
+
+  useEffect(
+    () => () => {
+      cancelActiveRequest();
+    },
+    [cancelActiveRequest],
+  );
+
+  /** 处理搜索表单提交。 */
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    onSearch(query);
+  };
+
+  /** 处理 Escape，给用户一个明确的取消入口。 */
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === 'Escape' && state === 'loading') {
+      event.preventDefault();
+      cancelActiveRequest();
+      setState('idle');
+    }
+  };
+
+  return (
+    <div className="page-stack">
+      <PageIntro
+        eyebrow="SEARCH"
+        title="搜索 Bilibili 内容"
+        description="搜索请求在主进程执行，输入框始终保持可用；按 Esc 或点击取消即可中止当前请求。"
+      />
+      <form className="search-panel" onSubmit={handleSubmit}>
+        <Icon name="search" size={19} />
+        <input
+          aria-label="搜索关键词"
+          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+            setQuery(event.target.value)
+          }
+          onKeyDown={handleKeyDown}
+          placeholder="例如：周杰伦、钢琴、日语歌"
+          ref={inputRef}
+          value={query}
+        />
+        {state === 'loading' ? (
+          <button
+            className="subtle-button"
+            onClick={event => {
+              event.preventDefault();
+              cancelActiveRequest();
+              setState('idle');
+            }}
+            type="button">
+            取消
+          </button>
+        ) : (
+          <button className="primary-button compact" type="submit">
+            搜索
+          </button>
+        )}
+      </form>
+      {state === 'idle' && !result ? (
+        <EmptyState
+          icon="search"
+          message="输入关键词开始搜索公开视频"
+          secondary="未登录也可以浏览搜索结果"
+        />
+      ) : null}
+      {state === 'loading' ? <LoadingState label="正在搜索 Bilibili" /> : null}
+      {state === 'error' ? (
+        <ErrorState message={error} onRetry={() => void load(page)} />
+      ) : null}
+      {state === 'success' && result?.items.length === 0 ? (
+        <EmptyState icon="search" message={`没有找到“${query}”的结果`} />
+      ) : null}
+      {state === 'success' && result?.items.length ? (
+        <>
+          <div className="result-meta-row">
+            <span>“{query}”的搜索结果</span>
+            {result.total !== null ? <small>约 {result.total.toLocaleString()} 条</small> : null}
+          </div>
+          <VideoGrid items={result.items} />
+          <Pagination
+            hasMore={result.hasMore}
+            loading={false}
+            onNext={() => void load(page + 1)}
+            onPrevious={() => void load(page - 1)}
+            page={page}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** 收藏页展示当前账号的收藏夹目录和视频分页。 */
+function FavoritesPage({
+  auth,
+  onLogin,
+  onNotice,
+  profile,
+}: {
+  auth: AuthStatus;
+  onLogin: () => void;
+  onNotice: (tone: NoticeTone, message: string) => void;
+  profile: UserProfile | null;
+}): JSX.Element {
+  const [folderState, setFolderState] = useState<AsyncState>('idle');
+  const [folders, setFolders] = useState<FavoriteFolderSummary[]>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
+  const [videoState, setVideoState] = useState<AsyncState>('idle');
+  const [videos, setVideos] = useState<DesktopPage<DesktopVideo> | null>(null);
+  const [videoPage, setVideoPage] = useState(1);
+  const [error, setError] = useState('');
+  const folderRequestRef = useRef(makeRequestId('favorite-folders'));
+  const videoRequestRef = useRef(makeRequestId('favorite-videos'));
+
+  /** 加载当前账号收藏夹目录。 */
+  const loadFolders = useCallback(async (): Promise<void> => {
+    if (!auth.loggedIn || !auth.uid) {
+      setFolders([]);
+      setSelectedFolderId(null);
+      setFolderState('idle');
+      return;
+    }
+    const requestId = makeRequestId('favorite-folders');
+    folderRequestRef.current = requestId;
+    setFolderState('loading');
+    setError('');
+    const request: FavoriteFolderContentRequest = {
+      requestId,
+      uid: auth.uid,
+    };
+    try {
+      const next = await window.nyamiDesktop.content.getFavoriteFolders(request);
+      setFolders(next);
+      setSelectedFolderId(current => current ?? next[0]?.id ?? null);
+      setFolderState('success');
+    } catch (requestError) {
+      if (isAbortError(requestError)) {
+        return;
+      }
+      const message = getErrorMessage(requestError, '收藏夹目录加载失败');
+      setError(message);
+      setFolderState('error');
+      onNotice('error', message);
+    }
+  }, [auth.loggedIn, auth.uid, onNotice]);
+
+  /** 加载选中收藏夹的视频分页。 */
+  const loadVideos = useCallback(
+    async (folderId: number, targetPage: number): Promise<void> => {
+      if (!auth.loggedIn || !auth.uid) {
+        return;
+      }
+      const requestId = makeRequestId('favorite-videos');
+      videoRequestRef.current = requestId;
+      setVideoState('loading');
+      setError('');
+      const request: FavoriteVideoContentRequest = {
+        requestId,
+        uid: auth.uid,
+        mediaId: folderId,
+        page: targetPage,
+      };
+      try {
+        const next = await window.nyamiDesktop.content.getFavoriteVideos(request);
+        setVideos(next);
+        setVideoPage(targetPage);
+        setVideoState('success');
+      } catch (requestError) {
+        if (isAbortError(requestError)) {
+          return;
+        }
+        const message = getErrorMessage(requestError, '收藏视频加载失败');
+        setError(message);
+        setVideoState('error');
+        onNotice('error', message);
+      }
+    },
+    [auth.loggedIn, auth.uid, onNotice],
+  );
+
+  useEffect(() => {
+    void loadFolders();
+    return () => {
+      void window.nyamiDesktop.content.cancel({requestId: folderRequestRef.current});
+      void window.nyamiDesktop.content.cancel({requestId: videoRequestRef.current});
+    };
+  }, [loadFolders]);
+
+  useEffect(() => {
+    if (selectedFolderId !== null) {
+      void loadVideos(selectedFolderId, 1);
+    } else {
+      setVideos(null);
+      setVideoState('idle');
+    }
+  }, [loadVideos, selectedFolderId]);
+
+  if (!auth.loggedIn || !auth.uid) {
+    return (
+      <div className="page-stack">
+        <PageIntro
+          eyebrow="LIBRARY"
+          title="你的收藏夹"
+          description="登录后可以读取 Bilibili 收藏夹目录，并在桌面上分页浏览收藏视频。"
+        />
+        <EmptyState
+          action={
+            <button className="primary-button" onClick={onLogin} type="button">
+              <Icon name="log-in" size={17} />
+              登录后查看收藏
+            </button>
+          }
+          icon="heart"
+          message="登录后解锁收藏夹"
+          secondary="公开搜索和发现内容仍然可以正常使用"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="page-stack">
+      <PageIntro
+        eyebrow="LIBRARY"
+        title={profile?.name ? `${profile.name} 的收藏夹` : '我的收藏夹'}
+        description="目录和视频列表采用独立请求，切换收藏夹时不会阻塞整个窗口。"
+      />
+      <div className="library-layout">
+        <aside className="folder-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="section-kicker">FOLDERS</p>
+              <h3>收藏目录</h3>
             </div>
-            <p className="muted">
-              二维码密钥只留在 Electron 主进程；扫码确认后，登录页会在受控的
-              WebContentsView 中读取 Cookie。
-            </p>
-            <div className="qr-stage">
-              {qrImageDataUrl ? (
-                <img
-                  alt="Bilibili 登录二维码"
-                  className="qr-image"
-                  src={qrImageDataUrl}
-                />
-              ) : (
-                <div className="qr-placeholder">二维码尚未生成</div>
-              )}
-            </div>
-            <p className="probe-status" aria-live="polite">
-              {qrStatus}
-            </p>
-            {qrExpiresAt ? (
-              <p className="muted small">
-                过期时间：{new Date(qrExpiresAt).toLocaleTimeString()}
-              </p>
-            ) : null}
-            <div className="button-row">
+            <span className="count-badge">{folders.length}</span>
+          </div>
+          {folderState === 'loading' ? <LoadingState label="正在读取目录" compact /> : null}
+          {folderState === 'error' ? (
+            <ErrorState compact message={error} onRetry={() => void loadFolders()} />
+          ) : null}
+          {folderState === 'success' && folders.length === 0 ? (
+            <EmptyState compact icon="folder" message="还没有收藏夹" />
+          ) : null}
+          <div className="folder-list">
+            {folders.map(folder => (
               <button
-                className="primary-button"
-                disabled={loginBusy}
-                onClick={() => void startQrLogin()}
+                className={selectedFolderId === folder.id ? 'folder-item active' : 'folder-item'}
+                key={folder.id}
+                onClick={() => setSelectedFolderId(folder.id)}
                 type="button">
-                {loginBusy ? '生成中…' : '重新生成二维码'}
+                <Icon name="folder" size={17} />
+                <span>
+                  <strong>{folder.title}</strong>
+                  <small>{folder.mediaCount.toLocaleString()} 个视频</small>
+                </span>
+                <Icon name="chevron-right" size={14} />
               </button>
-              <button
-                className="secondary-button"
-                disabled={!auth.loggedIn}
-                onClick={() => void logout()}
-                type="button">
+            ))}
+          </div>
+        </aside>
+        <section className="library-content">
+          <div className="panel-heading">
+            <div>
+              <p className="section-kicker">VIDEOS</p>
+              <h3>{folders.find(folder => folder.id === selectedFolderId)?.title ?? '选择收藏夹'}</h3>
+            </div>
+            {videos?.total !== null && videos?.total !== undefined ? (
+              <span className="muted-label">{videos.total.toLocaleString()} 个视频</span>
+            ) : null}
+          </div>
+          {videoState === 'loading' ? <LoadingState label="正在读取收藏视频" /> : null}
+          {videoState === 'error' ? (
+            <ErrorState
+              message={error}
+              onRetry={() =>
+                selectedFolderId === null ? undefined : void loadVideos(selectedFolderId, videoPage)
+              }
+            />
+          ) : null}
+          {videoState === 'success' && videos?.items.length === 0 ? (
+            <EmptyState icon="folder" message="这个收藏夹暂时为空" />
+          ) : null}
+          {videoState === 'success' && videos?.items.length ? (
+            <>
+              {videos.description ? <p className="folder-description">{videos.description}</p> : null}
+              <VideoGrid items={videos.items} />
+              <Pagination
+                hasMore={videos.hasMore}
+                loading={false}
+                onNext={() =>
+                  selectedFolderId === null ? undefined : void loadVideos(selectedFolderId, videoPage + 1)
+                }
+                onPrevious={() =>
+                  selectedFolderId === null ? undefined : void loadVideos(selectedFolderId, videoPage - 1)
+                }
+                page={videoPage}
+              />
+            </>
+          ) : null}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/** 设置页承载桌面主题、窗口行为和账号操作。 */
+function SettingsPage({
+  auth,
+  onLogin,
+  onLogout,
+  onRenew,
+  onUpdate,
+  profile,
+  settings,
+}: {
+  auth: AuthStatus;
+  onLogin: () => void;
+  onLogout: () => void;
+  onRenew: () => void;
+  onUpdate: (patch: Parameters<typeof window.nyamiDesktop.settings.update>[0]) => void;
+  profile: UserProfile | null;
+  settings: DesktopSettings | null;
+}): JSX.Element {
+  return (
+    <div className="page-stack settings-page">
+      <PageIntro
+        eyebrow="SETTINGS"
+        title="桌面设置"
+        description="窗口尺寸和主题会保存到本地设置文件，重新启动后继续使用。"
+      />
+      <section className="settings-card">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">APPEARANCE</p>
+            <h3>外观主题</h3>
+          </div>
+        </div>
+        <div className="theme-options">
+          {THEME_OPTIONS.map(option => (
+            <button
+              className={settings?.theme === option.value ? 'theme-option active' : 'theme-option'}
+              key={option.value}
+              onClick={() => onUpdate({theme: option.value})}
+              type="button">
+              <span className={`theme-swatch swatch-${option.value}`} />
+              <span>
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </span>
+              {settings?.theme === option.value ? <Icon name="check" size={17} /> : null}
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="settings-card">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">WINDOW</p>
+            <h3>窗口行为</h3>
+          </div>
+        </div>
+        <label className="setting-row">
+          <span>
+            <strong>关闭窗口时最小化到托盘</strong>
+            <small>托盘能力将在阶段 6 接入；当前设置会先保存。</small>
+          </span>
+          <input
+            checked={settings?.closeToTray ?? false}
+            onChange={event => onUpdate({closeToTray: event.target.checked})}
+            type="checkbox"
+          />
+        </label>
+      </section>
+      <section className="settings-card account-settings-card">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">ACCOUNT</p>
+            <h3>账号与登录</h3>
+          </div>
+        </div>
+        {auth.loggedIn && profile ? (
+          <div className="account-settings-summary">
+            <Avatar profile={profile} size="large" />
+            <div>
+              <strong>{profile.name}</strong>
+              <span>UID {profile.uid}</span>
+              <small>{auth.refreshAvailable ? '支持自动续期' : '建议重新扫码获取续期凭证'}</small>
+            </div>
+            <div className="account-settings-actions">
+              <button className="secondary-button" onClick={onRenew} type="button">
+                <Icon name="refresh" size={16} />
+                续期登录
+              </button>
+              <button className="danger-button" onClick={onLogout} type="button">
+                <Icon name="log-out" size={16} />
                 退出登录
               </button>
             </div>
-          </section>
+          </div>
+        ) : (
+          <div className="account-settings-summary logged-out">
+            <div className="avatar avatar-large avatar-placeholder"><Icon name="user" size={22} /></div>
+            <div>
+              <strong>尚未登录</strong>
+              <span>公开内容仍可浏览</span>
+            </div>
+            <button className="primary-button" onClick={onLogin} type="button">
+              <Icon name="log-in" size={16} />
+              去登录
+            </button>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
 
-          <section className="card checklist-card">
-            <p className="eyebrow">SECURITY CHECK</p>
-            <h2>阶段 0 安全边界</h2>
-            <ul className="checklist">
-              <li>Renderer 不接收完整 Cookie 或 refresh token。</li>
-              <li>二维码轮询密钥不会通过普通 IPC 传入页面。</li>
-              <li>登录 WebContentsView 只允许 HTTPS Bilibili 域名。</li>
-              <li>凭证使用 Electron safeStorage 加密后写入 userData。</li>
-              <li>音频请求日志只保留域名、路径、Range 和响应摘要。</li>
-            </ul>
-          </section>
-        </section>
-      ) : (
-        <section className="panel-grid audio-grid">
-          <section className="card">
-            <div className="card-heading">
-              <div>
-                <p className="eyebrow">AUDIO PROBE</p>
-                <h2>远程音频与过期重取</h2>
-              </div>
-              <span className="badge">Range + Headers</span>
-            </div>
-            <label className="field-label" htmlFor="remote-url">
-              当前音频 URL
-            </label>
-            <input
-              id="remote-url"
-              className="text-input"
-              onChange={event => setRemoteUrl(event.target.value)}
-              placeholder="粘贴 Bilibili CDN 音频 URL"
-              spellCheck={false}
-              value={remoteUrl}
-            />
-            <label className="field-label" htmlFor="retry-url">
-              过期后的新 URL（可选）
-            </label>
-            <input
-              id="retry-url"
-              className="text-input"
-              onChange={event => setRetryUrl(event.target.value)}
-              placeholder="用于模拟 403/410 后重取"
-              spellCheck={false}
-              value={retryUrl}
-            />
-            <div className="button-row">
-              <button
-                className="primary-button"
-                disabled={!remoteUrl.trim()}
-                onClick={() => void inspectAudio()}
-                type="button">
-                探测并播放
+/** 受控登录弹窗，提供二维码、网页登录、续期和退出登录入口。 */
+function LoginDialog({
+  auth,
+  busy,
+  expiresAt,
+  imageDataUrl,
+  onClose,
+  onLogout,
+  onRenew,
+  onStartQr,
+  onWebLogin,
+  profile,
+  status,
+}: {
+  auth: AuthStatus;
+  busy: boolean;
+  expiresAt: number | null;
+  imageDataUrl: string;
+  onClose: () => void;
+  onLogout: () => void;
+  onRenew: () => void;
+  onStartQr: () => void;
+  onWebLogin: () => void;
+  profile: UserProfile | null;
+  status: string;
+}): JSX.Element {
+  return (
+    <div
+      aria-modal="true"
+      className="modal-backdrop"
+      onMouseDown={event => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+      role="dialog">
+      <section className="login-dialog">
+        <div className="dialog-header">
+          <div>
+            <p className="section-kicker">BILIBILI ACCOUNT</p>
+            <h2>{auth.loggedIn ? '账号已连接' : '连接 Bilibili 账号'}</h2>
+          </div>
+          <button aria-label="关闭登录窗口" className="icon-button" onClick={onClose} type="button">
+            <Icon name="x" size={18} />
+          </button>
+        </div>
+        {auth.loggedIn && profile ? (
+          <div className="logged-in-dialog">
+            <Avatar profile={profile} size="large" />
+            <strong>{profile.name}</strong>
+            <span>UID {profile.uid}</span>
+            <p>登录凭证保存在 Windows 安全存储中，Renderer 不会读取完整 Cookie。</p>
+            <div className="dialog-actions">
+              <button className="secondary-button" onClick={onRenew} type="button">
+                <Icon name="refresh" size={16} />
+                续期登录
               </button>
-              <button
-                className="secondary-button"
-                onClick={() => void playOfflineSample()}
-                type="button">
-                播放离线样例
-              </button>
-            </div>
-            <label className="file-button secondary-button">
-              选择本地音频
-              <input
-                accept="audio/*"
-                onChange={handleLocalFile}
-                type="file"
-              />
-            </label>
-            {localFileName ? <p className="muted small">{localFileName}</p> : null}
-            {audioSrc ? (
-              <audio
-                className="audio-player"
-                controls
-                onError={() => void refreshRequestRecords()}
-                onLoadedMetadata={() => void refreshRequestRecords()}
-                preload="metadata"
-                src={audioSrc}
-              />
-            ) : (
-              <div className="audio-placeholder">选择 URL 或本地文件开始播放</div>
-            )}
-            {probeError ? <p className="error-text">{probeError}</p> : null}
-          </section>
-
-          <section className="card result-card">
-            <div className="card-heading">
-              <div>
-                <p className="eyebrow">OBSERVATIONS</p>
-                <h2>请求与响应记录</h2>
-              </div>
-              <button
-                className="link-button"
-                onClick={async () => {
-                  await window.nyamiDesktop.probes.clearRecentAudioRequests();
-                  setRequestRecords([]);
-                }}
-                type="button">
-                清空
+              <button className="danger-button" onClick={onLogout} type="button">
+                <Icon name="log-out" size={16} />
+                退出登录
               </button>
             </div>
-            {probeResult ? (
-              <div className="result-summary">
-                <span className={probeResult.ok ? 'result-ok' : 'result-fail'}>
-                  {probeResult.ok ? '请求成功' : '请求失败'}
-                </span>
-                <span>{probeResult.rangeSupported ? '支持 Range' : '未确认 Range'}</span>
-                {probeResult.retried ? <span>已执行重取</span> : null}
-              </div>
-            ) : (
-              <p className="muted">探测结果将在这里显示。</p>
-            )}
-            <div className="request-list">
-              {requestRecords.length ? (
-                requestRecords.map(record => (
-                  <div className="request-row" key={`${record.requestId}-${record.timestamp}`}>
-                    <div>
-                      <strong>{record.host}</strong>
-                      <span>{record.pathname}</span>
-                    </div>
-                    <div className="request-meta">
-                      <span>{record.status ?? '—'}</span>
-                      <span>{record.range ?? '无 Range'}</span>
-                      <span>{record.contentRange ?? '无 Content-Range'}</span>
-                    </div>
-                  </div>
-                ))
+          </div>
+        ) : (
+          <>
+            <div className="login-method-tabs">
+              <span className="login-method active">扫码登录</span>
+              <button className="text-button" onClick={onWebLogin} type="button">
+                <Icon name="user" size={15} />
+                网页登录
+              </button>
+            </div>
+            <div className="qr-login-stage">
+              {imageDataUrl ? (
+                <img alt="Bilibili 登录二维码" className="qr-image" src={imageDataUrl} />
               ) : (
-                <div className="empty-state">播放远程音频后刷新这里的 Chromium 请求摘要。</div>
+                <div className="qr-placeholder"><Icon name="loader" size={22} />正在准备二维码</div>
               )}
             </div>
-          </section>
-        </section>
-      )}
-
-      <footer className="footer-note">
-        阶段 0 spike · Electron {window.navigator.userAgent.match(/Electron\/([^ ]+)/)?.[1] ?? 'dev'} ·
-        目标 Windows 10/11 x64
-      </footer>
-    </main>
+            <p aria-live="polite" className="login-status">{status}</p>
+            {expiresAt ? <p className="muted-label">二维码有效期至 {new Date(expiresAt).toLocaleTimeString()}</p> : null}
+            <div className="dialog-actions">
+              <button className="primary-button" disabled={busy} onClick={onStartQr} type="button">
+                <Icon name="refresh" size={16} />
+                {busy ? '生成中…' : '重新生成二维码'}
+              </button>
+              <button className="secondary-button" onClick={onWebLogin} type="button">
+                <Icon name="log-in" size={16} />
+                使用网页登录
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+    </div>
   );
+}
+
+/** 渲染统一视频卡片网格，保留封面比例避免异步图片造成布局跳动。 */
+function VideoGrid({items}: {items: DesktopVideo[]}): JSX.Element {
+  return (
+    <div className="video-grid">
+      {items.map(video => <VideoCard item={video} key={video.bvid} />)}
+    </div>
+  );
+}
+
+/** 渲染一个公开视频摘要卡片。 */
+function VideoCard({item}: {item: DesktopVideo}): JSX.Element {
+  return (
+    <article className="video-card">
+      <div className="video-cover-wrap">
+        {item.cover ? <img alt="" className="video-cover" loading="lazy" src={item.cover} /> : <div className="cover-placeholder"><Icon name="play" size={22} /></div>}
+        <span className="duration-chip">{formatDuration(item.duration)}</span>
+      </div>
+      <div className="video-card-body">
+        <h3 title={item.title}>{item.title}</h3>
+        <p>{item.author}</p>
+        <div className="video-card-meta">
+          <span>{formatDate(item.pubtime)}</span>
+          {item.source === 'favorite' ? <span className="source-chip">已收藏</span> : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/** 渲染页面标题区。 */
+function PageIntro({
+  description,
+  eyebrow,
+  title,
+}: {
+  description: string;
+  eyebrow: string;
+  title: string;
+}): JSX.Element {
+  return (
+    <section className="page-intro">
+      <p className="section-kicker">{eyebrow}</p>
+      <h2>{title}</h2>
+      <p>{description}</p>
+    </section>
+  );
+}
+
+/** 渲染区块标题和可选动作。 */
+function SectionHeading({
+  action,
+  eyebrow,
+  title,
+}: {
+  action?: ReactNode;
+  eyebrow: string;
+  title: string;
+}): JSX.Element {
+  return (
+    <div className="section-heading">
+      <div>
+        <p className="section-kicker">{eyebrow}</p>
+        <h2>{title}</h2>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+/** 渲染统一加载状态。 */
+function LoadingState({label, compact = false}: {label: string; compact?: boolean}): JSX.Element {
+  return (
+    <div className={compact ? 'state-card compact' : 'state-card'} role="status">
+      <Icon className="spin" name="loader" size={20} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+/** 渲染统一空状态，并在需要时提供主操作。 */
+function EmptyState({
+  action,
+  compact = false,
+  icon,
+  message,
+  secondary,
+}: {
+  action?: ReactNode;
+  compact?: boolean;
+  icon: IconName;
+  message: string;
+  secondary?: string;
+}): JSX.Element {
+  return (
+    <div className={compact ? 'state-card empty-state compact' : 'state-card empty-state'}>
+      <span className="state-icon"><Icon name={icon} size={21} /></span>
+      <strong>{message}</strong>
+      {secondary ? <span>{secondary}</span> : null}
+      {action}
+    </div>
+  );
+}
+
+/** 渲染统一错误状态和重试入口。 */
+function ErrorState({
+  compact = false,
+  message,
+  onRetry,
+}: {
+  compact?: boolean;
+  message: string;
+  onRetry: () => void;
+}): JSX.Element {
+  return (
+    <div className={compact ? 'state-card error-state compact' : 'state-card error-state'} role="alert">
+      <span className="state-icon error"><Icon name="alert" size={21} /></span>
+      <strong>{message}</strong>
+      <button className="text-button" onClick={onRetry} type="button">
+        <Icon name="refresh" size={15} />
+        重试
+      </button>
+    </div>
+  );
+}
+
+/** 渲染统一分页控制，避免列表页面重复实现边界判断。 */
+function Pagination({
+  hasMore,
+  loading,
+  onNext,
+  onPrevious,
+  page,
+}: {
+  hasMore: boolean;
+  loading: boolean;
+  onNext: () => void;
+  onPrevious: () => void;
+  page: number;
+}): JSX.Element {
+  return (
+    <nav aria-label="分页" className="pagination">
+      <button
+        aria-label="上一页"
+        className="icon-button"
+        disabled={loading || page <= 1}
+        onClick={onPrevious}
+        title="上一页"
+        type="button">
+        <Icon name="chevron-left" size={17} />
+      </button>
+      <span>第 {page} 页</span>
+      <button
+        aria-label="下一页"
+        className="icon-button"
+        disabled={loading || !hasMore}
+        onClick={onNext}
+        title="下一页"
+        type="button">
+        <Icon name="chevron-right" size={17} />
+      </button>
+    </nav>
+  );
+}
+
+/** 渲染底部播放器占位，提前固定桌面信息层级。 */
+function PlayerPlaceholder({
+  playback,
+  onNext,
+  onPause,
+  onPlay,
+  onPrevious,
+}: {
+  playback: PlaybackSnapshot;
+  onNext: () => void;
+  onPause: () => void;
+  onPlay: () => void;
+  onPrevious: () => void;
+}): JSX.Element {
+  const isPlaying = playback.state === 'playing';
+  return (
+    <footer className="player-placeholder">
+      <div className="player-track">
+        <div className="player-art"><Icon name="play" size={18} /></div>
+        <div>
+          <strong>{playback.trackId ? playback.trackId : '尚未选择歌曲'}</strong>
+          <span>{playback.queueLength ? `${playback.queueLength} 首在队列中` : '播放队列将在阶段 4 接入'}</span>
+        </div>
+      </div>
+      <div className="player-controls">
+        <button aria-label="上一首" className="icon-button" onClick={onPrevious} title="上一首" type="button"><Icon name="arrow-left" size={17} /></button>
+        <button aria-label={isPlaying ? '暂停' : '播放'} className="player-main-button" onClick={isPlaying ? onPause : onPlay} title={isPlaying ? '暂停' : '播放'} type="button"><Icon name={isPlaying ? 'pause' : 'play'} size={18} /></button>
+        <button aria-label="下一首" className="icon-button" onClick={onNext} title="下一首" type="button"><Icon name="arrow-right" size={17} /></button>
+      </div>
+      <div className="player-status">
+        <span className="player-progress-track"><span style={{width: `${getProgressPercent(playback)}%`}} /></span>
+        <span>{formatDuration(playback.position)} / {formatDuration(playback.duration)}</span>
+      </div>
+    </footer>
+  );
+}
+
+/** 渲染全局任务通知下拉面板。 */
+function TaskCenter({
+  notices,
+  onDismiss,
+}: {
+  notices: Notice[];
+  onDismiss: (id: number) => void;
+}): JSX.Element {
+  return (
+    <div className="task-center" role="status">
+      <div className="task-center-header">
+        <strong>任务通知</strong>
+        <span>{notices.length ? `${notices.length} 条` : '暂无'}</span>
+      </div>
+      {notices.length ? notices.slice().reverse().map(notice => (
+        <div className={`task-item ${notice.tone}`} key={notice.id}>
+          <span className="task-item-icon"><Icon name={notice.tone === 'error' ? 'alert' : notice.tone === 'success' ? 'check' : 'sparkles'} size={15} /></span>
+          <span>{notice.message}</span>
+          <button aria-label="移除通知" className="task-dismiss" onClick={() => onDismiss(notice.id)} type="button"><Icon name="x" size={13} /></button>
+        </div>
+      )) : <div className="task-empty">登录、搜索和同步状态会显示在这里。</div>}
+    </div>
+  );
+}
+
+/** 渲染短时提示栈。 */
+function NoticeStack({notices}: {notices: Notice[]}): JSX.Element {
+  return (
+    <div aria-live="polite" className="notice-stack">
+      {notices.map(notice => (
+        <div className={`notice-toast ${notice.tone}`} key={notice.id}>
+          <Icon name={notice.tone === 'error' ? 'alert' : notice.tone === 'success' ? 'check' : 'sparkles'} size={16} />
+          <span>{notice.message}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 渲染账号头像，缺少头像时使用无障碍友好的默认图标。 */
+function Avatar({
+  profile,
+  size = 'small',
+}: {
+  profile: UserProfile | null;
+  size?: 'small' | 'large';
+}): JSX.Element {
+  if (profile?.avatar) {
+    return <img alt="" className={`avatar avatar-${size}`} src={profile.avatar} />;
+  }
+  return <span className={`avatar avatar-${size} avatar-placeholder`}><Icon name="user" size={size === 'large' ? 22 : 16} /></span>;
+}
+
+/** 将秒数格式化为播放器和卡片可读的时长。 */
+function formatDuration(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '--:--';
+  }
+  const seconds = Math.floor(value);
+  const minutes = Math.floor(seconds / 60);
+  const remainder = String(seconds % 60).padStart(2, '0');
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    return `${hours}:${String(minutes % 60).padStart(2, '0')}:${remainder}`;
+  }
+  return `${minutes}:${remainder}`;
+}
+
+/** 将 Unix 秒时间戳格式化为内容卡片日期。 */
+function formatDate(value: number): string {
+  if (!value) {
+    return '日期未知';
+  }
+  return new Date(value * 1000).toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
+/** 读取主进程或网络错误的安全展示文案。 */
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/** 判断请求是否因用户取消而结束。 */
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof Error && error.name === 'AbortError') ||
+    (error instanceof Error && error.message.includes('请求已取消'))
+  );
+}
+
+/** 生成仅用于当前 Renderer 生命周期的请求 ID。 */
+function makeRequestId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** 计算播放器进度百分比，避免无效时长产生布局异常。 */
+function getProgressPercent(snapshot: PlaybackSnapshot): number {
+  if (!snapshot.duration || snapshot.duration <= 0) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, (snapshot.position / snapshot.duration) * 100));
+}
+
+/** 返回侧边栏路由的中文标题。 */
+function getRouteTitle(route: Route): string {
+  return NAV_ITEMS.find(item => item.route === route)?.label ?? '设置';
 }
