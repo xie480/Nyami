@@ -27,12 +27,10 @@ import type {
   DesktopUpdateInfo,
   DesktopVideo,
   DesktopWindowState,
-  DiscoverContentRequest,
   FavoriteFolderContentRequest,
   FavoriteFolderSummary,
   FavoriteSearchContentRequest,
   FavoriteVideoContentRequest,
-  HomeSnapshot,
   PlaybackAudioEvent,
   PlaybackQueueContext,
   PlaybackQueueItem,
@@ -47,7 +45,7 @@ import {AudioSettingsPanel} from './audio/AudioSettingsPanel';
 import {DEFAULT_DESKTOP_AUDIO_SETTINGS} from './audio/eqPresets';
 import {ElectronAudioPlayerAdapter} from './audio/electronAudioPlayer';
 
-type Route = 'home' | 'discover' | 'search' | 'favorites' | 'settings';
+type Route = 'search' | 'favorites' | 'settings';
 type NoticeTone = 'info' | 'success' | 'error';
 
 type Notice = {
@@ -63,8 +61,6 @@ const NAV_ITEMS: Array<{
   label: string;
   icon: IconName;
 }> = [
-  {route: 'home', label: '首页', icon: 'home'},
-  {route: 'discover', label: '发现', icon: 'compass'},
   {route: 'search', label: '搜索', icon: 'search'},
   {route: 'favorites', label: '收藏夹', icon: 'heart'},
 ];
@@ -136,7 +132,7 @@ const EMPTY_UPDATE: DesktopUpdateInfo = {
 
 /** 阶段 3 桌面端应用根组件，负责导航、认证状态和全局任务通知。 */
 export function App(): JSX.Element {
-  const [route, setRoute] = useState<Route>('home');
+  const [route, setRoute] = useState<Route>('search');
   const [auth, setAuth] = useState<AuthStatus>({
     loggedIn: false,
     uid: null,
@@ -872,22 +868,6 @@ export function App(): JSX.Element {
           ) : null}
 
           <main className="page-scroll">
-            {route === 'home' ? (
-              <HomePage
-                onAddVideo={addVideoToQueue}
-                onNavigate={setRoute}
-                onNotice={pushNotice}
-                onPlayVideo={playVideo}
-                onSearch={submitSearch}
-              />
-            ) : null}
-            {route === 'discover' ? (
-              <DiscoverPage
-                onAddVideo={addVideoToQueue}
-                onNotice={pushNotice}
-                onPlayVideo={playVideo}
-              />
-            ) : null}
             {route === 'search' ? (
               <SearchPage
                 initialTrigger={searchTrigger}
@@ -1103,188 +1083,6 @@ function Sidebar({
         <p className="sidebar-footnote">阶段 5 · 收藏索引</p>
       </div>
     </aside>
-  );
-}
-
-/** 首页展示公开热门内容，并提供到搜索和发现页的快捷入口。 */
-function HomePage({
-  onAddVideo,
-  onNavigate,
-  onNotice,
-  onPlayVideo,
-  onSearch,
-}: {
-  onAddVideo: (video: DesktopVideo) => void;
-  onNavigate: (route: Route) => void;
-  onNotice: (tone: NoticeTone, message: string) => void;
-  onPlayVideo: (video: DesktopVideo) => void;
-  onSearch: (value: string) => void;
-}): JSX.Element {
-  const [state, setState] = useState<AsyncState>('loading');
-  const [data, setData] = useState<HomeSnapshot | null>(null);
-  const [error, setError] = useState('');
-  const requestIdRef = useRef(makeRequestId('home'));
-
-  /** 加载首页热门公开内容。 */
-  const load = useCallback(async (): Promise<void> => {
-    const requestId = makeRequestId('home');
-    requestIdRef.current = requestId;
-    setState('loading');
-    setError('');
-    try {
-      const result = await window.nyamiDesktop.content.getHome({requestId});
-      setData(result);
-      setState('success');
-    } catch (requestError) {
-      if (isAbortError(requestError)) {
-        return;
-      }
-      const message = getErrorMessage(requestError, '首页内容加载失败');
-      setError(message);
-      setState('error');
-      onNotice('error', message);
-    }
-  }, [onNotice]);
-
-  useEffect(() => {
-    void load();
-    return () => {
-      void window.nyamiDesktop.content.cancel({requestId: requestIdRef.current});
-    };
-  }, [load]);
-
-  return (
-    <div className="page-stack">
-      <section className="welcome-hero">
-        <div className="hero-copy">
-          <p className="section-kicker">YOUR DAILY LISTENING DESK</p>
-          <h2>把 Bilibili 的声音，放到桌面上。</h2>
-          <p>
-            在更宽的画布里浏览音乐视频、搜索收藏内容，并为之后的播放队列准备好入口。
-          </p>
-          <div className="hero-actions">
-            <button className="primary-button" onClick={() => onNavigate('discover')} type="button">
-              <Icon name="compass" size={17} />
-              浏览热门内容
-            </button>
-            <button className="secondary-button" onClick={() => onSearch('音乐')} type="button">
-              <Icon name="search" size={17} />
-              搜索音乐
-            </button>
-          </div>
-        </div>
-        <div className="hero-orbit" aria-hidden="true">
-          <span className="orbit-ring orbit-ring-one" />
-          <span className="orbit-ring orbit-ring-two" />
-          <div className="orbit-core"><Icon name="sparkles" size={27} /></div>
-        </div>
-      </section>
-
-      <section className="section-block">
-        <SectionHeading
-          action={
-            <button className="text-button" onClick={() => onNavigate('discover')} type="button">
-              查看全部 <Icon name="arrow-right" size={15} />
-            </button>
-          }
-          eyebrow="OPEN DISCOVERY"
-          title="今日热门"
-        />
-        {state === 'loading' ? <LoadingState label="正在加载热门内容" /> : null}
-        {state === 'error' ? <ErrorState message={error} onRetry={() => void load()} /> : null}
-        {state === 'success' && data?.featured.length === 0 && data.popular.length === 0 ? (
-          <EmptyState icon="compass" message="暂时没有可展示的公开内容" />
-        ) : null}
-        {state === 'success' ? (
-          <VideoGrid
-            items={[...(data?.featured ?? []), ...(data?.popular ?? [])].slice(0, 8)}
-            onAddVideo={onAddVideo}
-            onPlayVideo={onPlayVideo}
-          />
-        ) : null}
-      </section>
-    </div>
-  );
-}
-
-/** 发现页展示热门视频分页，并提供统一分页和重试反馈。 */
-function DiscoverPage({
-  onAddVideo,
-  onNotice,
-  onPlayVideo,
-}: {
-  onAddVideo: (video: DesktopVideo) => void;
-  onNotice: (tone: NoticeTone, message: string) => void;
-  onPlayVideo: (video: DesktopVideo) => void;
-}): JSX.Element {
-  const [page, setPage] = useState(1);
-  const [state, setState] = useState<AsyncState>('loading');
-  const [result, setResult] = useState<DesktopPage<DesktopVideo> | null>(null);
-  const [error, setError] = useState('');
-  const requestIdRef = useRef(makeRequestId('discover'));
-
-  /** 请求发现页指定分页。 */
-  const load = useCallback(async (targetPage: number): Promise<void> => {
-    const requestId = makeRequestId('discover');
-    requestIdRef.current = requestId;
-    setState('loading');
-    setError('');
-    const request: DiscoverContentRequest = {
-      requestId,
-      page: targetPage,
-    };
-    try {
-      const next = await window.nyamiDesktop.content.getDiscover(request);
-      setResult(next);
-      setPage(targetPage);
-      setState('success');
-    } catch (requestError) {
-      if (isAbortError(requestError)) {
-        return;
-      }
-      const message = getErrorMessage(requestError, '发现内容加载失败');
-      setError(message);
-      setState('error');
-      onNotice('error', message);
-    }
-  }, [onNotice]);
-
-  useEffect(() => {
-    void load(1);
-    return () => {
-      void window.nyamiDesktop.content.cancel({requestId: requestIdRef.current});
-    };
-  }, [load]);
-
-  return (
-    <div className="page-stack">
-      <PageIntro
-        eyebrow="DISCOVER"
-        title="发现新声音"
-        description="公开热门内容无需登录即可浏览；登录后可在收藏夹页继续整理自己的列表。"
-      />
-      {state === 'loading' ? <LoadingState label="正在加载热门视频" /> : null}
-      {state === 'error' ? <ErrorState message={error} onRetry={() => void load(page)} /> : null}
-      {state === 'success' && result?.items.length === 0 ? (
-        <EmptyState icon="compass" message="这一页暂时没有内容" />
-      ) : null}
-      {state === 'success' && result?.items.length ? (
-        <>
-          <VideoGrid
-            items={result.items}
-            onAddVideo={onAddVideo}
-            onPlayVideo={onPlayVideo}
-          />
-          <Pagination
-            hasMore={result.hasMore}
-            loading={false}
-            onNext={() => void load(page + 1)}
-            onPrevious={() => void load(page - 1)}
-            page={page}
-          />
-        </>
-      ) : null}
-    </div>
   );
 }
 
@@ -2869,3 +2667,4 @@ function getPopularQueueContext(
 function getRouteTitle(route: Route): string {
   return NAV_ITEMS.find(item => item.route === route)?.label ?? '设置';
 }
+
