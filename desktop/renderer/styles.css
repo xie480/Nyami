@@ -188,7 +188,8 @@ h2 {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.qr-stage canvas {
+.qr-stage canvas,
+.qr-image {
   display: block;
   width: 240px;
   height: 240px;

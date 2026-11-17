@@ -69,7 +69,7 @@ export type AuthStatus = {
 };
 
 export type QrSessionStartResult = {
-  qrUrl: string;
+  qrImageDataUrl: string;
   expiresAt: number;
 };
 

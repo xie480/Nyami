@@ -1,5 +1,4 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import QRCode from 'qrcode';
 import type {
   AudioProbeResult,
   AudioRequestRecord,
@@ -19,7 +18,7 @@ export function App(): JSX.Element {
     loggedIn: false,
     uid: null,
   });
-  const [qrUrl, setQrUrl] = useState('');
+  const [qrImageDataUrl, setQrImageDataUrl] = useState('');
   const [qrStatus, setQrStatus] = useState('准备生成二维码');
   const [qrExpiresAt, setQrExpiresAt] = useState<number | null>(null);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -30,7 +29,6 @@ export function App(): JSX.Element {
   const [probeError, setProbeError] = useState('');
   const [requestRecords, setRequestRecords] = useState<AudioRequestRecord[]>([]);
   const [localFileName, setLocalFileName] = useState('');
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const localObjectUrlRef = useRef<string | null>(null);
   const qrStartedRef = useRef(false);
 
@@ -49,7 +47,7 @@ export function App(): JSX.Element {
     setQrStatus('正在生成二维码');
     try {
       const result = await window.nyamiDesktop.auth.startQrLogin();
-      setQrUrl(result.qrUrl);
+      setQrImageDataUrl(result.qrImageDataUrl);
       setQrExpiresAt(result.expiresAt);
       setQrStatus('请使用 Bilibili 客户端扫码');
     } catch (error) {
@@ -58,24 +56,6 @@ export function App(): JSX.Element {
       setLoginBusy(false);
     }
   }, []);
-
-  /**
-   * 将二维码地址绘制到 Canvas，不把轮询密钥写入页面。
-   */
-  useEffect(() => {
-    if (!qrUrl || !canvasRef.current) {
-      return;
-    }
-    void QRCode.toCanvas(canvasRef.current, qrUrl, {
-      width: 240,
-      margin: 2,
-      errorCorrectionLevel: 'M',
-      color: {
-        dark: '#0d1117',
-        light: '#ffffff',
-      },
-    });
-  }, [qrUrl]);
 
   /**
    * 注册二维码状态事件并在启动时读取登录状态。
@@ -180,7 +160,7 @@ export function App(): JSX.Element {
   const logout = useCallback(async () => {
     await window.nyamiDesktop.auth.logout();
     await refreshAuthStatus();
-    setQrUrl('');
+    setQrImageDataUrl('');
   }, [refreshAuthStatus]);
 
   return (
@@ -226,8 +206,12 @@ export function App(): JSX.Element {
               WebContentsView 中读取 Cookie。
             </p>
             <div className="qr-stage">
-              {qrUrl ? (
-                <canvas ref={canvasRef} aria-label="Bilibili 登录二维码" />
+              {qrImageDataUrl ? (
+                <img
+                  alt="Bilibili 登录二维码"
+                  className="qr-image"
+                  src={qrImageDataUrl}
+                />
               ) : (
                 <div className="qr-placeholder">二维码尚未生成</div>
               )}

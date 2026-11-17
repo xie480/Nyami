@@ -1,4 +1,5 @@
 import {BrowserWindow} from 'electron';
+import QRCode from 'qrcode';
 import {
   BILIBILI_QR_LIFETIME_MS,
   BILIBILI_QR_POLL_INTERVAL_MS,
@@ -73,7 +74,11 @@ export class QrLoginController {
     });
     this.schedulePoll();
     return {
-      qrUrl: qr.url,
+      qrImageDataUrl: await QRCode.toDataURL(qr.url, {
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 480,
+      }),
       expiresAt,
     };
   }
