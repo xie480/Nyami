@@ -121,7 +121,7 @@ const EMPTY_SYNC: SyncSnapshot = {
 
 const EMPTY_UPDATE: DesktopUpdateInfo = {
   status: 'idle',
-  currentVersion: '1.0.0',
+  currentVersion: '',
   latestVersion: null,
   releaseDate: null,
   notes: null,
@@ -1774,7 +1774,9 @@ function SettingsPage({
             <p className="section-kicker">RELEASE</p>
             <h3>版本与更新</h3>
           </div>
-          <span className="status-chip">v{updateInfo.currentVersion}</span>
+          <span className="status-chip">
+            {updateInfo.currentVersion ? `v${updateInfo.currentVersion}` : '读取版本…'}
+          </span>
         </div>
         <div className="update-summary" role="status">
           <strong>{getUpdateStatusLabel(updateInfo)}</strong>

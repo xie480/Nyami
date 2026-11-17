@@ -32,7 +32,7 @@ async function readDesktopVersion() {
  */
 async function generateReleaseMetadata() {
   const version = await readDesktopVersion();
-  const artifacts = await listArtifacts();
+  const artifacts = await listArtifacts(version);
   const setupArtifact = artifacts.find(name => /-setup\.exe$/i.test(name));
   const portableArtifact = artifacts.find(name => /-portable\.exe$/i.test(name));
   if (!setupArtifact || !portableArtifact) {
@@ -87,7 +87,7 @@ async function generateReleaseMetadata() {
 async function checkReleaseArtifacts() {
   const version = await readDesktopVersion();
   await assertNoDebugFiles(DESKTOP_OUTPUT_DIRECTORY);
-  const artifacts = await listArtifacts();
+  const artifacts = await listArtifacts(version);
   if (!artifacts.some(name => /-setup\.exe$/i.test(name))) {
     throw new Error('未找到 NSIS 安装包');
   }
@@ -118,16 +118,27 @@ async function checkReleaseArtifacts() {
  * 列出当前发布目录中的可分发二进制和 blockmap 文件。
  * @returns 产物文件名列表
  */
-async function listArtifacts() {
+async function listArtifacts(version) {
   const entries = await fs.readdir(RELEASE_DIRECTORY, {withFileTypes: true});
+  const versionPattern = new RegExp(`-${escapeRegExp(version)}-`);
   return entries
     .filter(
       entry =>
         entry.isFile() &&
+        versionPattern.test(entry.name) &&
         (entry.name.endsWith('.exe') || entry.name.endsWith('.blockmap')),
     )
     .map(entry => entry.name)
     .sort();
+}
+
+/**
+ * 将版本文本转成可安全拼接到正则表达式中的片段。
+ * @param value 原始文本
+ * @returns 转义后的正则片段
+ */
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**

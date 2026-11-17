@@ -21,10 +21,14 @@ npmRebuild: false
 buildDependenciesFromSource: false
 artifactName: Nyami-${version}-${arch}.${ext}
 electronVersion: 45.3.3
+electronDist: ../node_modules/electron/dist
 win:
-  publisherName: Nyami Project
+  # 保留图标和版本资源编辑，未配置证书时只跳过代码签名。
+  signAndEditExecutable: true
   signExecutable: true
   verifyUpdateCodeSignature: true
+  signtoolOptions:
+    publisherName: Nyami Project
   target:
     - target: nsis
       arch:

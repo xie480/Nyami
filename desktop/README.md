@@ -25,7 +25,7 @@ npm run desktop:release:check
 
 ### 代码签名
 
-公开发布前在构建环境配置 `CSC_LINK`（或 `WIN_CSC_LINK`）和 `CSC_KEY_PASSWORD`，并让证书发布者与 `win.publisherName` 的 `Nyami Project` 一致。未配置证书时仍可生成内部 Alpha 包，但安装器会显示未签名风险，不能视为 Stable 发布。
+公开发布前在构建环境配置 `CSC_LINK`（或 `WIN_CSC_LINK`）和 `CSC_KEY_PASSWORD`，并让证书发布者与 `win.signtoolOptions.publisherName` 的 `Nyami Project` 一致。未配置证书时仍可生成内部 Alpha 包，但安装器会显示未签名风险，不能视为 Stable 发布。`signExecutable` 已保持开启，electron-builder 会在没有证书时跳过签名；接入证书后无需修改安装器结构。
 
 ## 阶段 2 运行时
 
