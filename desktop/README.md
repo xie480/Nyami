@@ -59,7 +59,7 @@ npm run desktop:package
 - **登录与 WebContentsView**：主进程生成二维码并轮询，Renderer 不接收二维码轮询密钥；扫码成功后由主进程打开受控 Bilibili `WebContentsView`，读取 Cookie 后使用 Electron `safeStorage` 保存。
 - **音频与离线播放**：阶段 4 已实现主进程带 `Referer`、`User-Agent` 的音频解析和下载、Range 响应、过期 URL 重取、缓存优先播放以及断网诊断；真实 CDN 行为仍需在具备窗口权限的 Windows 环境补验。
 
-阶段 4 不实现完整收藏同步、SQLite Repository、EQ、频谱和系统媒体键；这些内容按 `WINDOWS_DESKTOP_PLAN.md` 在后续阶段迁移。
+阶段 6 已补齐桌面端 EQ、频谱、托盘、快捷键、媒体键、通知、缓存管理和日志导出；真实 Windows 音频效果、系统媒体键占用情况和通知展示仍需在目标系统手动验收。
 
 ## 阶段 5 收藏同步、推荐和本地数据库
 
@@ -70,3 +70,18 @@ npm run desktop:package
 - `content:get-recommendations` 通过 Preload 白名单提供首页个性化视频推荐，完整 Cookie、数据库连接和同步对象仍只在主进程内存在。
 
 阶段 5 已执行 `npm run desktop:typecheck`、`npm run desktop:build` 和 `git diff --check`。真实账号同步、收藏数据量、网络限流、标签接口和 Windows 窗口手动验收仍需在具备 Electron 窗口权限并登录 Bilibili 的环境中完成。
+
+## 阶段 6 EQ、频谱与 Windows 桌面能力
+
+- `desktop/renderer/audio/audioEffectsController.ts` 使用 `AudioWorklet` 承载双声道独立的 RBJ Peaking 滤波器、10 段 Graphic EQ、8 段 PEQ、Limiter 和 1024 点 FFT；参数以完整快照同步，AudioWorklet 失败时回退到 HTMLAudioElement 直通播放。
+- `desktop/renderer/audio/fft.ts` 迁移 Android 端的 Hann 窗、Radix-2 FFT、固定 dB 范围和 128 段聚合规则，并保留 44.1 kHz/48 kHz 参考测试向量。
+- 设置页保存 EQ 模式、预设、自定义曲线、PEQ 参数、Limiter 阈值和频谱开关；重启后由主进程设置文件恢复，Renderer 初始化后再次同步到音频线程。
+- `desktop/main/tray/desktopShell.ts` 接入系统托盘、关闭到托盘、托盘菜单、`CommandOrControl+Alt` 播放快捷键和 `MediaPlayPause`/`MediaNextTrack`/`MediaPreviousTrack` 媒体键；同步完成或失败时发送 Windows 通知。
+- 设置页支持缓存摘要、缓存清理、脱敏日志导出；日志导出通过系统保存对话框完成，日志内容继续过滤 Cookie、token、二维码密钥和 URL 查询参数。
+
+### 阶段 6 验证范围
+
+- `npm run desktop:typecheck` 通过。
+- `npm run desktop:build` 通过，main、preload 和 renderer 产物均生成。
+- `git diff --check` 通过；LF/CRLF 转换提示来自 Windows 工作区属性。
+- 尚未在真实 Windows 音频输出、带媒体键键盘、托盘通知中心和登录账号环境完成手动验收；Electron 窗口 ACL 与阶段 5 的真实 Bilibili 数据限制仍然存在。
