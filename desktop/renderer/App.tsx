@@ -33,7 +33,10 @@ import type {
   PlaybackQueueMode,
   PlaybackSnapshot,
   QrStatusEvent,
+  RecommendationContentRequest,
+  RecommendationSnapshot,
   SearchContentRequest,
+  SyncSnapshot,
   UserProfile,
 } from '../shared/types';
 import {ElectronAudioPlayerAdapter} from './audio/electronAudioPlayer';
@@ -92,6 +95,24 @@ const EMPTY_PLAYBACK: PlaybackSnapshot = {
   diagnostic: null,
 };
 
+const EMPTY_SYNC: SyncSnapshot = {
+  state: 'idle',
+  taskId: null,
+  completed: 0,
+  total: 0,
+  phase: 'idle',
+  uid: null,
+  processedVideos: 0,
+  totalVideos: 0,
+  skippedTasks: 0,
+  failedTasks: 0,
+  message: null,
+  canRetry: false,
+  startedAt: null,
+  finishedAt: null,
+  error: null,
+};
+
 /** 阶段 3 桌面端应用根组件，负责导航、认证状态和全局任务通知。 */
 export function App(): JSX.Element {
   const [route, setRoute] = useState<Route>('home');
@@ -115,6 +136,7 @@ export function App(): JSX.Element {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTrigger, setSearchTrigger] = useState(0);
   const [playback, setPlayback] = useState<PlaybackSnapshot>(EMPTY_PLAYBACK);
+  const [sync, setSync] = useState<SyncSnapshot>(EMPTY_SYNC);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const audioAdapterRef = useRef<ElectronAudioPlayerAdapter | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -471,10 +493,14 @@ export function App(): JSX.Element {
     const unsubscribePlayback = window.nyamiDesktop.playback.onStateChanged(
       event => setPlayback(event.snapshot),
     );
+    const unsubscribeSync = window.nyamiDesktop.sync.onStateChanged(
+      event => setSync(event.snapshot),
+    );
     void Promise.all([
       refreshAuth(),
       window.nyamiDesktop.settings.get().then(setSettings),
       window.nyamiDesktop.playback.getState().then(setPlayback),
+      window.nyamiDesktop.sync.getStatus().then(setSync),
     ]).catch(error => {
       pushNotice('error', getErrorMessage(error, '桌面运行时初始化失败'));
     });
@@ -483,8 +509,28 @@ export function App(): JSX.Element {
       unsubscribeWebView();
       unsubscribeSettings();
       unsubscribePlayback();
+      unsubscribeSync();
     };
   }, [pushNotice, refreshAuth]);
+
+  /** 登录新账号后自动启动一次可恢复的增量同步。 */
+  const autoSyncUidRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!auth.loggedIn || !auth.uid) {
+      autoSyncUidRef.current = null;
+      return;
+    }
+    if (autoSyncUidRef.current === auth.uid) {
+      return;
+    }
+    autoSyncUidRef.current = auth.uid;
+    void window.nyamiDesktop.sync
+      .start({force: false})
+      .then(setSync)
+      .catch(error => {
+        pushNotice('error', getErrorMessage(error, '收藏同步启动失败'));
+      });
+  }, [auth.loggedIn, auth.uid, pushNotice]);
 
   /** 登录弹窗打开后自动生成首张二维码。 */
   useEffect(() => {
@@ -571,11 +617,23 @@ export function App(): JSX.Element {
                 {taskCenterOpen ? (
                   <TaskCenter
                     notices={notices}
+                    onCancelSync={() => {
+                      void window.nyamiDesktop.sync.cancel().then(setSync);
+                    }}
                     onDismiss={id =>
                       setNotices(current =>
                         current.filter(notice => notice.id !== id),
                       )
                     }
+                    onStartSync={(force = false) => {
+                      void window.nyamiDesktop.sync
+                        .start({force})
+                        .then(setSync)
+                        .catch(error => {
+                          pushNotice('error', getErrorMessage(error, '同步启动失败'));
+                        });
+                    }}
+                    sync={sync}
                   />
                 ) : null}
               </div>
@@ -602,6 +660,8 @@ export function App(): JSX.Element {
           <main className="page-scroll">
             {route === 'home' ? (
               <HomePage
+                auth={auth}
+                sync={sync}
                 onAddVideo={addVideoToQueue}
                 onNavigate={setRoute}
                 onNotice={pushNotice}
@@ -761,7 +821,7 @@ function Sidebar({
             <span>登录 Bilibili</span>
           </button>
         )}
-        <p className="sidebar-footnote">阶段 3 · 桌面骨架</p>
+        <p className="sidebar-footnote">阶段 5 · 收藏同步与推荐</p>
       </div>
     </aside>
   );
@@ -769,22 +829,29 @@ function Sidebar({
 
 /** 首页展示公开热门内容，并提供到搜索和发现页的快捷入口。 */
 function HomePage({
+  auth,
   onAddVideo,
   onNavigate,
   onNotice,
   onPlayVideo,
   onSearch,
+  sync,
 }: {
+  auth: AuthStatus;
   onAddVideo: (video: DesktopVideo) => void;
   onNavigate: (route: Route) => void;
   onNotice: (tone: NoticeTone, message: string) => void;
   onPlayVideo: (video: DesktopVideo) => void;
   onSearch: (value: string) => void;
+  sync: SyncSnapshot;
 }): JSX.Element {
   const [state, setState] = useState<AsyncState>('loading');
   const [data, setData] = useState<HomeSnapshot | null>(null);
   const [error, setError] = useState('');
+  const [recommendationState, setRecommendationState] = useState<AsyncState>('idle');
+  const [recommendations, setRecommendations] = useState<RecommendationSnapshot | null>(null);
   const requestIdRef = useRef(makeRequestId('home'));
+  const recommendationRequestIdRef = useRef(makeRequestId('recommendations'));
 
   /** 加载首页热门公开内容。 */
   const load = useCallback(async (): Promise<void> => {
@@ -813,6 +880,46 @@ function HomePage({
       void window.nyamiDesktop.content.cancel({requestId: requestIdRef.current});
     };
   }, [load]);
+
+  /** 加载当前账号的本地画像推荐；未登录时不请求账号数据。 */
+  useEffect(() => {
+    if (!auth.loggedIn || !auth.uid) {
+      setRecommendations(null);
+      setRecommendationState('idle');
+      return;
+    }
+    if (sync.state === 'running') {
+      setRecommendationState('loading');
+      return;
+    }
+    const requestId = makeRequestId('recommendations');
+    recommendationRequestIdRef.current = requestId;
+    setRecommendationState('loading');
+    const request: RecommendationContentRequest = {
+      requestId,
+      uid: auth.uid,
+      page: 1,
+    };
+    void window.nyamiDesktop.content
+      .getRecommendations(request)
+      .then(result => {
+        setRecommendations(result);
+        setRecommendationState('success');
+      })
+      .catch(requestError => {
+        if (isAbortError(requestError)) {
+          return;
+        }
+        const message = getErrorMessage(requestError, '个性化推荐加载失败');
+        setRecommendationState('error');
+        onNotice('error', message);
+      });
+    return () => {
+      void window.nyamiDesktop.content.cancel({
+        requestId: recommendationRequestIdRef.current,
+      });
+    };
+  }, [auth.loggedIn, auth.uid, onNotice, sync.state, sync.uid]);
 
   return (
     <div className="page-stack">
@@ -864,6 +971,38 @@ function HomePage({
           />
         ) : null}
       </section>
+      {auth.loggedIn ? (
+        <section className="section-block">
+          <SectionHeading
+            eyebrow="FROM YOUR LIBRARY"
+            title="为你推荐"
+          />
+          {recommendationState === 'loading' ? (
+            <LoadingState label="正在读取本地画像和推荐历史" />
+          ) : null}
+          {recommendationState === 'success' && recommendations?.videos.length ? (
+            <VideoGrid
+              items={recommendations.videos}
+              onAddVideo={onAddVideo}
+              onPlayVideo={onPlayVideo}
+            />
+          ) : null}
+          {recommendationState === 'success' && !recommendations?.videos.length ? (
+            <EmptyState
+              icon="sparkles"
+              message="同步收藏后会生成个性化推荐"
+              secondary="推荐历史会按账号保存在本地"
+            />
+          ) : null}
+          {recommendationState === 'error' ? (
+            <EmptyState
+              icon="alert"
+              message="推荐暂时不可用"
+              secondary="可以稍后重试收藏同步"
+            />
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -1934,16 +2073,46 @@ function PlayerPlaceholder({
 /** 渲染全局任务通知下拉面板。 */
 function TaskCenter({
   notices,
+  onCancelSync,
   onDismiss,
+  onStartSync,
+  sync,
 }: {
   notices: Notice[];
+  onCancelSync: () => void;
   onDismiss: (id: number) => void;
+  onStartSync: (force?: boolean) => void;
+  sync: SyncSnapshot;
 }): JSX.Element {
   return (
     <div className="task-center" role="status">
       <div className="task-center-header">
         <strong>任务通知</strong>
         <span>{notices.length ? `${notices.length} 条` : '暂无'}</span>
+      </div>
+      <div className="task-item sync-task">
+        <span className="task-item-icon"><Icon name="refresh" size={15} /></span>
+        <span className="sync-task-copy">
+          <strong>{sync.message ?? '收藏同步未启动'}</strong>
+          {sync.state === 'running' ? (
+            <small>
+              {sync.phase === 'tags'
+                ? `${sync.processedVideos}/${sync.totalVideos} 个标签`
+                : `${sync.completed}/${sync.total} 个来源`}
+            </small>
+          ) : null}
+          {sync.error ? <small>{sync.error}</small> : null}
+        </span>
+        {sync.state === 'running' ? (
+          <button className="task-action" onClick={onCancelSync} type="button">取消</button>
+        ) : (
+          <button
+            className="task-action"
+            onClick={() => onStartSync(sync.state === 'failed')}
+            type="button">
+            {sync.state === 'failed' ? '重试' : '同步'}
+          </button>
+        )}
       </div>
       {notices.length ? notices.slice().reverse().map(notice => (
         <div className={`task-item ${notice.tone}`} key={notice.id}>

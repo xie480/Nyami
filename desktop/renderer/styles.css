@@ -554,6 +554,43 @@ kbd {
   flex: 1;
 }
 
+.sync-task-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sync-task-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-task-copy small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.task-action {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  color: var(--text-soft);
+  font-size: 10px;
+  padding: 5px 8px;
+}
+
+.task-action:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 .task-dismiss {
   display: grid;
   width: 26px;

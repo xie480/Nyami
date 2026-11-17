@@ -60,3 +60,13 @@ npm run desktop:package
 - **音频与离线播放**：阶段 4 已实现主进程带 `Referer`、`User-Agent` 的音频解析和下载、Range 响应、过期 URL 重取、缓存优先播放以及断网诊断；真实 CDN 行为仍需在具备窗口权限的 Windows 环境补验。
 
 阶段 4 不实现完整收藏同步、SQLite Repository、EQ、频谱和系统媒体键；这些内容按 `WINDOWS_DESKTOP_PLAN.md` 在后续阶段迁移。
+
+## 阶段 5 收藏同步、推荐和本地数据库
+
+- `desktop/main/storage/sqliteDatabase.ts` 使用主进程独占的 Node `node:sqlite`，以 `PRAGMA user_version` 执行事务化前向迁移；迁移失败会回滚当前版本，保留上一版本数据。
+- `desktop/main/storage/desktopLibraryRepository.ts` 实现收藏夹元数据、视频关系、同步任务、全局去重索引、视频 tag 缓存和七日推荐历史。每张业务表都带 UID，登录新账号或退出登录时清理旧账号数据。
+- `desktop/main/content/desktopLibraryRuntime.ts` 同步自有收藏夹、外部收藏夹和订阅合集，按页断点写入并在同步后有限并发回填 tag；首页推荐通过本地画像、Bilibili 音乐搜索和本地推荐历史生成。
+- `desktop/main/runtime/syncRuntime.ts` 将收藏同步、tag 回填、失败重试和取消映射为脱敏进度事件；Renderer 任务面板可以启动、取消和重试同步。
+- `content:get-recommendations` 通过 Preload 白名单提供首页个性化视频推荐，完整 Cookie、数据库连接和同步对象仍只在主进程内存在。
+
+阶段 5 已执行 `npm run desktop:typecheck`、`npm run desktop:build` 和 `git diff --check`。真实账号同步、收藏数据量、网络限流、标签接口和 Windows 窗口手动验收仍需在具备 Electron 窗口权限并登录 Bilibili 的环境中完成。
