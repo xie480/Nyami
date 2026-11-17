@@ -17,6 +17,7 @@ export type IconName =
   | 'log-out'
   | 'pause'
   | 'play'
+  | 'plus'
   | 'refresh'
   | 'search'
   | 'settings'
@@ -85,6 +86,12 @@ const paths: Record<IconName, JSX.Element> = {
     </>
   ),
   play: <path d="m8 5 11 7-11 7V5Z" />,
+  plus: (
+    <>
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </>
+  ),
   refresh: (
     <>
       <path d="M20 11a8 8 0 0 0-14.8-4L3 10" />

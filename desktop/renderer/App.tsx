@@ -27,11 +27,15 @@ import type {
   FavoriteFolderSummary,
   FavoriteVideoContentRequest,
   HomeSnapshot,
+  PlaybackAudioEvent,
+  PlaybackQueueItem,
+  PlaybackQueueMode,
   PlaybackSnapshot,
   QrStatusEvent,
   SearchContentRequest,
   UserProfile,
 } from '../shared/types';
+import {ElectronAudioPlayerAdapter} from './audio/electronAudioPlayer';
 
 type Route = 'home' | 'discover' | 'search' | 'favorites' | 'settings';
 type NoticeTone = 'info' | 'success' | 'error';
@@ -69,11 +73,21 @@ const THEME_OPTIONS: Array<{
 const EMPTY_PLAYBACK: PlaybackSnapshot = {
   state: 'idle',
   trackId: null,
+  trackTitle: null,
+  trackArtist: null,
+  artwork: null,
   position: 0,
   duration: 0,
   volume: 1,
   queueLength: 0,
+  queueIndex: -1,
+  queue: [],
+  mode: 'sequential',
+  sleepTimerSeconds: null,
+  networkOnline: true,
+  cached: false,
   error: null,
+  diagnostic: null,
 };
 
 /** 阶段 3 桌面端应用根组件，负责导航、认证状态和全局任务通知。 */
@@ -99,6 +113,8 @@ export function App(): JSX.Element {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTrigger, setSearchTrigger] = useState(0);
   const [playback, setPlayback] = useState<PlaybackSnapshot>(EMPTY_PLAYBACK);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const audioAdapterRef = useRef<ElectronAudioPlayerAdapter | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const noticeSequenceRef = useRef(0);
 
@@ -197,10 +213,10 @@ export function App(): JSX.Element {
     }
   }, []);
 
-  /** 执行占位播放器的播放/暂停控制。 */
+  /** 执行播放器的播放/暂停控制。 */
   const togglePlayback = useCallback(async (): Promise<void> => {
     if (!playback.trackId) {
-      pushNotice('info', '播放器将在阶段 4 接入真实音频');
+      pushNotice('info', '请先从内容卡片选择一首歌曲');
       return;
     }
     const next =
@@ -209,6 +225,125 @@ export function App(): JSX.Element {
         : await window.nyamiDesktop.playback.play();
     setPlayback(next);
   }, [playback.state, playback.trackId, pushNotice]);
+
+  /** 从内容卡片创建队列项目并立即播放。 */
+  const playVideo = useCallback(
+    (video: DesktopVideo): void => {
+      void window.nyamiDesktop.playback
+        .loadQueue({
+          items: [toPlaybackQueueItem(video)],
+          startIndex: 0,
+          autoplay: true,
+          expandParts: true,
+        })
+        .then(setPlayback)
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '音频加载失败'));
+        });
+    },
+    [pushNotice],
+  );
+
+  /** 将内容卡片追加到当前播放队列。 */
+  const addVideoToQueue = useCallback(
+    (video: DesktopVideo): void => {
+      void window.nyamiDesktop.playback
+        .addToQueue({
+          item: toPlaybackQueueItem(video),
+          autoplay: false,
+        })
+        .then(snapshot => {
+          setPlayback(snapshot);
+          pushNotice('success', '已加入播放队列');
+        })
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '加入播放队列失败'));
+        });
+    },
+    [pushNotice],
+  );
+
+  /** 调整播放进度并同步主进程状态。 */
+  const seekPlayback = useCallback((position: number): void => {
+    void window.nyamiDesktop.playback
+      .seek({position})
+      .then(setPlayback)
+      .catch(error => {
+        pushNotice('error', getErrorMessage(error, '调整播放进度失败'));
+      });
+  }, [pushNotice]);
+
+  /** 调整播放器音量。 */
+  const setPlaybackVolume = useCallback((volume: number): void => {
+    void window.nyamiDesktop.playback
+      .setVolume({volume})
+      .then(setPlayback)
+      .catch(error => {
+        pushNotice('error', getErrorMessage(error, '调整音量失败'));
+      });
+  }, [pushNotice]);
+
+  /** 切换播放顺序模式。 */
+  const setPlaybackMode = useCallback((mode: PlaybackQueueMode): void => {
+    void window.nyamiDesktop.playback
+      .setMode({mode})
+      .then(setPlayback)
+      .catch(error => {
+        pushNotice('error', getErrorMessage(error, '切换播放模式失败'));
+      });
+  }, [pushNotice]);
+
+  /** 设置或取消睡眠定时器。 */
+  const setPlaybackSleepTimer = useCallback((seconds: number | null): void => {
+    void window.nyamiDesktop.playback
+      .setSleepTimer({seconds})
+      .then(setPlayback)
+      .catch(error => {
+        pushNotice('error', getErrorMessage(error, '设置睡眠定时器失败'));
+      });
+  }, [pushNotice]);
+
+  /** 从播放队列移除一个项目。 */
+  const removePlaybackItem = useCallback((trackId: string): void => {
+    void window.nyamiDesktop.playback
+      .removeFromQueue({trackId})
+      .then(setPlayback)
+      .catch(error => {
+        pushNotice('error', getErrorMessage(error, '移除队列项目失败'));
+      });
+  }, [pushNotice]);
+
+  /** 按拖拽结果保存播放队列顺序。 */
+  const reorderPlaybackQueue = useCallback((trackIds: string[]): void => {
+    void window.nyamiDesktop.playback
+      .reorderQueue({trackIds})
+      .then(setPlayback)
+      .catch(error => {
+        pushNotice('error', getErrorMessage(error, '调整播放队列失败'));
+      });
+  }, [pushNotice]);
+
+  /** 从队列面板选择指定歌曲并保持其余项目顺序。 */
+  const playQueueTrack = useCallback(
+    (trackId: string): void => {
+      const startIndex = playback.queue.findIndex(item => item.id === trackId);
+      if (startIndex < 0) {
+        return;
+      }
+      void window.nyamiDesktop.playback
+        .loadQueue({
+          items: playback.queue,
+          startIndex,
+          autoplay: true,
+          expandParts: false,
+        })
+        .then(setPlayback)
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '切换队列项目失败'));
+        });
+    },
+    [playback.queue, pushNotice],
+  );
 
   /** 注册全局快捷键，支持 Ctrl+K、Space 和 Ctrl+方向键。 */
   useEffect(() => {
@@ -243,6 +378,60 @@ export function App(): JSX.Element {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [focusSearch, togglePlayback]);
+
+  /** 创建隐藏音频元素，接收主进程来源、命令和网络状态事件。 */
+  useEffect(() => {
+    const element = audioElementRef.current;
+    if (!element) {
+      return;
+    }
+    const adapter = new ElectronAudioPlayerAdapter(
+      element,
+      event => {
+        void window.nyamiDesktop.playback
+          .reportAudioEvent(event)
+          .then(setPlayback)
+          .catch(() => undefined);
+      },
+    );
+    audioAdapterRef.current = adapter;
+    void adapter.setup();
+    const unsubscribeSource = window.nyamiDesktop.playback.onSourceChanged(
+      event => adapter.loadSource(event.source),
+    );
+    const unsubscribeCommand = window.nyamiDesktop.playback.onCommand(
+      event => {
+        void adapter.handleCommand(event.command).catch(error => {
+          const audioEvent: PlaybackAudioEvent = {
+            type: 'error',
+            trackId: event.command.trackId,
+            message: getErrorMessage(error, '音频播放命令失败'),
+          };
+          void window.nyamiDesktop.playback.reportAudioEvent(audioEvent);
+        });
+      },
+    );
+    const reportNetwork = (type: 'network-online' | 'network-offline') => {
+      const event: PlaybackAudioEvent = {type};
+      void window.nyamiDesktop.playback
+        .reportAudioEvent(event)
+        .then(setPlayback)
+        .catch(() => undefined);
+    };
+    const handleOnline = () => reportNetwork('network-online');
+    const handleOffline = () => reportNetwork('network-offline');
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    reportNetwork(navigator.onLine ? 'network-online' : 'network-offline');
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      unsubscribeSource();
+      unsubscribeCommand();
+      adapter.dispose();
+      audioAdapterRef.current = null;
+    };
+  }, []);
 
   /** 初始化认证、设置、播放状态和跨进程事件订阅。 */
   useEffect(() => {
@@ -408,17 +597,27 @@ export function App(): JSX.Element {
           <main className="page-scroll">
             {route === 'home' ? (
               <HomePage
+                onAddVideo={addVideoToQueue}
                 onNavigate={setRoute}
                 onNotice={pushNotice}
+                onPlayVideo={playVideo}
                 onSearch={submitSearch}
               />
             ) : null}
-            {route === 'discover' ? <DiscoverPage onNotice={pushNotice} /> : null}
+            {route === 'discover' ? (
+              <DiscoverPage
+                onAddVideo={addVideoToQueue}
+                onNotice={pushNotice}
+                onPlayVideo={playVideo}
+              />
+            ) : null}
             {route === 'search' ? (
               <SearchPage
                 initialTrigger={searchTrigger}
                 inputRef={searchInputRef}
+                onAddVideo={addVideoToQueue}
                 onNotice={pushNotice}
+                onPlayVideo={playVideo}
                 onSearch={submitSearch}
                 query={searchQuery}
                 setQuery={setSearchQuery}
@@ -427,8 +626,10 @@ export function App(): JSX.Element {
             {route === 'favorites' ? (
               <FavoritesPage
                 auth={auth}
+                onAddVideo={addVideoToQueue}
                 onLogin={() => setLoginOpen(true)}
                 onNotice={pushNotice}
+                onPlayVideo={playVideo}
                 profile={profile}
               />
             ) : null}
@@ -447,6 +648,7 @@ export function App(): JSX.Element {
 
           <PlayerPlaceholder
             playback={playback}
+            onModeChange={setPlaybackMode}
             onNext={() =>
               void window.nyamiDesktop.playback.skipNext().then(setPlayback)
             }
@@ -457,9 +659,17 @@ export function App(): JSX.Element {
             onPrevious={() =>
               void window.nyamiDesktop.playback.skipPrevious().then(setPlayback)
             }
+            onRemove={removePlaybackItem}
+            onReorder={reorderPlaybackQueue}
+            onSeek={seekPlayback}
+            onSleepTimer={setPlaybackSleepTimer}
+            onSelectTrack={playQueueTrack}
+            onVolume={setPlaybackVolume}
           />
         </section>
       </div>
+
+      <audio aria-hidden="true" className="desktop-audio-element" ref={audioElementRef} />
 
       <NoticeStack notices={notices.slice(-3)} />
 
@@ -554,12 +764,16 @@ function Sidebar({
 
 /** 首页展示公开热门内容，并提供到搜索和发现页的快捷入口。 */
 function HomePage({
+  onAddVideo,
   onNavigate,
   onNotice,
+  onPlayVideo,
   onSearch,
 }: {
+  onAddVideo: (video: DesktopVideo) => void;
   onNavigate: (route: Route) => void;
   onNotice: (tone: NoticeTone, message: string) => void;
+  onPlayVideo: (video: DesktopVideo) => void;
   onSearch: (value: string) => void;
 }): JSX.Element {
   const [state, setState] = useState<AsyncState>('loading');
@@ -638,7 +852,11 @@ function HomePage({
           <EmptyState icon="compass" message="暂时没有可展示的公开内容" />
         ) : null}
         {state === 'success' ? (
-          <VideoGrid items={[...(data?.featured ?? []), ...(data?.popular ?? [])].slice(0, 8)} />
+          <VideoGrid
+            items={[...(data?.featured ?? []), ...(data?.popular ?? [])].slice(0, 8)}
+            onAddVideo={onAddVideo}
+            onPlayVideo={onPlayVideo}
+          />
         ) : null}
       </section>
     </div>
@@ -647,9 +865,13 @@ function HomePage({
 
 /** 发现页展示热门视频分页，并提供统一分页和重试反馈。 */
 function DiscoverPage({
+  onAddVideo,
   onNotice,
+  onPlayVideo,
 }: {
+  onAddVideo: (video: DesktopVideo) => void;
   onNotice: (tone: NoticeTone, message: string) => void;
+  onPlayVideo: (video: DesktopVideo) => void;
 }): JSX.Element {
   const [page, setPage] = useState(1);
   const [state, setState] = useState<AsyncState>('loading');
@@ -704,7 +926,11 @@ function DiscoverPage({
       ) : null}
       {state === 'success' && result?.items.length ? (
         <>
-          <VideoGrid items={result.items} />
+          <VideoGrid
+            items={result.items}
+            onAddVideo={onAddVideo}
+            onPlayVideo={onPlayVideo}
+          />
           <Pagination
             hasMore={result.hasMore}
             loading={false}
@@ -722,14 +948,18 @@ function DiscoverPage({
 function SearchPage({
   initialTrigger,
   inputRef,
+  onAddVideo,
   onNotice,
+  onPlayVideo,
   onSearch,
   query,
   setQuery,
 }: {
   initialTrigger: number;
   inputRef: React.RefObject<HTMLInputElement>;
+  onAddVideo: (video: DesktopVideo) => void;
   onNotice: (tone: NoticeTone, message: string) => void;
+  onPlayVideo: (video: DesktopVideo) => void;
   onSearch: (value: string) => void;
   query: string;
   setQuery: (value: string) => void;
@@ -876,7 +1106,11 @@ function SearchPage({
             <span>“{query}”的搜索结果</span>
             {result.total !== null ? <small>约 {result.total.toLocaleString()} 条</small> : null}
           </div>
-          <VideoGrid items={result.items} />
+          <VideoGrid
+            items={result.items}
+            onAddVideo={onAddVideo}
+            onPlayVideo={onPlayVideo}
+          />
           <Pagination
             hasMore={result.hasMore}
             loading={false}
@@ -893,13 +1127,17 @@ function SearchPage({
 /** 收藏页展示当前账号的收藏夹目录和视频分页。 */
 function FavoritesPage({
   auth,
+  onAddVideo,
   onLogin,
   onNotice,
+  onPlayVideo,
   profile,
 }: {
   auth: AuthStatus;
+  onAddVideo: (video: DesktopVideo) => void;
   onLogin: () => void;
   onNotice: (tone: NoticeTone, message: string) => void;
+  onPlayVideo: (video: DesktopVideo) => void;
   profile: UserProfile | null;
 }): JSX.Element {
   const [folderState, setFolderState] = useState<AsyncState>('idle');
@@ -1083,7 +1321,11 @@ function FavoritesPage({
           {videoState === 'success' && videos?.items.length ? (
             <>
               {videos.description ? <p className="folder-description">{videos.description}</p> : null}
-              <VideoGrid items={videos.items} />
+              <VideoGrid
+                items={videos.items}
+                onAddVideo={onAddVideo}
+                onPlayVideo={onPlayVideo}
+              />
               <Pagination
                 hasMore={videos.hasMore}
                 loading={false}
@@ -1314,28 +1556,65 @@ function LoginDialog({
 }
 
 /** 渲染统一视频卡片网格，保留封面比例避免异步图片造成布局跳动。 */
-function VideoGrid({items}: {items: DesktopVideo[]}): JSX.Element {
+function VideoGrid({
+  items,
+  onAddVideo,
+  onPlayVideo,
+}: {
+  items: DesktopVideo[];
+  onAddVideo: (video: DesktopVideo) => void;
+  onPlayVideo: (video: DesktopVideo) => void;
+}): JSX.Element {
   return (
     <div className="video-grid">
-      {items.map(video => <VideoCard item={video} key={video.bvid} />)}
+      {items.map(video => (
+        <VideoCard
+          item={video}
+          key={video.bvid}
+          onAdd={() => onAddVideo(video)}
+          onPlay={() => onPlayVideo(video)}
+        />
+      ))}
     </div>
   );
 }
 
 /** 渲染一个公开视频摘要卡片。 */
-function VideoCard({item}: {item: DesktopVideo}): JSX.Element {
+function VideoCard({
+  item,
+  onAdd,
+  onPlay,
+}: {
+  item: DesktopVideo;
+  onAdd: () => void;
+  onPlay: () => void;
+}): JSX.Element {
   return (
-    <article className="video-card">
-      <div className="video-cover-wrap">
+    <article className="video-card" onDoubleClick={onPlay}>
+      <button
+        aria-label={`播放 ${item.title}`}
+        className="video-cover-button"
+        onClick={onPlay}
+        type="button">
+        <div className="video-cover-wrap">
         {item.cover ? <img alt="" className="video-cover" loading="lazy" src={item.cover} /> : <div className="cover-placeholder"><Icon name="play" size={22} /></div>}
         <span className="duration-chip">{formatDuration(item.duration)}</span>
-      </div>
+        </div>
+      </button>
       <div className="video-card-body">
         <h3 title={item.title}>{item.title}</h3>
         <p>{item.author}</p>
         <div className="video-card-meta">
           <span>{formatDate(item.pubtime)}</span>
           {item.source === 'favorite' ? <span className="source-chip">已收藏</span> : null}
+          <button
+            aria-label={`将 ${item.title} 加入队列`}
+            className="queue-add-button"
+            onClick={onAdd}
+            title="加入播放队列"
+            type="button">
+            <Icon name="plus" size={14} />
+          </button>
         </div>
       </div>
     </article>
@@ -1477,39 +1756,172 @@ function Pagination({
   );
 }
 
-/** 渲染底部播放器占位，提前固定桌面信息层级。 */
+/** 渲染底部播放器、进度控制和可拖拽播放队列。 */
 function PlayerPlaceholder({
   playback,
+  onModeChange,
   onNext,
   onPause,
   onPlay,
   onPrevious,
+  onRemove,
+  onReorder,
+  onSeek,
+  onSelectTrack,
+  onSleepTimer,
+  onVolume,
 }: {
   playback: PlaybackSnapshot;
+  onModeChange: (mode: PlaybackQueueMode) => void;
   onNext: () => void;
   onPause: () => void;
   onPlay: () => void;
   onPrevious: () => void;
+  onRemove: (trackId: string) => void;
+  onReorder: (trackIds: string[]) => void;
+  onSeek: (position: number) => void;
+  onSelectTrack: (trackId: string) => void;
+  onSleepTimer: (seconds: number | null) => void;
+  onVolume: (volume: number) => void;
 }): JSX.Element {
   const isPlaying = playback.state === 'playing';
+  const [queueOpen, setQueueOpen] = useState(false);
+  const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null);
+  const duration = playback.duration > 0 ? playback.duration : 1;
+  const sleepValue = playback.sleepTimerSeconds ? 'active' : '';
+
+  /** 将拖拽中的队列项目移动到目标位置。 */
+  const handleDrop = (targetId: string): void => {
+    if (!draggedTrackId || draggedTrackId === targetId) {
+      return;
+    }
+    const ids = playback.queue.map(item => item.id);
+    const sourceIndex = ids.indexOf(draggedTrackId);
+    const targetIndex = ids.indexOf(targetId);
+    if (sourceIndex < 0 || targetIndex < 0) {
+      return;
+    }
+    const [moved] = ids.splice(sourceIndex, 1);
+    ids.splice(targetIndex, 0, moved);
+    onReorder(ids);
+    setDraggedTrackId(null);
+  };
+
   return (
     <footer className="player-placeholder">
       <div className="player-track">
-        <div className="player-art"><Icon name="play" size={18} /></div>
+        {playback.artwork ? (
+          <img alt="" className="player-art player-art-image" src={playback.artwork} />
+        ) : (
+          <div className="player-art"><Icon name="play" size={18} /></div>
+        )}
         <div>
-          <strong>{playback.trackId ? playback.trackId : '尚未选择歌曲'}</strong>
-          <span>{playback.queueLength ? `${playback.queueLength} 首在队列中` : '播放队列将在阶段 4 接入'}</span>
+          <strong>{playback.trackTitle ?? '尚未选择歌曲'}</strong>
+          <span>
+            {playback.trackArtist ?? '选择内容卡片开始播放'}
+            {playback.cached ? ' · 已缓存' : ''}
+          </span>
         </div>
       </div>
       <div className="player-controls">
-        <button aria-label="上一首" className="icon-button" onClick={onPrevious} title="上一首" type="button"><Icon name="arrow-left" size={17} /></button>
-        <button aria-label={isPlaying ? '暂停' : '播放'} className="player-main-button" onClick={isPlaying ? onPause : onPlay} title={isPlaying ? '暂停' : '播放'} type="button"><Icon name={isPlaying ? 'pause' : 'play'} size={18} /></button>
-        <button aria-label="下一首" className="icon-button" onClick={onNext} title="下一首" type="button"><Icon name="arrow-right" size={17} /></button>
+        <button aria-label="上一首" className="icon-button" onClick={onPrevious} title="上一首" type="button">
+          <Icon name="arrow-left" size={17} />
+        </button>
+        <button aria-label={isPlaying ? '暂停' : '播放'} className="player-main-button" onClick={isPlaying ? onPause : onPlay} title={isPlaying ? '暂停' : '播放'} type="button">
+          <Icon name={isPlaying ? 'pause' : 'play'} size={18} />
+        </button>
+        <button aria-label="下一首" className="icon-button" onClick={onNext} title="下一首" type="button">
+          <Icon name="arrow-right" size={17} />
+        </button>
       </div>
       <div className="player-status">
-        <span className="player-progress-track"><span style={{width: `${getProgressPercent(playback)}%`}} /></span>
+        <input
+          aria-label="播放进度"
+          className="player-progress-input"
+          disabled={!playback.trackId}
+          max={duration}
+          min="0"
+          onChange={event => onSeek(Number(event.target.value))}
+          step="0.1"
+          type="range"
+          value={Math.min(playback.position, duration)}
+        />
         <span>{formatDuration(playback.position)} / {formatDuration(playback.duration)}</span>
+        <label className="player-volume-control">
+          <span className="sr-only">音量</span>
+          <input
+            aria-label="音量"
+            max="1"
+            min="0"
+            onChange={event => onVolume(Number(event.target.value))}
+            step="0.01"
+            type="range"
+            value={playback.volume}
+          />
+        </label>
+        <button
+          aria-expanded={queueOpen}
+          className="queue-toggle"
+          onClick={() => setQueueOpen(current => !current)}
+          type="button">
+          队列 {playback.queueLength}
+        </button>
+        <button
+          aria-label="切换播放模式"
+          className="queue-mode-button"
+          onClick={() => onModeChange(playback.mode === 'shuffle' ? 'sequential' : 'shuffle')}
+          title={playback.mode === 'shuffle' ? '随机播放' : '顺序播放'}
+          type="button">
+          {playback.mode === 'shuffle' ? '随机' : '顺序'}
+        </button>
+        <select
+          aria-label="睡眠定时器"
+          className="sleep-timer-select"
+          onChange={event => {
+            const value = event.target.value;
+            onSleepTimer(value === 'active' ? null : value ? Number(value) : null);
+          }}
+          value={sleepValue}>
+          <option value="">睡眠</option>
+          <option value="900">15 分钟</option>
+          <option value="1800">30 分钟</option>
+          <option value="3600">60 分钟</option>
+          {sleepValue === 'active' ? <option value="active">剩余 {playback.sleepTimerSeconds} 秒</option> : null}
+        </select>
       </div>
+      {playback.diagnostic ? (
+        <div className="player-diagnostic" role="status">
+          {playback.diagnostic.message}
+          {playback.diagnostic.retrying ? '…' : ''}
+        </div>
+      ) : null}
+      {queueOpen ? (
+        <div className="queue-panel" role="dialog">
+          <div className="queue-panel-header">
+            <strong>播放队列</strong>
+            <span>{playback.queueLength} 首</span>
+          </div>
+          {playback.queue.length ? playback.queue.map(item => (
+            <div
+              className={item.id === playback.trackId ? 'queue-item active' : 'queue-item'}
+              draggable
+              key={item.id}
+              onDragEnd={() => setDraggedTrackId(null)}
+              onDragOver={event => event.preventDefault()}
+              onDrop={() => handleDrop(item.id)}
+              onDragStart={() => setDraggedTrackId(item.id)}>
+              <span className="queue-drag-handle">⋮⋮</span>
+              <button className="queue-item-play" onClick={() => onSelectTrack(item.id)} type="button">
+                <strong>{item.title}</strong>
+                <small>{item.artist}</small>
+              </button>
+              <button aria-label="移除队列项目" className="task-dismiss" onClick={() => onRemove(item.id)} type="button">
+                <Icon name="x" size={13} />
+              </button>
+            </div>
+          )) : <div className="queue-empty">队列为空，点击内容卡片开始播放。</div>}
+        </div>
+      ) : null}
     </footer>
   );
 }
@@ -1618,6 +2030,20 @@ function getProgressPercent(snapshot: PlaybackSnapshot): number {
     return 0;
   }
   return Math.min(100, Math.max(0, (snapshot.position / snapshot.duration) * 100));
+}
+
+/** 将内容卡片转换为跨进程播放队列项目。 */
+function toPlaybackQueueItem(video: DesktopVideo): PlaybackQueueItem {
+  return {
+    id: video.bvid,
+    bvid: video.bvid,
+    title: video.title,
+    artist: video.author,
+    artwork: video.cover,
+    duration: video.duration,
+    ...(video.page !== undefined ? {page: video.page} : {}),
+    ...(video.source ? {source: video.source} : {}),
+  };
 }
 
 /** 返回侧边栏路由的中文标题。 */
