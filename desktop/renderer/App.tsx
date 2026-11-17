@@ -400,6 +400,7 @@ export function App(): JSX.Element {
       pushNotice('error', getErrorMessage(error, '缓存清理失败'));
     } finally {
       setCacheBusy(false);
+      setCacheProgress(null);
     }
   }, [pushNotice]);
 
