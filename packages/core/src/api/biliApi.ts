@@ -334,17 +334,22 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
     },
 
     /** 获取视频详情（包括 CID 和多 P 信息）。 */
-    getVideoInfo(bvid: string) {
+    getVideoInfo(bvid: string, signal?: AbortSignal) {
       if (!bvid) {
         return Promise.reject(new Error('bvid 不能为空'));
       }
       return get<BiliVideoInfo>('/x/web-interface/view', {
         params: {bvid},
+        signal,
       });
     },
 
     /** 获取 DASH 音频播放地址。 */
-    async getPlayUrl(bvid: string, cid: number) {
+    async getPlayUrl(
+      bvid: string,
+      cid: number,
+      signal?: AbortSignal,
+    ) {
       if (!bvid || cid == null) {
         throw new Error('bvid 和 cid 不能为空');
       }
@@ -355,7 +360,10 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
         fnver: 0,
         fourk: 1,
       });
-      return get<BiliPlayUrlData>(`/x/player/wbi/playurl?${query}`);
+      return get<BiliPlayUrlData>(
+        `/x/player/wbi/playurl?${query}`,
+        {signal},
+      );
     },
 
     /** 获取登录用户的脱敏资料。 */

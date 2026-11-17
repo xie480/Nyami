@@ -98,7 +98,7 @@ export class QueueController<TItem extends QueueItem> {
         item => this.idOf(item) === currentBvid || item.bvid === currentBvid,
       )
         ? currentBvid
-        : normalized[0]?.bvid ?? null;
+        : normalized[0] ? this.idOf(normalized[0]) : null;
     this.snapshot = {
       ...this.snapshot,
       queue: normalized,
@@ -128,11 +128,38 @@ export class QueueController<TItem extends QueueItem> {
       ...this.snapshot,
       queue: normalized,
       currentBvid:
-        current && normalized.some(item => item.bvid === current)
+        current &&
+        normalized.some(
+          item => this.idOf(item) === current || item.bvid === current,
+        )
           ? current
-          : normalized[0]?.bvid ?? null,
+          : normalized[0] ? this.idOf(normalized[0]) : null,
     };
     this.emit();
+  }
+
+  /** 在队列末尾追加项目，并保留当前播放项。 */
+  append(items: TItem[]): number {
+    const revision = this.beginOperation();
+    const normalized = this.unique([...this.snapshot.queue, ...items]);
+    const current = this.snapshot.currentBvid;
+    this.snapshot = {
+      ...this.snapshot,
+      queue: normalized,
+      originalQueue:
+        this.snapshot.mode === 'sequential'
+          ? [...normalized]
+          : this.snapshot.originalQueue,
+      currentBvid:
+        current &&
+        normalized.some(
+          item => this.idOf(item) === current || item.bvid === current,
+        )
+          ? current
+          : normalized[0] ? this.idOf(normalized[0]) : null,
+    };
+    this.emit();
+    return revision;
   }
 
   /** 在当前播放项后插入一首歌。 */
@@ -142,7 +169,9 @@ export class QueueController<TItem extends QueueItem> {
       queueItem => this.idOf(queueItem) !== this.idOf(item),
     );
     const currentIndex = nextQueue.findIndex(
-      queueItem => queueItem.bvid === this.snapshot.currentBvid,
+      queueItem =>
+        this.idOf(queueItem) === this.snapshot.currentBvid ||
+        queueItem.bvid === this.snapshot.currentBvid,
     );
     nextQueue.splice(currentIndex < 0 ? 0 : currentIndex + 1, 0, item);
     this.snapshot = {
@@ -167,10 +196,12 @@ export class QueueController<TItem extends QueueItem> {
         item => this.idOf(item) !== itemId && item.bvid !== itemId,
       ),
       currentBvid: nextQueue.some(
-        item => item.bvid === this.snapshot.currentBvid,
+        item =>
+          this.idOf(item) === this.snapshot.currentBvid ||
+          item.bvid === this.snapshot.currentBvid,
       )
         ? this.snapshot.currentBvid
-        : nextQueue[0]?.bvid ?? null,
+        : nextQueue[0] ? this.idOf(nextQueue[0]) : null,
     };
     this.emit();
     return revision;
@@ -187,7 +218,13 @@ export class QueueController<TItem extends QueueItem> {
         this.snapshot.mode === 'sequential'
           ? [...normalized]
           : this.snapshot.originalQueue,
-      currentBvid: currentBvid ?? this.snapshot.currentBvid,
+      currentBvid:
+        currentBvid &&
+        normalized.some(
+          item => this.idOf(item) === currentBvid || item.bvid === currentBvid,
+        )
+          ? currentBvid
+          : this.snapshot.currentBvid,
     };
     this.emit();
     return revision;
@@ -203,7 +240,9 @@ export class QueueController<TItem extends QueueItem> {
     let queue = [...baseline];
     if (mode === 'shuffle') {
       const currentIndex = queue.findIndex(
-        item => item.bvid === this.snapshot.currentBvid,
+        item =>
+          this.idOf(item) === this.snapshot.currentBvid ||
+          item.bvid === this.snapshot.currentBvid,
       );
       const current =
         currentIndex >= 0 ? queue.splice(currentIndex, 1)[0] : null;
@@ -224,17 +263,13 @@ export class QueueController<TItem extends QueueItem> {
 
   /** 返回当前播放项的下一项，不改变状态。 */
   next(): TItem | null {
-    const index = this.snapshot.queue.findIndex(
-      item => item.bvid === this.snapshot.currentBvid,
-    );
+    const index = this.findCurrentIndex();
     return index >= 0 ? this.snapshot.queue[index + 1] ?? null : null;
   }
 
   /** 返回当前播放项的上一项，不改变状态。 */
   previous(): TItem | null {
-    const index = this.snapshot.queue.findIndex(
-      item => item.bvid === this.snapshot.currentBvid,
-    );
+    const index = this.findCurrentIndex();
     return index > 0 ? this.snapshot.queue[index - 1] : null;
   }
 
@@ -263,6 +298,15 @@ export class QueueController<TItem extends QueueItem> {
       const target = Math.floor(this.random() * (index + 1));
       [queue[index], queue[target]] = [queue[target], queue[index]];
     }
+  }
+
+  /** 根据队列项目 ID 或 BVID 查找当前项，兼容多 P 的 queueId。 */
+  private findCurrentIndex(): number {
+    return this.snapshot.queue.findIndex(
+      item =>
+        this.idOf(item) === this.snapshot.currentBvid ||
+        item.bvid === this.snapshot.currentBvid,
+    );
   }
 
   private emit(): void {

@@ -18,6 +18,13 @@ export const IPC_CHANNELS = {
   },
   playback: {
     getState: 'playback:get-state',
+    loadQueue: 'playback:load-queue',
+    addToQueue: 'playback:add-to-queue',
+    removeFromQueue: 'playback:remove-from-queue',
+    reorderQueue: 'playback:reorder-queue',
+    setMode: 'playback:set-mode',
+    setSleepTimer: 'playback:set-sleep-timer',
+    reportAudioEvent: 'playback:report-audio-event',
     play: 'playback:play',
     pause: 'playback:pause',
     stop: 'playback:stop',
@@ -26,6 +33,8 @@ export const IPC_CHANNELS = {
     skipPrevious: 'playback:skip-previous',
     setVolume: 'playback:set-volume',
     stateChanged: 'playback:state-changed',
+    sourceChanged: 'playback:source-changed',
+    command: 'playback:command',
   },
   sync: {
     getStatus: 'sync:get-status',
@@ -155,11 +164,139 @@ export type PlaybackState =
 export type PlaybackSnapshot = {
   state: PlaybackState;
   trackId: string | null;
+  trackTitle: string | null;
+  trackArtist: string | null;
+  artwork: string | null;
   position: number;
   duration: number;
   volume: number;
   queueLength: number;
+  queueIndex: number;
+  queue: PlaybackQueueItem[];
+  mode: PlaybackQueueMode;
+  sleepTimerSeconds: number | null;
+  networkOnline: boolean;
+  cached: boolean;
   error: string | null;
+  diagnostic: PlaybackDiagnostic | null;
+};
+
+export type PlaybackQueueMode = 'sequential' | 'shuffle';
+
+/** Renderer 可见的队列项，不包含签名后的 CDN 地址。 */
+export type PlaybackQueueItem = {
+  id: string;
+  bvid: string;
+  cid?: number;
+  page?: number;
+  title: string;
+  artist: string;
+  artwork: string;
+  duration: number;
+  source?: DesktopVideo['source'];
+};
+
+export type PlaybackQueueRequest = {
+  items: PlaybackQueueItem[];
+  startIndex?: number;
+  autoplay?: boolean;
+  expandParts?: boolean;
+};
+
+export type PlaybackQueueItemRequest = {
+  item: PlaybackQueueItem;
+  autoplay?: boolean;
+};
+
+export type PlaybackRemoveRequest = {
+  trackId: string;
+};
+
+export type PlaybackReorderRequest = {
+  trackIds: string[];
+};
+
+export type PlaybackModeRequest = {
+  mode: PlaybackQueueMode;
+};
+
+export type PlaybackSleepTimerRequest = {
+  seconds: number | null;
+};
+
+export type PlaybackSource = {
+  trackId: string;
+  url: string;
+  cached: boolean;
+  revision: number;
+};
+
+export type PlaybackSourceEvent = {
+  source: PlaybackSource;
+};
+
+export type PlaybackCommand =
+  | {
+      type: 'play' | 'pause' | 'stop';
+      trackId: string | null;
+      revision: number;
+    }
+  | {
+      type: 'seek';
+      trackId: string | null;
+      position: number;
+      revision: number;
+    }
+  | {
+      type: 'set-volume';
+      trackId: string | null;
+      volume: number;
+      revision: number;
+    }
+  | {
+      type: 'fade-in' | 'fade-out';
+      trackId: string | null;
+      volume: number;
+      durationMs: number;
+      revision: number;
+    };
+
+export type PlaybackCommandEvent = {
+  command: PlaybackCommand;
+};
+
+export type PlaybackAudioEvent = {
+  type:
+    | 'loadedmetadata'
+    | 'canplay'
+    | 'playing'
+    | 'pause'
+    | 'waiting'
+    | 'stalled'
+    | 'timeupdate'
+    | 'ended'
+    | 'error'
+    | 'network-online'
+    | 'network-offline';
+  trackId?: string | null;
+  position?: number;
+  duration?: number;
+  buffered?: number;
+  message?: string;
+  code?: number;
+};
+
+export type PlaybackDiagnostic = {
+  kind:
+    | 'request-headers'
+    | 'url-expired'
+    | 'decode-failure'
+    | 'disk-failure'
+    | 'network-offline'
+    | 'playback-error';
+  message: string;
+  retrying: boolean;
+  timestamp: number;
 };
 
 export type PlaybackSeekRequest = {
@@ -332,6 +469,15 @@ export type NyamiDesktopApi = {
   };
   playback: {
     getState: () => Promise<PlaybackSnapshot>;
+    loadQueue: (request: PlaybackQueueRequest) => Promise<PlaybackSnapshot>;
+    addToQueue: (request: PlaybackQueueItemRequest) => Promise<PlaybackSnapshot>;
+    removeFromQueue: (request: PlaybackRemoveRequest) => Promise<PlaybackSnapshot>;
+    reorderQueue: (request: PlaybackReorderRequest) => Promise<PlaybackSnapshot>;
+    setMode: (request: PlaybackModeRequest) => Promise<PlaybackSnapshot>;
+    setSleepTimer: (
+      request: PlaybackSleepTimerRequest,
+    ) => Promise<PlaybackSnapshot>;
+    reportAudioEvent: (event: PlaybackAudioEvent) => Promise<PlaybackSnapshot>;
     play: () => Promise<PlaybackSnapshot>;
     pause: () => Promise<PlaybackSnapshot>;
     stop: () => Promise<PlaybackSnapshot>;
@@ -340,6 +486,8 @@ export type NyamiDesktopApi = {
     skipPrevious: () => Promise<PlaybackSnapshot>;
     setVolume: (request: PlaybackVolumeRequest) => Promise<PlaybackSnapshot>;
     onStateChanged: (listener: (event: PlaybackStateEvent) => void) => () => void;
+    onSourceChanged: (listener: (event: PlaybackSourceEvent) => void) => () => void;
+    onCommand: (listener: (event: PlaybackCommandEvent) => void) => () => void;
   };
   sync: {
     getStatus: () => Promise<SyncSnapshot>;
