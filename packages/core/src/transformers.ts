@@ -2,6 +2,7 @@ import type {
   BiliDashAudio,
   BiliFavoriteVideoMedia,
   BiliFolder,
+  BiliPopularVideoItem,
   BiliVideoSearchItem,
   BiliVideoTag,
 } from './types/bili';
@@ -80,6 +81,28 @@ export function trimSearchVideo(
       .split(',')
       .map(tag => tag.trim())
       .filter(Boolean),
+  };
+}
+
+/** 将热门视频接口条目规范化为共享在线视频模型。 */
+export function trimPopularVideo(
+  video: BiliPopularVideoItem,
+): OnlineVideoSearchResult {
+  const duration =
+    typeof video.duration === 'number'
+      ? video.duration
+      : parseSearchDuration(video.duration || '');
+  const cover = video.pic || '';
+  return {
+    aid: video.aid,
+    bvid: video.bvid,
+    title: (video.title || '').replace(/<[^>]*>/g, ''),
+    cover: cover.startsWith('//') ? `https:${cover}` : cover,
+    duration,
+    pubtime: video.pubdate ?? 0,
+    authorId: video.owner?.mid ?? video.mid ?? 0,
+    author: video.owner?.name ?? video.author ?? '未知UP主',
+    tags: [],
   };
 }
 

@@ -15,6 +15,14 @@ export const BILIBILI_AUTH_ENDPOINTS = {
     'https://passport.bilibili.com/x/passport-login/web/qrcode/generate',
   qrPoll: 'https://passport.bilibili.com/x/passport-login/web/qrcode/poll',
   webHome: 'https://www.bilibili.com/',
+  passwordLogin: 'https://passport.bilibili.com/login',
+  cookieInfo:
+    'https://passport.bilibili.com/x/passport-login/web/cookie/info',
+  cookieRefresh:
+    'https://passport.bilibili.com/x/passport-login/web/cookie/refresh',
+  cookieRefreshConfirm:
+    'https://passport.bilibili.com/x/passport-login/web/confirm/refresh',
+  correspondPrefix: 'https://www.bilibili.com/correspond/1/',
 } as const;
 
 export const BILIBILI_QR_STATUS = {
@@ -27,6 +35,15 @@ export const BILIBILI_QR_STATUS = {
 export const BILIBILI_QR_SOURCE = 'main-fe-header';
 export const BILIBILI_QR_LIFETIME_MS = 180000;
 export const BILIBILI_QR_POLL_INTERVAL_MS = 2000;
+
+export const BILIBILI_COOKIE_REFRESH_SOURCE = 'main_web';
+export const BILIBILI_REFRESH_CSRF_ID = '1-name';
+export const BILIBILI_REFRESH_TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
+export const BILIBILI_REFRESH_PUBLIC_KEY = {
+  kty: 'RSA',
+  n: 'y4HdjgJHBlbaBN04VERG4qNBIFHP6a3GozCl75AihQloSWCXC5HDNgyinEnhaQ_4-gaMud_GF50elYXLlCToR9se9Z8z433U3KjM-3Yx7ptKkmQNAMggQwAVKgq3zYAoidNEWuxpkY_mAitTSRLnsJW-NCTa0bqBFF6Wm1MxgfE',
+  e: 'AQAB',
+} as const;
 
 export const BILIBILI_LOGIN_COOKIE_NAMES = new Set([
   'SESSDATA',

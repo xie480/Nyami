@@ -10,6 +10,7 @@ import type {
   BiliCollectedPlaylistList,
   BiliFavoriteVideoMedia,
   BiliFolder,
+  BiliPopularVideoPage,
   BiliPlayUrlData,
   BiliSeasonArchivesPage,
   BiliVideoInfo,
@@ -141,6 +142,28 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
         {signal, silent: true},
         1,
       );
+    },
+
+    /** 获取 B 站热门视频，供桌面首页和发现页展示公开内容。 */
+    getPopularVideos(
+      page = 1,
+      pageSize = 20,
+      signal?: AbortSignal,
+    ) {
+      if (!Number.isInteger(page) || page < 1) {
+        return Promise.reject(new Error('热门视频页码无效'));
+      }
+      if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 50) {
+        return Promise.reject(new Error('热门视频分页大小无效'));
+      }
+      return get<BiliPopularVideoPage>('/x/web-interface/popular', {
+        params: {
+          pn: page,
+          ps: pageSize,
+        },
+        signal,
+        silent: true,
+      });
     },
 
     /** 获取单个视频的标签。 */

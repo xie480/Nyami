@@ -4,13 +4,17 @@ import {
   WebContentsView,
   session,
 } from 'electron';
-import {BILIBILI_LOGIN_COOKIE_NAMES, BILIBILI_REFERER} from '../constants';
+import {
+  BILIBILI_AUTH_ENDPOINTS,
+  BILIBILI_LOGIN_COOKIE_NAMES,
+  BILIBILI_REFERER,
+} from '../constants';
 import {
   hasRequiredLoginCookies,
   isTrustedBiliUrl,
 } from '../security/urlPolicy';
 
-type CookieReader = (cookie: string) => Promise<void>;
+type CookieReader = (cookie: string, refreshToken?: string | null) => Promise<void>;
 
 /**
  * 受控 Bilibili 登录页面适配器。
@@ -45,7 +49,7 @@ export class TrustedLoginViewController {
    * 打开二维码回调地址，并安装导航与 Cookie 监听。
    * @param ticketUrl B 站二维码确认后的 ticket 地址
    */
-  async open(ticketUrl: string): Promise<void> {
+  async open(ticketUrl: string, captureCookies = true): Promise<void> {
     if (!isTrustedBiliUrl(ticketUrl)) {
       throw new Error('B 站登录回调地址不在可信域名白名单中');
     }
@@ -84,18 +88,65 @@ export class TrustedLoginViewController {
         event.preventDefault();
       }
     });
-    view.webContents.on('did-stop-loading', () => {
-      void this.captureLoginCookies();
-    });
+    if (captureCookies) {
+      view.webContents.on('did-stop-loading', () => {
+        void this.captureLoginCookies();
+      });
+    }
 
     await view.webContents.loadURL(ticketUrl, {
       extraHeaders: `Referer: ${BILIBILI_REFERER}\n`,
     });
-    if (this.view === view) {
+    if (captureCookies && this.view === view) {
       this.captureTimer = setInterval(() => {
         void this.captureLoginCookies();
       }, 500);
     }
+  }
+
+  /** 将主进程保存的 B 站 Cookie 注入受控 Session，供续期页面复用。 */
+  async seedCookies(cookieHeader: string): Promise<void> {
+    const parts = cookieHeader.split(';');
+    for (const part of parts) {
+      const separator = part.indexOf('=');
+      if (separator <= 0) {
+        continue;
+      }
+      const name = part.slice(0, separator).trim();
+      const value = part.slice(separator + 1).trim();
+      if (!name || !value) {
+        continue;
+      }
+      await this.loginSession.cookies.set({
+        url: BILIBILI_AUTH_ENDPOINTS.webHome,
+        name,
+        value,
+        domain: '.bilibili.com',
+        path: '/',
+        secure: true,
+      });
+    }
+  }
+
+  /** 在受控 B 站页面中执行主进程生成的续期脚本。 */
+  async executeJavaScript<T>(script: string): Promise<T> {
+    if (!this.view) {
+      throw new Error('B 站网页会话尚未打开');
+    }
+    return (await this.view.webContents.executeJavaScript(script, true)) as T;
+  }
+
+  /** 读取受控 Session 中的登录 Cookie，返回脱敏范围内的 Cookie 头。 */
+  async readCookieHeader(): Promise<string> {
+    const cookies = await this.loginSession.cookies.get({});
+    return cookies
+      .filter(
+        cookie =>
+          cookie.domain?.endsWith('bilibili.com') &&
+          BILIBILI_LOGIN_COOKIE_NAMES.has(cookie.name),
+      )
+      .map(cookie => `${cookie.name}=${cookie.value}`)
+      .join('; ');
   }
 
   /**
@@ -147,15 +198,7 @@ export class TrustedLoginViewController {
       return;
     }
 
-    const cookies = await this.loginSession.cookies.get({});
-    const loginCookies = cookies.filter(
-      cookie =>
-        cookie.domain?.endsWith('bilibili.com') &&
-        BILIBILI_LOGIN_COOKIE_NAMES.has(cookie.name),
-    );
-    const cookieHeader = loginCookies
-      .map(cookie => `${cookie.name}=${cookie.value}`)
-      .join('; ');
+    const cookieHeader = await this.readCookieHeader();
     if (!hasRequiredLoginCookies(cookieHeader)) {
       return;
     }

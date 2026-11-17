@@ -3,6 +3,7 @@ import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {extractBiliUid, hasRequiredLoginCookies} from '../security/urlPolicy';
 import type {AuthStatus} from '../../shared/types';
+import type {CredentialSnapshot} from '../../../packages/platform-contracts/src';
 
 type StoredCredentials = {
   version: 1;
@@ -56,6 +57,28 @@ export class CredentialStore {
     });
   }
 
+  /** 读取共享核心所需的凭证快照；完整 Cookie 只在主进程内部使用。 */
+  async getCredentials(): Promise<CredentialSnapshot> {
+    const stored = await this.readInternal();
+    return {
+      cookie: stored?.cookie ?? '',
+      refreshToken: stored?.refreshToken ?? null,
+    };
+  }
+
+  /** 保存共享核心传入的凭证快照。 */
+  async saveCredentials(
+    cookie: string,
+    refreshToken: string | null,
+  ): Promise<void> {
+    await this.save(cookie, refreshToken);
+  }
+
+  /** 清理共享核心使用的凭证。 */
+  async clearCredentials(): Promise<void> {
+    await this.clear();
+  }
+
   /**
    * 读取并解密 Cookie，仅供主进程内部调用。
    * @returns 完整凭证；文件不存在或解密失败时返回 null
@@ -102,6 +125,7 @@ export class CredentialStore {
     return {
       loggedIn: Boolean(stored),
       uid,
+      refreshAvailable: Boolean(stored?.refreshToken),
     };
   }
 

@@ -1,15 +1,21 @@
 import {contextBridge, ipcRenderer} from 'electron';
 import type {
   AudioProbeRequest,
+  AuthWebViewState,
   CacheProgressEvent,
+  ContentRequestBase,
   DesktopSettings,
   DesktopSettingsPatch,
+  DiscoverContentRequest,
+  FavoriteFolderContentRequest,
+  FavoriteVideoContentRequest,
   NyamiDesktopApi,
   PlaybackSeekRequest,
   PlaybackStateEvent,
   PlaybackVolumeRequest,
   QrStatusEvent,
   RendererErrorReport,
+  SearchContentRequest,
   SyncStateEvent,
 } from '../shared/types';
 import {IPC_CHANNELS as CHANNELS} from '../shared/types';
@@ -46,9 +52,15 @@ const api: NyamiDesktopApi = {
     startQrLogin: () => ipcRenderer.invoke(CHANNELS.auth.startQrLogin),
     cancelQrLogin: () => ipcRenderer.invoke(CHANNELS.auth.cancelQrLogin),
     getStatus: () => ipcRenderer.invoke(CHANNELS.auth.getStatus),
+    getProfile: () => ipcRenderer.invoke(CHANNELS.auth.getProfile),
+    openWebLogin: () => ipcRenderer.invoke(CHANNELS.auth.openWebLogin),
+    renew: () => ipcRenderer.invoke(CHANNELS.auth.renew),
+    closeWebLogin: () => ipcRenderer.invoke(CHANNELS.auth.closeWebLogin),
     logout: () => ipcRenderer.invoke(CHANNELS.auth.logout),
     onQrStatus: listener =>
       subscribe<QrStatusEvent>(CHANNELS.auth.qrStatus, listener),
+    onWebViewState: listener =>
+      subscribe<AuthWebViewState>(CHANNELS.auth.webViewState, listener),
   },
   probes: {
     inspectAudio: (request: AudioProbeRequest) =>
@@ -82,6 +94,20 @@ const api: NyamiDesktopApi = {
     cancel: () => ipcRenderer.invoke(CHANNELS.sync.cancel),
     onStateChanged: listener =>
       subscribe<SyncStateEvent>(CHANNELS.sync.stateChanged, listener),
+  },
+  content: {
+    getHome: (request: ContentRequestBase) =>
+      ipcRenderer.invoke(CHANNELS.content.getHome, request),
+    getDiscover: (request: DiscoverContentRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.getDiscover, request),
+    search: (request: SearchContentRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.search, request),
+    getFavoriteFolders: (request: FavoriteFolderContentRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.getFavoriteFolders, request),
+    getFavoriteVideos: (request: FavoriteVideoContentRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.getFavoriteVideos, request),
+    cancel: (request: ContentRequestBase) =>
+      ipcRenderer.invoke(CHANNELS.content.cancel, request),
   },
   cache: {
     getSummary: () => ipcRenderer.invoke(CHANNELS.cache.getSummary),

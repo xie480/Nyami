@@ -6,15 +6,21 @@ import {
 import {
   IPC_CHANNELS,
   type AudioProbeRequest,
+  type ContentRequestBase,
   type DesktopSettingsPatch,
+  type DiscoverContentRequest,
+  type FavoriteFolderContentRequest,
+  type FavoriteVideoContentRequest,
   type PlaybackSeekRequest,
   type PlaybackVolumeRequest,
   type RendererErrorReport,
+  type SearchContentRequest,
 } from '../../shared/types';
 import {AudioProbe} from '../audio/audioProbe';
 import {AudioRequestRecorder} from '../audio/audioRequestRecorder';
 import {getSampleAudioUrl} from '../audio/localAudioProtocol';
 import {QrLoginController} from '../auth/qrLoginController';
+import {BiliContentRuntime} from '../content/biliContentRuntime';
 import {AppLogger} from '../logging/appLogger';
 import {CacheManager} from '../runtime/cacheManager';
 import {PlaybackRuntime} from '../runtime/playbackRuntime';
@@ -31,6 +37,7 @@ export type IpcRuntimeDependencies = {
   cacheManager: CacheManager;
   playbackRuntime: PlaybackRuntime;
   syncRuntime: SyncRuntime;
+  contentRuntime: BiliContentRuntime;
 };
 
 /**
@@ -83,6 +90,12 @@ export function registerIpcHandlers(
     qrLogin.stopSession();
   });
   register(IPC_CHANNELS.auth.getStatus, () => qrLogin.getStatus());
+  register(IPC_CHANNELS.auth.getProfile, () =>
+    dependencies.contentRuntime.getProfile(),
+  );
+  register(IPC_CHANNELS.auth.openWebLogin, () => qrLogin.openWebLogin());
+  register(IPC_CHANNELS.auth.renew, () => qrLogin.renew());
+  register(IPC_CHANNELS.auth.closeWebLogin, () => qrLogin.closeWebLogin());
   register(IPC_CHANNELS.auth.logout, () => qrLogin.logout());
 
   register(IPC_CHANNELS.probes.inspectAudio, (_event, request) => {
@@ -146,6 +159,31 @@ export function registerIpcHandlers(
     const snapshot = dependencies.syncRuntime.cancel();
     send(IPC_CHANNELS.sync.stateChanged, {snapshot});
     return snapshot;
+  });
+
+  register(IPC_CHANNELS.content.getHome, (_event, request) => {
+    assertContentRequestBase(request);
+    return dependencies.contentRuntime.getHome(request);
+  });
+  register(IPC_CHANNELS.content.getDiscover, (_event, request) => {
+    assertDiscoverContentRequest(request);
+    return dependencies.contentRuntime.getDiscover(request);
+  });
+  register(IPC_CHANNELS.content.search, (_event, request) => {
+    assertSearchContentRequest(request);
+    return dependencies.contentRuntime.search(request);
+  });
+  register(IPC_CHANNELS.content.getFavoriteFolders, (_event, request) => {
+    assertFavoriteFolderContentRequest(request);
+    return dependencies.contentRuntime.getFavoriteFolders(request);
+  });
+  register(IPC_CHANNELS.content.getFavoriteVideos, (_event, request) => {
+    assertFavoriteVideoContentRequest(request);
+    return dependencies.contentRuntime.getFavoriteVideos(request);
+  });
+  register(IPC_CHANNELS.content.cancel, (_event, request) => {
+    assertContentRequestBase(request);
+    dependencies.contentRuntime.cancel(request);
   });
 
   register(IPC_CHANNELS.cache.getSummary, () =>
@@ -232,6 +270,83 @@ function assertAudioProbeRequest(value: unknown): asserts value is AudioProbeReq
   ) {
     throw new Error('音频重试 URL 无效');
   }
+}
+
+/** 校验所有可取消内容请求的请求 ID。 */
+function assertContentRequestBase(
+  value: unknown,
+): asserts value is ContentRequestBase {
+  if (!isRecord(value) || !isBoundedString(value.requestId, 128)) {
+    throw new Error('内容请求 ID 无效');
+  }
+}
+
+/** 校验搜索请求，限制关键词长度和页码范围。 */
+function assertSearchContentRequest(
+  value: unknown,
+): asserts value is SearchContentRequest {
+  assertContentRequestBase(value);
+  const request = value as ContentRequestBase & {
+    keyword?: unknown;
+    page?: unknown;
+  };
+  if (!isBoundedString(request.keyword, 128) || !request.keyword.trim()) {
+    throw new Error('搜索关键词无效');
+  }
+  if (!isPositiveInteger(request.page) || request.page > 1000) {
+    throw new Error('搜索页码无效');
+  }
+}
+
+/** 校验发现页请求。 */
+function assertDiscoverContentRequest(
+  value: unknown,
+): asserts value is DiscoverContentRequest {
+  assertContentRequestBase(value);
+  const request = value as ContentRequestBase & {page?: unknown};
+  if (!isPositiveInteger(request.page) || request.page > 1000) {
+    throw new Error('发现页码无效');
+  }
+}
+
+/** 校验收藏夹目录请求。 */
+function assertFavoriteFolderContentRequest(
+  value: unknown,
+): asserts value is FavoriteFolderContentRequest {
+  assertContentRequestBase(value);
+  const request = value as ContentRequestBase & {uid?: unknown};
+  if (!isBoundedString(request.uid, 64) || !request.uid.trim()) {
+    throw new Error('收藏账号 UID 无效');
+  }
+}
+
+/** 校验收藏夹视频请求。 */
+function assertFavoriteVideoContentRequest(
+  value: unknown,
+): asserts value is FavoriteVideoContentRequest {
+  assertContentRequestBase(value);
+  const request = value as ContentRequestBase & {
+    uid?: unknown;
+    mediaId?: unknown;
+    page?: unknown;
+  };
+  if (!isBoundedString(request.uid, 64) || !request.uid.trim()) {
+    throw new Error('收藏账号 UID 无效');
+  }
+  if (
+    !isPositiveInteger(request.mediaId) ||
+    request.mediaId > Number.MAX_SAFE_INTEGER
+  ) {
+    throw new Error('收藏夹 ID 无效');
+  }
+  if (!isPositiveInteger(request.page) || request.page > 1000) {
+    throw new Error('收藏视频页码无效');
+  }
+}
+
+/** 判断未知输入是否为正整数。 */
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
 }
 
 /**

@@ -40,6 +40,28 @@ export interface BiliVideoSearchPage {
   numResults?: number;
 }
 
+/** B 站热门视频接口返回的条目。 */
+export interface BiliPopularVideoItem {
+  aid: number;
+  bvid: string;
+  title: string;
+  pic: string;
+  duration: string | number;
+  pubdate?: number;
+  owner?: {
+    mid?: number;
+    name?: string;
+  };
+  author?: string;
+  mid?: number;
+}
+
+/** B 站热门视频分页响应。 */
+export interface BiliPopularVideoPage {
+  list?: BiliPopularVideoItem[];
+  no_more?: boolean;
+}
+
 /** 收藏关系目录接口中的条目；fid 为 0 的条目表示视频合集。 */
 export interface BiliCollectedPlaylist {
   id: number;

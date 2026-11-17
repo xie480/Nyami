@@ -8,8 +8,13 @@ export const IPC_CHANNELS = {
     startQrLogin: 'auth:start-qr-login',
     cancelQrLogin: 'auth:cancel-qr-login',
     getStatus: 'auth:get-status',
+    getProfile: 'auth:get-profile',
+    openWebLogin: 'auth:open-web-login',
+    renew: 'auth:renew',
+    closeWebLogin: 'auth:close-web-login',
     logout: 'auth:logout',
     qrStatus: 'auth:qr-status',
+    webViewState: 'auth:webview-state',
   },
   playback: {
     getState: 'playback:get-state',
@@ -27,6 +32,14 @@ export const IPC_CHANNELS = {
     start: 'sync:start',
     cancel: 'sync:cancel',
     stateChanged: 'sync:state-changed',
+  },
+  content: {
+    getHome: 'content:get-home',
+    getDiscover: 'content:get-discover',
+    search: 'content:search',
+    getFavoriteFolders: 'content:get-favorite-folders',
+    getFavoriteVideos: 'content:get-favorite-videos',
+    cancel: 'content:cancel',
   },
   cache: {
     getSummary: 'cache:get-summary',
@@ -66,6 +79,20 @@ export type QrLoginStatus =
 export type AuthStatus = {
   loggedIn: boolean;
   uid: string | null;
+  profile?: UserProfile | null;
+  refreshAvailable?: boolean;
+};
+
+/** Renderer 可见的 Bilibili 账号资料，不包含任何凭证字段。 */
+export type UserProfile = {
+  uid: string;
+  name: string;
+  avatar: string;
+  vipStatus: {
+    type: number;
+    status: number;
+    dueDate?: number;
+  };
 };
 
 export type QrSessionStartResult = {
@@ -210,6 +237,72 @@ export type SyncStateEvent = {
   snapshot: SyncSnapshot;
 };
 
+/** 受控 Bilibili WebContentsView 的展示状态。 */
+export type AuthWebViewState = {
+  open: boolean;
+  mode: 'login' | 'refresh' | null;
+};
+
+/** 统一的可取消内容请求基类。 */
+export type ContentRequestBase = {
+  requestId: string;
+};
+
+export type SearchContentRequest = ContentRequestBase & {
+  keyword: string;
+  page: number;
+};
+
+export type DiscoverContentRequest = ContentRequestBase & {
+  page: number;
+};
+
+export type FavoriteFolderContentRequest = ContentRequestBase & {
+  uid: string;
+};
+
+export type FavoriteVideoContentRequest = ContentRequestBase & {
+  uid: string;
+  mediaId: number;
+  page: number;
+};
+
+/** 桌面内容卡片使用的统一视频模型。 */
+export type DesktopVideo = {
+  aid?: number;
+  bvid: string;
+  title: string;
+  cover: string;
+  duration: number;
+  pubtime: number;
+  authorId: number;
+  author: string;
+  tags: string[];
+  page?: number;
+  favTime?: number;
+  source?: 'search' | 'popular' | 'favorite';
+};
+
+export type DesktopPage<T> = {
+  items: T[];
+  page: number;
+  hasMore: boolean;
+  total: number | null;
+  description?: string;
+};
+
+export type FavoriteFolderSummary = {
+  id: number;
+  fid: number;
+  title: string;
+  mediaCount: number;
+};
+
+export type HomeSnapshot = {
+  featured: DesktopVideo[];
+  popular: DesktopVideo[];
+};
+
 export type CacheProgressEvent = {
   operation: 'clear' | 'scan';
   completed: number;
@@ -221,8 +314,15 @@ export type NyamiDesktopApi = {
     startQrLogin: () => Promise<QrSessionStartResult>;
     cancelQrLogin: () => Promise<void>;
     getStatus: () => Promise<AuthStatus>;
+    getProfile: () => Promise<UserProfile | null>;
+    openWebLogin: () => Promise<void>;
+    renew: () => Promise<AuthStatus>;
+    closeWebLogin: () => Promise<void>;
     logout: () => Promise<void>;
     onQrStatus: (listener: (event: QrStatusEvent) => void) => () => void;
+    onWebViewState: (
+      listener: (event: AuthWebViewState) => void,
+    ) => () => void;
   };
   probes: {
     inspectAudio: (request: AudioProbeRequest) => Promise<AudioProbeResult>;
@@ -246,6 +346,22 @@ export type NyamiDesktopApi = {
     start: () => Promise<SyncSnapshot>;
     cancel: () => Promise<SyncSnapshot>;
     onStateChanged: (listener: (event: SyncStateEvent) => void) => () => void;
+  };
+  content: {
+    getHome: (request: ContentRequestBase) => Promise<HomeSnapshot>;
+    getDiscover: (
+      request: DiscoverContentRequest,
+    ) => Promise<DesktopPage<DesktopVideo>>;
+    search: (
+      request: SearchContentRequest,
+    ) => Promise<DesktopPage<DesktopVideo>>;
+    getFavoriteFolders: (
+      request: FavoriteFolderContentRequest,
+    ) => Promise<FavoriteFolderSummary[]>;
+    getFavoriteVideos: (
+      request: FavoriteVideoContentRequest,
+    ) => Promise<DesktopPage<DesktopVideo>>;
+    cancel: (request: ContentRequestBase) => Promise<void>;
   };
   cache: {
     getSummary: () => Promise<CacheSummary>;

@@ -9,6 +9,8 @@ import {AudioProbe} from '../audio/audioProbe';
 import {AudioRequestRecorder} from '../audio/audioRequestRecorder';
 import {registerAudioInterception} from '../audio/registerAudioInterception';
 import {QrLoginController} from '../auth/qrLoginController';
+import {CredentialStore} from '../auth/credentialStore';
+import {BiliContentRuntime} from '../content/biliContentRuntime';
 import {AppLogger} from '../logging/appLogger';
 import {registerIpcHandlers} from '../ipc/registerIpc';
 import {CacheManager} from '../runtime/cacheManager';
@@ -68,7 +70,12 @@ export function createMainWindow(
   const window = new BrowserWindow(windowOptions);
   const recorder = new AudioRequestRecorder();
   registerAudioInterception(session.defaultSession, recorder);
-  const qrLogin = new QrLoginController(window);
+  const credentialStore = new CredentialStore();
+  const qrLogin = new QrLoginController(window, credentialStore);
+  const contentRuntime = new BiliContentRuntime(
+    credentialStore,
+    dependencies.logger,
+  );
   const audioProbe = new AudioProbe();
   const cacheManager = new CacheManager(dependencies.directories);
   const playbackRuntime = new PlaybackRuntime();
@@ -84,6 +91,7 @@ export function createMainWindow(
       cacheManager,
       playbackRuntime,
       syncRuntime,
+      contentRuntime,
     },
   );
   let disposed = false;
