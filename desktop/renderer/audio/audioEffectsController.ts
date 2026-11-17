@@ -267,7 +267,7 @@ class NyamiDspProcessor extends AudioWorkletProcessor {
             }
           }
         }
-        if (this.settings.limiterEnabled) {
+        if (this.settings.enabled && this.settings.limiterEnabled) {
           const threshold = Math.min(1, Math.max(0.5, this.settings.limiterThreshold));
           sample = Math.tanh(sample / threshold) * threshold;
         }
@@ -300,7 +300,12 @@ class NyamiDspProcessor extends AudioWorkletProcessor {
     this.peqFilters = Array.from({length: this.channelCount}, () =>
       this.settings.peqBands.map(band => {
         const filter = new Biquad();
-        filter.setPeaking(Number(band.frequency || 1000), Number(band.gain || 0), Number(band.q || 1), sampleRate);
+        filter.setPeaking(
+          Number(band.frequency || 1000),
+          band.enabled ? Number(band.gain || 0) : 0,
+          Number(band.q || 1),
+          sampleRate,
+        );
         return filter;
       }),
     );
