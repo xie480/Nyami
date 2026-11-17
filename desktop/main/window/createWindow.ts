@@ -4,6 +4,7 @@ import {
   type BrowserWindowConstructorOptions,
 } from 'electron';
 import path from 'node:path';
+import {randomUUID} from 'node:crypto';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {AudioProbe} from '../audio/audioProbe';
 import {BiliAudioResolver} from '../audio/biliAudioResolver';
@@ -21,6 +22,10 @@ import {PlaybackRuntime} from '../runtime/playbackRuntime';
 import {SyncRuntime} from '../runtime/syncRuntime';
 import type {AppDirectories} from '../storage/appDirectories';
 import {SettingsStore} from '../storage/settingsStore';
+import type {
+  PlaybackQueueContext,
+  PlaybackQueueItem,
+} from '../../shared/types';
 
 const currentFile = fileURLToPath(import.meta.url);
 const currentDir = path.dirname(currentFile);
@@ -94,6 +99,27 @@ export function createMainWindow(
     cache: audioCache,
     logger: dependencies.logger,
     statePath: path.join(dependencies.directories.settings, 'playback.json'),
+    recommendationContinuation: async (
+      context: PlaybackQueueContext,
+      signal: AbortSignal,
+    ) => {
+      const page = await contentRuntime.getDiscover({
+        requestId: `playback-recommendation-${randomUUID()}`,
+        page: context.page + 1,
+      });
+      if (signal.aborted) {
+        const error = new Error('推荐续页请求已取消');
+        error.name = 'AbortError';
+        throw error;
+      }
+      return {
+        items: page.items.map(toPlaybackQueueItem),
+        context: {
+          kind: 'recommendation',
+          page: page.page,
+        },
+      };
+    },
   });
   const syncRuntime = new SyncRuntime();
   const disposeIpc = registerIpcHandlers(
@@ -244,4 +270,26 @@ function isAllowedRendererNavigation(value: string): boolean {
   }
   const rendererFile = path.join(currentDir, '../renderer/index.html');
   return value === pathToFileURL(rendererFile).toString();
+}
+
+/** 将内容运行时返回的热门视频转换为播放队列项目。 */
+function toPlaybackQueueItem(video: {
+  bvid: string;
+  title: string;
+  author: string;
+  cover: string;
+  duration: number;
+  source?: 'search' | 'popular' | 'favorite';
+  page?: number;
+}): PlaybackQueueItem {
+  return {
+    id: video.bvid,
+    bvid: video.bvid,
+    title: video.title,
+    artist: video.author,
+    artwork: video.cover,
+    duration: video.duration,
+    ...(video.page !== undefined ? {page: video.page} : {}),
+    ...(video.source ? {source: video.source} : {}),
+  };
 }

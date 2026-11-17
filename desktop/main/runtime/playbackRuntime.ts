@@ -7,6 +7,7 @@ import type {
   PlaybackCommand,
   PlaybackDiagnostic,
   PlaybackModeRequest,
+  PlaybackQueueContext,
   PlaybackQueueItem,
   PlaybackQueueItemRequest,
   PlaybackQueueMode,
@@ -46,6 +47,7 @@ const DEFAULT_PLAYBACK_SNAPSHOT: PlaybackSnapshot = {
   queueIndex: -1,
   queue: [],
   mode: 'sequential',
+  queueContext: null,
   sleepTimerSeconds: null,
   networkOnline: true,
   cached: false,
@@ -63,12 +65,20 @@ type PlaybackRuntimeOptions = {
   cache: AudioCacheStore;
   logger: AppLogger;
   statePath: string;
+  recommendationContinuation?: (
+    context: PlaybackQueueContext,
+    signal: AbortSignal,
+  ) => Promise<{
+    items: PlaybackQueueItem[];
+    context: PlaybackQueueContext;
+  }>;
 };
 
 type PersistedPlaybackState = {
   queue: PlaybackQueueItem[];
   currentTrackId: string | null;
   mode: PlaybackQueueMode;
+  context: PlaybackQueueContext | null;
 };
 
 /**
@@ -137,6 +147,7 @@ export class PlaybackRuntime {
     const revision = this.queueController.replaceQueue(
       items,
       initialItem.id,
+      request.context ?? null,
     );
     const controller = new AbortController();
     this.operationController = controller;
@@ -185,6 +196,7 @@ export class PlaybackRuntime {
       return this.loadQueue({
         items: [item],
         autoplay: request.autoplay !== false,
+        context: request.context ?? null,
       });
     }
     this.queueController.append([item]);
@@ -473,11 +485,68 @@ export class PlaybackRuntime {
     item: PlaybackQueueItem | null,
   ): Promise<PlaybackSnapshot> {
     if (!item) {
+      return this.continueRecommendations();
+    }
+    return this.activateTrack(item.id, true);
+  }
+
+  /** 在推荐队列播放到末尾时请求下一页并追加到当前队列。 */
+  private async continueRecommendations(): Promise<PlaybackSnapshot> {
+    const context = this.queueController.getSnapshot().context;
+    if (
+      !this.options.recommendationContinuation ||
+      !isRecommendationContext(context)
+    ) {
       this.snapshot = this.snapshotFromQueue('stopped');
       this.emitState();
       return this.getState();
     }
-    return this.activateTrack(item.id, true);
+
+    this.abortCurrentOperation();
+    const revision = this.queueController.beginOperation();
+    const controller = new AbortController();
+    this.operationController = controller;
+    try {
+      const result = await this.options.recommendationContinuation(
+        context,
+        controller.signal,
+      );
+      if (!this.queueController.isCurrent(revision)) {
+        return this.getState();
+      }
+      const items = normalizeQueueItems(result.items);
+      if (items.length === 0) {
+        this.queueController.syncSnapshot(
+          this.queueController.getSnapshot().queue,
+          this.queueController.getSnapshot().currentBvid,
+          result.context,
+        );
+        await this.persistState();
+        this.snapshot = this.snapshotFromQueue('stopped');
+        this.emitState();
+        return this.getState();
+      }
+      this.queueController.append(items);
+      const appended = this.queueController.getSnapshot();
+      this.queueController.syncSnapshot(
+        appended.queue,
+        appended.currentBvid,
+        result.context,
+      );
+      await this.persistState();
+      const next = this.queueController.next();
+      return next ? this.activateTrack(next.id, true) : this.getState();
+    } catch (error) {
+      if (isAbortError(error)) {
+        return this.getState();
+      }
+      const kind = !net.isOnline() ? 'network-offline' : 'playback-error';
+      return this.failPlayback(error, kind, false);
+    } finally {
+      if (this.operationController === controller) {
+        this.operationController = null;
+      }
+    }
   }
 
   /** 以指定项目为当前项建立新 revision。 */
@@ -694,6 +763,9 @@ export class PlaybackRuntime {
       queueLength: queueSnapshot.queue.length,
       queueIndex,
       mode: queueSnapshot.mode,
+      queueContext: isRecommendationContext(queueSnapshot.context)
+        ? queueSnapshot.context
+        : null,
       sleepTimerSeconds,
     };
   }
@@ -853,6 +925,7 @@ export class PlaybackRuntime {
         typeof parsed.currentTrackId === 'string'
           ? parsed.currentTrackId
           : queue[0].id,
+        parsed.context ?? null,
       );
       if (parsed.mode === 'shuffle') {
         this.queueController.setMode('shuffle');
@@ -869,6 +942,9 @@ export class PlaybackRuntime {
       queue: snapshot.queue,
       currentTrackId: snapshot.currentBvid,
       mode: snapshot.mode,
+      context: isRecommendationContext(snapshot.context)
+        ? snapshot.context
+        : null,
     };
     const temporaryPath = `${this.options.statePath}.${Date.now()}.tmp`;
     await fs.mkdir(path.dirname(this.options.statePath), {recursive: true});
@@ -914,6 +990,19 @@ function normalizeQueueItems(items: PlaybackQueueItem[]): PlaybackQueueItem[] {
     });
   }
   return normalized;
+}
+
+/** 判断队列上下文是否为受支持的推荐续页游标。 */
+function isRecommendationContext(
+  value: unknown,
+): value is PlaybackQueueContext {
+  return (
+    Boolean(value) &&
+    typeof value === 'object' &&
+    (value as {kind?: unknown}).kind === 'recommendation' &&
+    Number.isSafeInteger((value as {page?: unknown}).page) &&
+    Number((value as {page: number}).page) >= 1
+  );
 }
 
 /** 将可能的浮点输入限制到播放器允许的范围。 */

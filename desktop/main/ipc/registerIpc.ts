@@ -12,6 +12,7 @@ import {
   type FavoriteFolderContentRequest,
   type FavoriteVideoContentRequest,
   type PlaybackAudioEvent,
+  type PlaybackQueueContext,
   type PlaybackModeRequest,
   type PlaybackQueueItemRequest,
   type PlaybackQueueRequest,
@@ -433,6 +434,9 @@ function assertPlaybackQueueRequest(
   ) {
     throw new Error('多 P 展开参数无效');
   }
+  if (value.context !== undefined && value.context !== null) {
+    assertPlaybackQueueContext(value.context);
+  }
 }
 
 /** 校验追加单项队列请求。 */
@@ -445,6 +449,23 @@ function assertPlaybackQueueItemRequest(
   assertPlaybackQueueItem(value.item);
   if (value.autoplay !== undefined && typeof value.autoplay !== 'boolean') {
     throw new Error('播放自动开始参数无效');
+  }
+  if (value.context !== undefined && value.context !== null) {
+    assertPlaybackQueueContext(value.context);
+  }
+}
+
+/** 校验推荐续页上下文，避免主进程接受任意游标。 */
+function assertPlaybackQueueContext(
+  value: unknown,
+): asserts value is PlaybackQueueContext {
+  if (
+    !isRecord(value) ||
+    value.kind !== 'recommendation' ||
+    !isPositiveInteger(value.page) ||
+    value.page > 1000
+  ) {
+    throw new Error('推荐续页上下文无效');
   }
 }
 

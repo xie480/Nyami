@@ -28,6 +28,7 @@ import type {
   FavoriteVideoContentRequest,
   HomeSnapshot,
   PlaybackAudioEvent,
+  PlaybackQueueContext,
   PlaybackQueueItem,
   PlaybackQueueMode,
   PlaybackSnapshot,
@@ -83,6 +84,7 @@ const EMPTY_PLAYBACK: PlaybackSnapshot = {
   queueIndex: -1,
   queue: [],
   mode: 'sequential',
+  queueContext: null,
   sleepTimerSeconds: null,
   networkOnline: true,
   cached: false,
@@ -235,6 +237,7 @@ export function App(): JSX.Element {
           startIndex: 0,
           autoplay: true,
           expandParts: true,
+          context: getRecommendationContext(video),
         })
         .then(setPlayback)
         .catch(error => {
@@ -251,6 +254,7 @@ export function App(): JSX.Element {
         .addToQueue({
           item: toPlaybackQueueItem(video),
           autoplay: false,
+          context: getRecommendationContext(video),
         })
         .then(snapshot => {
           setPlayback(snapshot);
@@ -336,6 +340,7 @@ export function App(): JSX.Element {
           startIndex,
           autoplay: true,
           expandParts: false,
+          context: playback.queueContext,
         })
         .then(setPlayback)
         .catch(error => {
@@ -2044,6 +2049,15 @@ function toPlaybackQueueItem(video: DesktopVideo): PlaybackQueueItem {
     ...(video.page !== undefined ? {page: video.page} : {}),
     ...(video.source ? {source: video.source} : {}),
   };
+}
+
+/** 将首页/发现热门结果标记为可自动续页的推荐队列。 */
+function getRecommendationContext(
+  video: DesktopVideo,
+): PlaybackQueueContext | null {
+  return video.source === 'popular'
+    ? {kind: 'recommendation', page: 1}
+    : null;
 }
 
 /** 返回侧边栏路由的中文标题。 */

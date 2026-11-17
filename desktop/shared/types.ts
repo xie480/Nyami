@@ -174,6 +174,7 @@ export type PlaybackSnapshot = {
   queueIndex: number;
   queue: PlaybackQueueItem[];
   mode: PlaybackQueueMode;
+  queueContext: PlaybackQueueContext | null;
   sleepTimerSeconds: number | null;
   networkOnline: boolean;
   cached: boolean;
@@ -182,6 +183,12 @@ export type PlaybackSnapshot = {
 };
 
 export type PlaybackQueueMode = 'sequential' | 'shuffle';
+
+/** 队列可恢复的推荐来源上下文，页码用于播放到末尾时请求下一页。 */
+export type PlaybackQueueContext = {
+  kind: 'recommendation';
+  page: number;
+};
 
 /** Renderer 可见的队列项，不包含签名后的 CDN 地址。 */
 export type PlaybackQueueItem = {
@@ -201,11 +208,13 @@ export type PlaybackQueueRequest = {
   startIndex?: number;
   autoplay?: boolean;
   expandParts?: boolean;
+  context?: PlaybackQueueContext | null;
 };
 
 export type PlaybackQueueItemRequest = {
   item: PlaybackQueueItem;
   autoplay?: boolean;
+  context?: PlaybackQueueContext | null;
 };
 
 export type PlaybackRemoveRequest = {
