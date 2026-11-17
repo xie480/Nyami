@@ -283,6 +283,9 @@ export class QrLoginController {
         : null);
     const previousUid = extractUid(previous.cookie);
     const nextUid = extractUid(cookie);
+    if (!nextUid) {
+      throw new Error('登录 Cookie 缺少有效账号 UID');
+    }
     await this.onAccountChanged?.(previousUid, nextUid);
     await this.credentialStore.saveCredentials(cookie, nextRefreshToken);
     this.emit({
