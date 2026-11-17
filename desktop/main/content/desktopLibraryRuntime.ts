@@ -47,6 +47,8 @@ type LibrarySyncOptions = {
  * 该类组合共享 BiliApi、SQLite Repository 和标签/推荐规则，Renderer 不接触其中任何凭证。
  */
 export class DesktopLibraryRuntime {
+  private readonly pendingRequests = new Map<string, AbortController>();
+
   /**
    * 创建桌面业务运行时。
    * @param api 已注入主进程凭证的共享 Bilibili API
@@ -111,42 +113,48 @@ export class DesktopLibraryRuntime {
   async getRecommendations(
     request: RecommendationContentRequest,
   ): Promise<RecommendationSnapshot> {
-    await this.assertCurrentAccount(request.uid);
-    this.repository.switchAccount(request.uid);
-    const signal = undefined;
-    const favorites = await this.repository.getGlobalIndex(request.uid);
-    const profile = this.buildTagProfile(request.uid, favorites);
-    const candidates = await this.searchTagCandidates(
-      profile,
-      favorites,
-      signal,
-      request.page ?? 1,
-    );
-    const filteredVideos = this.repository.filterAndRecordVideos(
-      request.uid,
-      filterRecommendedVideos(candidates, {
-        excludedVideoIds: favorites.map(video => video.bvid),
-        excludedVideoTitles: favorites.map(video => video.title),
-      }),
-      config.recommendations.homeSongPreviewCount,
-      config.recommendations.recommendationHistoryTtlMs,
-    );
-    const collections = this.buildCollectionCandidates(
-      this.repository.getPlaylistCatalog(request.uid),
-    );
-    const filteredCollections = this.repository.filterAndRecordCollections(
-      request.uid,
-      collections,
-      config.recommendations.homePlaylistPreviewCount,
-      config.recommendations.recommendationHistoryTtlMs,
-    );
-    return {
-      videos: filteredVideos.map(video => toDesktopVideo(video)),
-      collections: filteredCollections.map(toRecommendationCollection),
-      profile,
-      hasMore: candidates.length >= config.tagRecommendations.maxRecommendations,
-      updatedAt: Date.now(),
-    };
+    return this.withRequest(request.requestId, async signal => {
+      await this.assertCurrentAccount(request.uid);
+      this.repository.switchAccount(request.uid);
+      const favorites = await this.repository.getGlobalIndex(request.uid);
+      const profile = this.buildTagProfile(request.uid, favorites);
+      const candidates = await this.searchTagCandidates(
+        profile,
+        favorites,
+        signal,
+        request.page ?? 1,
+      );
+      const filteredVideos = this.repository.filterAndRecordVideos(
+        request.uid,
+        filterRecommendedVideos(candidates, {
+          excludedVideoIds: favorites.map(video => video.bvid),
+          excludedVideoTitles: favorites.map(video => video.title),
+        }),
+        config.recommendations.homeSongPreviewCount,
+        config.recommendations.recommendationHistoryTtlMs,
+      );
+      const collections = this.buildCollectionCandidates(
+        this.repository.getPlaylistCatalog(request.uid),
+      );
+      const filteredCollections = this.repository.filterAndRecordCollections(
+        request.uid,
+        collections,
+        config.recommendations.homePlaylistPreviewCount,
+        config.recommendations.recommendationHistoryTtlMs,
+      );
+      return {
+        videos: filteredVideos.map(video => toDesktopVideo(video)),
+        collections: filteredCollections.map(toRecommendationCollection),
+        profile,
+        hasMore: candidates.length >= config.tagRecommendations.maxRecommendations,
+        updatedAt: Date.now(),
+      };
+    });
+  }
+
+  /** 取消 Renderer 不再需要的推荐请求。 */
+  cancel(requestId: string): void {
+    this.pendingRequests.get(requestId)?.abort();
   }
 
   /** 清理当前账号的本地索引和推荐历史。 */
@@ -538,6 +546,24 @@ export class DesktopLibraryRuntime {
     const status = await this.credentials.getStatus();
     if (!status.loggedIn || status.uid !== uid) {
       throw new Error('B 站账号已变化，请重新登录后同步');
+    }
+  }
+
+  /** 为推荐请求建立 AbortController，避免旧账号或旧首页结果覆盖新请求。 */
+  private async withRequest<T>(
+    requestId: string,
+    work: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const previous = this.pendingRequests.get(requestId);
+    previous?.abort();
+    const controller = new AbortController();
+    this.pendingRequests.set(requestId, controller);
+    try {
+      return await work(controller.signal);
+    } finally {
+      if (this.pendingRequests.get(requestId) === controller) {
+        this.pendingRequests.delete(requestId);
+      }
     }
   }
 }

@@ -231,6 +231,7 @@ export function registerIpcHandlers(
   register(IPC_CHANNELS.content.cancel, (_event, request) => {
     assertContentRequestBase(request);
     dependencies.contentRuntime.cancel(request);
+    dependencies.libraryRuntime.cancel(request.requestId);
   });
 
   register(IPC_CHANNELS.cache.getSummary, () =>
