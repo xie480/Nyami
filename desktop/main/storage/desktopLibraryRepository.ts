@@ -360,7 +360,9 @@ export class DesktopLibraryRepository implements FavoriteRepository {
        INNER JOIN playlist_meta
          ON playlist_meta.uid = video_meta.uid
         AND playlist_meta.playlist_id = video_meta.playlist_id
-       WHERE video_meta.uid = ? AND video_meta.is_deleted = 0
+       WHERE video_meta.uid = ?
+         AND video_meta.is_deleted = 0
+         AND playlist_meta.kind = 'owned'
        ORDER BY video_meta.fav_time DESC, video_meta.updated_at DESC`,
       [normalizedUid],
     );
@@ -410,6 +412,7 @@ export class DesktopLibraryRepository implements FavoriteRepository {
         AND playlist_meta.playlist_id = video_meta.playlist_id
        WHERE video_meta.uid = ?
          AND video_meta.is_deleted = 0
+         AND playlist_meta.kind = 'owned'
          AND (
            video_meta.title LIKE ? ESCAPE '\\'
            OR video_meta.author LIKE ? ESCAPE '\\'
@@ -431,7 +434,7 @@ export class DesktopLibraryRepository implements FavoriteRepository {
     const row = this.database.get<{count: number}>(
       `SELECT COUNT(*) AS count
        FROM playlist_meta
-       WHERE uid = ? AND sync_status = 'success'`,
+       WHERE uid = ? AND kind = 'owned' AND sync_status = 'success'`,
       [normalizeUid(uid)],
     );
     return (row?.count ?? 0) > 0;

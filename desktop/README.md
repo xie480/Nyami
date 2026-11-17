@@ -82,7 +82,7 @@ npm run desktop:release:check
 - `desktop/main/content/desktopLibraryRuntime.ts` 只同步自有收藏夹，按页断点写入；收藏页搜索直接查询本地 SQLite 索引，不依赖额外推荐或画像数据。
 - `desktop/main/runtime/syncRuntime.ts` 将收藏同步、失败重试和取消映射为脱敏进度事件；Renderer 任务面板可以手动启动、取消和重试同步。
 - PC 端同步使用 8 个收藏夹并发工作协程和独立的自适应请求限流；增量同步在遇到已存在视频时提前停止后续分页，全量同步仍会完整扫描并软删除失效关系。
-- 旧版本的 tag 缓存和推荐历史表通过前向迁移清理，桌面端不再提供个性化推荐、用户画像或相关 IPC。
+- 旧版本的 tag 缓存和推荐历史表通过前向迁移清理；旧外部收藏关系保留在本地文件中，但查询范围限定为自有收藏夹，避免升级时删除用户数据。
 
 阶段 5 已执行 `npm run desktop:typecheck`、`npm run desktop:build` 和 `git diff --check`。真实账号同步、收藏数据量、网络限流、标签接口和 Windows 窗口手动验收仍需在具备 Electron 窗口权限并登录 Bilibili 的环境中完成。
 
