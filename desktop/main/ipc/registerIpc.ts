@@ -26,7 +26,6 @@ import {
   type PlaybackSeekRequest,
   type PlaybackSleepTimerRequest,
   type PlaybackVolumeRequest,
-  type RecommendationContentRequest,
   type RendererErrorReport,
   type SearchContentRequest,
   type SyncStartRequest,
@@ -246,10 +245,6 @@ export function registerIpcHandlers(
   register(IPC_CHANNELS.content.search, (_event, request) => {
     assertSearchContentRequest(request);
     return dependencies.contentRuntime.search(request);
-  });
-  register(IPC_CHANNELS.content.getRecommendations, (_event, request) => {
-    assertRecommendationContentRequest(request);
-    return dependencies.libraryRuntime.getRecommendations(request);
   });
   register(IPC_CHANNELS.content.getFavoriteFolders, (_event, request) => {
     assertFavoriteFolderContentRequest(request);
@@ -492,26 +487,6 @@ function assertFavoriteSearchContentRequest(
   }
 }
 
-/** 校验推荐请求，保证推荐数据只为当前登录账号生成。 */
-function assertRecommendationContentRequest(
-  value: unknown,
-): asserts value is RecommendationContentRequest {
-  assertContentRequestBase(value);
-  const request = value as ContentRequestBase & {
-    uid?: unknown;
-    page?: unknown;
-  };
-  if (!isBoundedString(request.uid, 64) || !request.uid.trim()) {
-    throw new Error('推荐账号 UID 无效');
-  }
-  if (
-    request.page !== undefined &&
-    (!isPositiveInteger(request.page) || request.page > 1000)
-  ) {
-    throw new Error('推荐页码无效');
-  }
-}
-
 /** 校验同步启动参数，拒绝 Renderer 传入未知结构。 */
 function assertSyncStartRequest(
   value: unknown,
@@ -598,17 +573,17 @@ function assertPlaybackQueueItemRequest(
   }
 }
 
-/** 校验推荐续页上下文，避免主进程接受任意游标。 */
+/** 校验热门续页上下文，避免主进程接受任意游标。 */
 function assertPlaybackQueueContext(
   value: unknown,
 ): asserts value is PlaybackQueueContext {
   if (
     !isRecord(value) ||
-    value.kind !== 'recommendation' ||
+    value.kind !== 'popular' ||
     !isPositiveInteger(value.page) ||
     value.page > 1000
   ) {
-    throw new Error('推荐续页上下文无效');
+    throw new Error('热门续页上下文无效');
   }
 }
 

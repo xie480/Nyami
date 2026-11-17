@@ -66,7 +66,7 @@ type PlaybackRuntimeOptions = {
   cache: AudioCacheStore;
   logger: AppLogger;
   statePath: string;
-  recommendationContinuation?: (
+  popularContinuation?: (
     context: PlaybackQueueContext,
     signal: AbortSignal,
   ) => Promise<{
@@ -487,17 +487,17 @@ export class PlaybackRuntime {
     item: PlaybackQueueItem | null,
   ): Promise<PlaybackSnapshot> {
     if (!item) {
-      return this.continueRecommendations();
+      return this.continuePopular();
     }
     return this.activateTrack(item.id, true);
   }
 
-  /** 在推荐队列播放到末尾时请求下一页并追加到当前队列。 */
-  private async continueRecommendations(): Promise<PlaybackSnapshot> {
+  /** 在热门队列播放到末尾时请求下一页并追加到当前队列。 */
+  private async continuePopular(): Promise<PlaybackSnapshot> {
     const context = this.queueController.getSnapshot().context;
     if (
-      !this.options.recommendationContinuation ||
-      !isRecommendationContext(context)
+      !this.options.popularContinuation ||
+      !isPopularContext(context)
     ) {
       this.snapshot = this.snapshotFromQueue('stopped');
       this.emitState();
@@ -509,7 +509,7 @@ export class PlaybackRuntime {
     const controller = new AbortController();
     this.operationController = controller;
     try {
-      const result = await this.options.recommendationContinuation(
+      const result = await this.options.popularContinuation(
         context,
         controller.signal,
       );
@@ -771,7 +771,7 @@ export class PlaybackRuntime {
       queueLength: queueSnapshot.queue.length,
       queueIndex,
       mode: queueSnapshot.mode,
-      queueContext: isRecommendationContext(queueSnapshot.context)
+      queueContext: isPopularContext(queueSnapshot.context)
         ? queueSnapshot.context
         : null,
       sleepTimerSeconds,
@@ -950,7 +950,7 @@ export class PlaybackRuntime {
       queue: snapshot.queue,
       currentTrackId: snapshot.currentBvid,
       mode: snapshot.mode,
-      context: isRecommendationContext(snapshot.context)
+      context: isPopularContext(snapshot.context)
         ? snapshot.context
         : null,
     };
@@ -1000,14 +1000,14 @@ function normalizeQueueItems(items: PlaybackQueueItem[]): PlaybackQueueItem[] {
   return normalized;
 }
 
-/** 判断队列上下文是否为受支持的推荐续页游标。 */
-function isRecommendationContext(
+/** 判断队列上下文是否为受支持的热门续页游标。 */
+function isPopularContext(
   value: unknown,
 ): value is PlaybackQueueContext {
   return (
     Boolean(value) &&
     typeof value === 'object' &&
-    (value as {kind?: unknown}).kind === 'recommendation' &&
+    (value as {kind?: unknown}).kind === 'popular' &&
     Number.isSafeInteger((value as {page?: unknown}).page) &&
     Number((value as {page: number}).page) >= 1
   );

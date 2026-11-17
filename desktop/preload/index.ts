@@ -27,7 +27,6 @@ import type {
   PlaybackStateEvent,
   PlaybackVolumeRequest,
   QrStatusEvent,
-  RecommendationContentRequest,
   RendererErrorReport,
   SearchContentRequest,
   SyncStateEvent,
@@ -142,8 +141,6 @@ const api: NyamiDesktopApi = {
       ipcRenderer.invoke(CHANNELS.content.getDiscover, request),
     search: (request: SearchContentRequest) =>
       ipcRenderer.invoke(CHANNELS.content.search, request),
-    getRecommendations: (request: RecommendationContentRequest) =>
-      ipcRenderer.invoke(CHANNELS.content.getRecommendations, request),
     getFavoriteFolders: (request: FavoriteFolderContentRequest) =>
       ipcRenderer.invoke(CHANNELS.content.getFavoriteFolders, request),
     getFavoriteVideos: (request: FavoriteVideoContentRequest) =>

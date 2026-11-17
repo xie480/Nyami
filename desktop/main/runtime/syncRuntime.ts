@@ -41,7 +41,7 @@ export class SyncRuntime {
   /**
    * 创建同步运行时。
    * @param credentials 主进程凭证存储
-   * @param library 收藏、标签和推荐业务运行时
+   * @param library 收藏索引业务运行时
    * @param logger 脱敏日志器
    */
   constructor(
@@ -112,7 +112,7 @@ export class SyncRuntime {
     this.listeners.clear();
   }
 
-  /** 执行真实收藏、标签同步并把阶段性进度映射到桌面快照。 */
+  /** 执行真实收藏同步并把阶段性进度映射到桌面快照。 */
   private async execute(taskId: string, force: boolean): Promise<void> {
     let status: AuthStatus;
     try {
@@ -150,16 +150,6 @@ export class SyncRuntime {
           };
           this.emit();
         },
-        onTagProgress: (completed, total) => {
-          this.snapshot = {
-            ...this.snapshot,
-            phase: 'tags',
-            processedVideos: completed,
-            totalVideos: total,
-            message: `标签缓存 ${completed}/${total}`,
-          };
-          this.emit();
-        },
       });
       if (controller.signal.aborted || this.snapshot.state === 'cancelled') {
         return;
@@ -169,7 +159,7 @@ export class SyncRuntime {
         state: 'completed',
         phase: 'completed',
         canRetry: false,
-        message: '收藏、标签和本地索引同步完成',
+        message: '收藏索引同步完成',
         finishedAt: Date.now(),
         error: null,
       };

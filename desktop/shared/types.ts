@@ -46,7 +46,6 @@ export const IPC_CHANNELS = {
     getHome: 'content:get-home',
     getDiscover: 'content:get-discover',
     search: 'content:search',
-    getRecommendations: 'content:get-recommendations',
     getFavoriteFolders: 'content:get-favorite-folders',
     getFavoriteVideos: 'content:get-favorite-videos',
     searchFavorites: 'content:search-favorites',
@@ -199,9 +198,9 @@ export type PlaybackSnapshot = {
 
 export type PlaybackQueueMode = 'sequential' | 'shuffle';
 
-/** 队列可恢复的推荐来源上下文，页码用于播放到末尾时请求下一页。 */
+/** 队列可恢复的热门来源上下文，页码用于播放到末尾时请求下一页。 */
 export type PlaybackQueueContext = {
-  kind: 'recommendation';
+  kind: 'popular';
   page: number;
 };
 
@@ -342,8 +341,6 @@ export type SyncPhase =
   | 'idle'
   | 'catalog'
   | 'favorites'
-  | 'tags'
-  | 'recommendations'
   | 'completed';
 
 export type SyncSnapshot = {
@@ -526,11 +523,6 @@ export type FavoriteSearchContentRequest = ContentRequestBase & {
   page: number;
 };
 
-export type RecommendationContentRequest = ContentRequestBase & {
-  uid: string;
-  page?: number;
-};
-
 /** 桌面内容卡片使用的统一视频模型。 */
 export type DesktopVideo = {
   aid?: number;
@@ -544,38 +536,7 @@ export type DesktopVideo = {
   tags: string[];
   page?: number;
   favTime?: number;
-  source?: 'search' | 'popular' | 'favorite' | 'recommendation';
-};
-
-export type RecommendationCollection = {
-  sourceKey: string;
-  title: string;
-  cover: string;
-  mediaCount: number;
-  ownerName: string;
-  description?: string;
-  score: number;
-};
-
-export type RecommendationProfile = {
-  totalVideoCount: number;
-  resolvedVideoCount: number;
-  taggedVideoCount: number;
-  pendingVideoCount: number;
-  preferences: Array<{
-    tagId: number;
-    tagName: string;
-    videoCount: number;
-    score: number;
-  }>;
-};
-
-export type RecommendationSnapshot = {
-  videos: DesktopVideo[];
-  collections: RecommendationCollection[];
-  profile: RecommendationProfile;
-  hasMore: boolean;
-  updatedAt: number;
+  source?: 'search' | 'popular' | 'favorite';
 };
 
 export type DesktopPage<T> = {
@@ -661,9 +622,6 @@ export type NyamiDesktopApi = {
     search: (
       request: SearchContentRequest,
     ) => Promise<DesktopPage<DesktopVideo>>;
-    getRecommendations: (
-      request: RecommendationContentRequest,
-    ) => Promise<RecommendationSnapshot>;
     getFavoriteFolders: (
       request: FavoriteFolderContentRequest,
     ) => Promise<FavoriteFolderSummary[]>;

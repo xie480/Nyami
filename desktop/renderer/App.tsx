@@ -39,8 +39,6 @@ import type {
   PlaybackQueueMode,
   PlaybackSnapshot,
   QrStatusEvent,
-  RecommendationContentRequest,
-  RecommendationSnapshot,
   SearchContentRequest,
   SyncSnapshot,
   UserProfile,
@@ -329,7 +327,7 @@ export function App(): JSX.Element {
           startIndex: 0,
           autoplay: true,
           expandParts: true,
-          context: getRecommendationContext(video),
+          context: getPopularQueueContext(video),
         })
         .then(snapshot => {
           setPlayback(snapshot);
@@ -351,7 +349,7 @@ export function App(): JSX.Element {
         .addToQueue({
           item: toPlaybackQueueItem(video),
           autoplay: false,
-          context: getRecommendationContext(video),
+          context: getPopularQueueContext(video),
         })
         .then(snapshot => {
           setPlayback(snapshot);
@@ -876,8 +874,6 @@ export function App(): JSX.Element {
           <main className="page-scroll">
             {route === 'home' ? (
               <HomePage
-                auth={auth}
-                sync={sync}
                 onAddVideo={addVideoToQueue}
                 onNavigate={setRoute}
                 onNotice={pushNotice}
@@ -1104,7 +1100,7 @@ function Sidebar({
             <span>登录 Bilibili</span>
           </button>
         )}
-        <p className="sidebar-footnote">阶段 5 · 收藏同步与推荐</p>
+        <p className="sidebar-footnote">阶段 5 · 收藏索引</p>
       </div>
     </aside>
   );
@@ -1112,29 +1108,22 @@ function Sidebar({
 
 /** 首页展示公开热门内容，并提供到搜索和发现页的快捷入口。 */
 function HomePage({
-  auth,
   onAddVideo,
   onNavigate,
   onNotice,
   onPlayVideo,
   onSearch,
-  sync,
 }: {
-  auth: AuthStatus;
   onAddVideo: (video: DesktopVideo) => void;
   onNavigate: (route: Route) => void;
   onNotice: (tone: NoticeTone, message: string) => void;
   onPlayVideo: (video: DesktopVideo) => void;
   onSearch: (value: string) => void;
-  sync: SyncSnapshot;
 }): JSX.Element {
   const [state, setState] = useState<AsyncState>('loading');
   const [data, setData] = useState<HomeSnapshot | null>(null);
   const [error, setError] = useState('');
-  const [recommendationState, setRecommendationState] = useState<AsyncState>('idle');
-  const [recommendations, setRecommendations] = useState<RecommendationSnapshot | null>(null);
   const requestIdRef = useRef(makeRequestId('home'));
-  const recommendationRequestIdRef = useRef(makeRequestId('recommendations'));
 
   /** 加载首页热门公开内容。 */
   const load = useCallback(async (): Promise<void> => {
@@ -1163,46 +1152,6 @@ function HomePage({
       void window.nyamiDesktop.content.cancel({requestId: requestIdRef.current});
     };
   }, [load]);
-
-  /** 加载当前账号的本地画像推荐；未登录时不请求账号数据。 */
-  useEffect(() => {
-    if (!auth.loggedIn || !auth.uid) {
-      setRecommendations(null);
-      setRecommendationState('idle');
-      return;
-    }
-    if (sync.state === 'running') {
-      setRecommendationState('loading');
-      return;
-    }
-    const requestId = makeRequestId('recommendations');
-    recommendationRequestIdRef.current = requestId;
-    setRecommendationState('loading');
-    const request: RecommendationContentRequest = {
-      requestId,
-      uid: auth.uid,
-      page: 1,
-    };
-    void window.nyamiDesktop.content
-      .getRecommendations(request)
-      .then(result => {
-        setRecommendations(result);
-        setRecommendationState('success');
-      })
-      .catch(requestError => {
-        if (isAbortError(requestError)) {
-          return;
-        }
-        const message = getErrorMessage(requestError, '个性化推荐加载失败');
-        setRecommendationState('error');
-        onNotice('error', message);
-      });
-    return () => {
-      void window.nyamiDesktop.content.cancel({
-        requestId: recommendationRequestIdRef.current,
-      });
-    };
-  }, [auth.loggedIn, auth.uid, onNotice, sync.state, sync.uid]);
 
   return (
     <div className="page-stack">
@@ -1254,38 +1203,6 @@ function HomePage({
           />
         ) : null}
       </section>
-      {auth.loggedIn ? (
-        <section className="section-block">
-          <SectionHeading
-            eyebrow="FROM YOUR LIBRARY"
-            title="为你推荐"
-          />
-          {recommendationState === 'loading' ? (
-            <LoadingState label="正在读取本地画像和推荐历史" />
-          ) : null}
-          {recommendationState === 'success' && recommendations?.videos.length ? (
-            <VideoGrid
-              items={recommendations.videos}
-              onAddVideo={onAddVideo}
-              onPlayVideo={onPlayVideo}
-            />
-          ) : null}
-          {recommendationState === 'success' && !recommendations?.videos.length ? (
-            <EmptyState
-              icon="sparkles"
-              message="同步收藏后会生成个性化推荐"
-              secondary="推荐历史会按账号保存在本地"
-            />
-          ) : null}
-          {recommendationState === 'error' ? (
-            <EmptyState
-              icon="alert"
-              message="推荐暂时不可用"
-              secondary="可以稍后重试收藏同步"
-            />
-          ) : null}
-        </section>
-      ) : null}
     </div>
   );
 }
@@ -2722,9 +2639,9 @@ function TaskCenter({
           <strong>{sync.message ?? '收藏同步未启动'}</strong>
           {sync.state === 'running' ? (
             <small>
-              {sync.phase === 'tags'
-                ? `${sync.processedVideos}/${sync.totalVideos} 个标签`
-                : `${sync.completed}/${sync.total} 个来源`}
+              {sync.phase === 'favorites'
+                ? `${sync.processedVideos}/${sync.totalVideos} 个视频`
+                : `${sync.completed}/${sync.total} 个收藏夹`}
             </small>
           ) : null}
           {sync.error ? <small>{sync.error}</small> : null}
@@ -2916,12 +2833,12 @@ function toPlaybackQueueItem(video: DesktopVideo): PlaybackQueueItem {
   };
 }
 
-/** 将首页/发现热门结果标记为可自动续页的推荐队列。 */
-function getRecommendationContext(
+/** 将首页/发现热门结果标记为可自动续页的热门队列。 */
+function getPopularQueueContext(
   video: DesktopVideo,
 ): PlaybackQueueContext | null {
   return video.source === 'popular'
-    ? {kind: 'recommendation', page: 1}
+    ? {kind: 'popular', page: 1}
     : null;
 }
 

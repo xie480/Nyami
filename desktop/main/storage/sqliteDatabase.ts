@@ -115,6 +115,13 @@ const MIGRATIONS: Migration[] = [
         WHERE title_key IS NOT NULL AND title_key <> '';
     `,
   },
+  {
+    version: 4,
+    sql: `
+      DROP TABLE IF EXISTS video_tag_cache;
+      DROP TABLE IF EXISTS recommendation_filter;
+    `,
+  },
 ];
 
 /**

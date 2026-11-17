@@ -138,23 +138,23 @@ export function createMainWindow(
     cache: audioCache,
     logger: dependencies.logger,
     statePath: path.join(dependencies.directories.settings, 'playback.json'),
-    recommendationContinuation: async (
+    popularContinuation: async (
       context: PlaybackQueueContext,
       signal: AbortSignal,
     ) => {
       const page = await contentRuntime.getDiscover({
-        requestId: `playback-recommendation-${randomUUID()}`,
+        requestId: `playback-popular-${randomUUID()}`,
         page: context.page + 1,
       });
       if (signal.aborted) {
-        const error = new Error('推荐续页请求已取消');
+        const error = new Error('热门续页请求已取消');
         error.name = 'AbortError';
         throw error;
       }
       return {
         items: page.items.map(toPlaybackQueueItem),
         context: {
-          kind: 'recommendation',
+          kind: 'popular',
           page: page.page,
         },
       };
@@ -336,7 +336,7 @@ function toPlaybackQueueItem(video: {
   author: string;
   cover: string;
   duration: number;
-  source?: 'search' | 'popular' | 'favorite' | 'recommendation';
+  source?: 'search' | 'popular' | 'favorite';
   page?: number;
 }): PlaybackQueueItem {
   return {

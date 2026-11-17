@@ -1,18 +1,13 @@
 import {randomUUID} from 'node:crypto';
 import type {
-  CollectionRecommendation,
   FavoriteVideo,
-  TagRecommendation,
   VideoPart,
-  VideoTag,
-  VideoTagCacheEntry,
 } from '../../../packages/core/src';
 import type {
   FavoritePlaylistMeta,
   FavoriteRepository,
   FavoriteSyncPageResult,
 } from '../../../packages/core/src/favorites/contracts';
-import {normalizeRecommendationTitleKey} from '../../../packages/core/src/recommendation/filters';
 import type {AppLogger} from '../logging/appLogger';
 import {SqliteDatabase, type SqliteValue} from './sqliteDatabase';
 
@@ -72,28 +67,6 @@ type VideoRow = {
   updated_at: number;
 };
 
-type TagRow = {
-  video_id: string;
-  tags_json: string;
-  fetched_at: number | null;
-  retry_after: number | null;
-};
-
-type PlaylistCatalogRecord = {
-  playlistId: string;
-  title: string;
-  kind: 'owned' | 'collectedFavorite' | 'subscribedSeason';
-  remoteVideoCount: number;
-  ownerMid: number;
-  ownerName: string;
-  cover: string;
-  description: string;
-};
-
-type RecommendationCollectionRecord = CollectionRecommendation & {
-  expiresAt?: number;
-};
-
 type FavoriteSearchResult = {
   items: FavoriteVideo[];
   total: number;
@@ -108,7 +81,7 @@ const SYNC_STATUS_VALUES = new Set<FavoritePlaylistMeta['playlistSyncStatus']>([
 ]);
 
 /**
- * 桌面端收藏、全局索引、标签缓存和推荐历史仓储。
+ * 桌面端收藏和全局索引仓储。
  * 该类实现共享核心的 FavoriteRepository，并把账号 UID 作为每张表的隔离边界。
  */
 export class DesktopLibraryRepository implements FavoriteRepository {
@@ -148,7 +121,7 @@ export class DesktopLibraryRepository implements FavoriteRepository {
     this.activeUid = normalizedUid;
   }
 
-  /** 清理一个账号的收藏、推荐历史、标签和同步任务。 */
+  /** 清理一个账号的收藏索引和同步任务。 */
   clearAccount(uid = this.activeUid): void {
     const normalizedUid = normalizeUid(uid ?? '');
     if (!normalizedUid) {
@@ -168,8 +141,6 @@ export class DesktopLibraryRepository implements FavoriteRepository {
       this.database.run('DELETE FROM playlist_meta');
       this.database.run('DELETE FROM video_meta');
       this.database.run('DELETE FROM sync_job');
-      this.database.run('DELETE FROM video_tag_cache');
-      this.database.run('DELETE FROM recommendation_filter');
       this.database.run('DELETE FROM account_state');
     });
     this.activeUid = null;
@@ -455,138 +426,6 @@ export class DesktopLibraryRepository implements FavoriteRepository {
     };
   }
 
-  /** 读取同步后的来源目录，供合集推荐和同步诊断使用。 */
-  getPlaylistCatalog(uid = this.requireUid()): PlaylistCatalogRecord[] {
-    const rows = this.database.all<PlaylistRow>(
-      `SELECT * FROM playlist_meta WHERE uid = ? ORDER BY updated_at DESC, title COLLATE NOCASE`,
-      [uid],
-    );
-    return rows.map(row => ({
-      playlistId: row.playlist_id,
-      title: row.title,
-      kind: normalizePlaylistKind(row.kind),
-      remoteVideoCount: row.remote_video_count,
-      ownerMid: row.owner_mid,
-      ownerName: row.owner_name,
-      cover: row.cover,
-      description: row.description,
-    }));
-  }
-
-  /** 读取标签缓存，并把不存在的 BVID 返回为 null。 */
-  getVideoTagCache(
-    uid: string,
-    videoIds: readonly string[],
-  ): Map<string, VideoTagCacheEntry | null> {
-    const normalizedUid = normalizeUid(uid);
-    const result = new Map<string, VideoTagCacheEntry | null>();
-    const ids = Array.from(new Set(videoIds.filter(Boolean)));
-    for (const videoId of ids) {
-      result.set(videoId, null);
-    }
-    if (!normalizedUid || ids.length === 0) {
-      return result;
-    }
-    const placeholders = ids.map(() => '?').join(', ');
-    const rows = this.database.all<TagRow>(
-      `SELECT video_id, tags_json, fetched_at, retry_after
-       FROM video_tag_cache
-       WHERE uid = ? AND video_id IN (${placeholders})`,
-      [normalizedUid, ...ids],
-    );
-    for (const row of rows) {
-      result.set(row.video_id, {
-        videoId: row.video_id,
-        tags: parseJsonArray<VideoTag>(row.tags_json),
-        fetchedAt: row.fetched_at,
-        retryAfter: row.retry_after,
-      });
-    }
-    return result;
-  }
-
-  /** 批量写入视频标签成功结果或下一次重试时间。 */
-  upsertVideoTagCache(
-    uid: string,
-    entries: readonly VideoTagCacheEntry[],
-  ): void {
-    const normalizedUid = normalizeUid(uid);
-    if (!normalizedUid || entries.length === 0) {
-      return;
-    }
-    this.database.transaction(() => {
-      for (const entry of entries) {
-        this.database.run(
-          `INSERT INTO video_tag_cache (
-            uid, video_id, tags_json, fetched_at, retry_after
-          ) VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT(uid, video_id) DO UPDATE SET
-            tags_json = excluded.tags_json,
-            fetched_at = excluded.fetched_at,
-            retry_after = excluded.retry_after`,
-          [
-            normalizedUid,
-            entry.videoId,
-            JSON.stringify(entry.tags),
-            entry.fetchedAt,
-            entry.retryAfter,
-          ],
-        );
-      }
-    });
-  }
-
-  /** 按 UID 清理过期推荐历史，避免推荐过滤表无限增长。 */
-  cleanupExpiredRecommendationHistory(
-    uid: string,
-    now = Date.now(),
-  ): void {
-    this.database.run(
-      `DELETE FROM recommendation_filter WHERE uid = ? AND expires_at <= ?`,
-      [normalizeUid(uid), now],
-    );
-  }
-
-  /** 过滤七日内已展示的视频，并在同一事务中写入本轮历史。 */
-  filterAndRecordVideos(
-    uid: string,
-    candidates: readonly TagRecommendation[],
-    limit: number,
-    ttlMs: number,
-  ): TagRecommendation[] {
-    return this.filterAndRecord(
-      uid,
-      candidates.map(candidate => ({
-        itemType: 'video',
-        itemId: candidate.bvid,
-        titleKey: normalizeRecommendationTitleKey(candidate.title),
-        candidate,
-      })),
-      limit,
-      ttlMs,
-    ).map(item => item.candidate);
-  }
-
-  /** 过滤七日内已展示的合集，并在同一事务中写入本轮历史。 */
-  filterAndRecordCollections(
-    uid: string,
-    candidates: readonly RecommendationCollectionRecord[],
-    limit: number,
-    ttlMs: number,
-  ): RecommendationCollectionRecord[] {
-    return this.filterAndRecord(
-      uid,
-      candidates.map(candidate => ({
-        itemType: 'collection',
-        itemId: candidate.sourceKey,
-        titleKey: null,
-        candidate,
-      })),
-      limit,
-      ttlMs,
-    ).map(item => item.candidate);
-  }
-
   /** 检查当前 UID 是否已经有本地业务数据，用于启动后的账号隔离。 */
   hasAccountData(uid: string): boolean {
     const row = this.database.get<{count: number}>(
@@ -607,8 +446,6 @@ export class DesktopLibraryRepository implements FavoriteRepository {
       'playlist_meta',
       'video_meta',
       'sync_job',
-      'video_tag_cache',
-      'recommendation_filter',
       'account_state',
     ];
     for (const table of tables) {
@@ -693,94 +530,6 @@ export class DesktopLibraryRepository implements FavoriteRepository {
     );
   }
 
-  /** 在一个事务内应用推荐历史过滤和写入。 */
-  private filterAndRecord<T>(
-    uid: string,
-    candidates: ReadonlyArray<{
-      itemType: 'video' | 'collection';
-      itemId: string;
-      titleKey: string | null;
-      candidate: T;
-    }>,
-    limit: number,
-    ttlMs: number,
-  ): Array<{candidate: T}> {
-    const normalizedUid = normalizeUid(uid);
-    const now = Date.now();
-    const expiresAt = now + Math.max(0, ttlMs);
-    const maxItems = Math.max(0, Math.floor(limit));
-    if (!normalizedUid || maxItems === 0) {
-      return [];
-    }
-    return this.database.transaction(() => {
-      this.cleanupExpiredRecommendationHistory(normalizedUid, now);
-      const existing = this.database.all<{
-        item_type: string;
-        item_id: string;
-        title_key: string | null;
-      }>(
-        `SELECT item_type, item_id, title_key
-         FROM recommendation_filter WHERE uid = ? AND expires_at > ?`,
-        [normalizedUid, now],
-      );
-      const ids = new Set(
-        existing.map(item => `${item.item_type}:${item.item_id}`),
-      );
-      const titles = new Set(
-        existing
-          .map(item => item.title_key)
-          .filter((title): title is string => Boolean(title)),
-      );
-      const selected: Array<{candidate: T}> = [];
-      const writes: Array<{
-        itemType: string;
-        itemId: string;
-        titleKey: string | null;
-      }> = [];
-      for (const item of candidates) {
-        const itemId = item.itemId.trim();
-        const titleKey = item.titleKey?.trim() || null;
-        if (!itemId || ids.has(`${item.itemType}:${itemId}`)) {
-          continue;
-        }
-        if (titleKey && titles.has(titleKey)) {
-          continue;
-        }
-        selected.push({candidate: item.candidate});
-        ids.add(`${item.itemType}:${itemId}`);
-        if (titleKey) {
-          titles.add(titleKey);
-        }
-        writes.push({
-          itemType: item.itemType,
-          itemId,
-          titleKey,
-        });
-        if (selected.length >= maxItems) {
-          break;
-        }
-      }
-      for (const write of writes) {
-        this.database.run(
-          `INSERT INTO recommendation_filter (
-            uid, item_type, item_id, title_key, expires_at
-          ) VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT(uid, item_type, item_id) DO UPDATE SET
-            title_key = excluded.title_key,
-            expires_at = excluded.expires_at`,
-          [
-            normalizedUid,
-            write.itemType,
-            write.itemId,
-            write.titleKey,
-            expiresAt,
-          ],
-        );
-      }
-      return selected;
-    });
-  }
-
   /** 获取已绑定账号，防止调用方把未绑定请求写入数据库。 */
   private requireUid(): string {
     if (!this.activeUid) {
@@ -814,16 +563,6 @@ function inferPlaylistKind(
   }
   if (playlistId.startsWith('collectedFavorite:')) {
     return 'collectedFavorite';
-  }
-  return 'owned';
-}
-
-/** 将数据库中的来源类型收敛为领域枚举。 */
-function normalizePlaylistKind(
-  value: string,
-): 'owned' | 'collectedFavorite' | 'subscribedSeason' {
-  if (value === 'subscribedSeason' || value === 'collectedFavorite') {
-    return value;
   }
   return 'owned';
 }
@@ -912,6 +651,4 @@ function rowToFavoriteVideo(
 
 export type {
   FavoriteSearchResult,
-  PlaylistCatalogRecord,
-  RecommendationCollectionRecord,
 };
