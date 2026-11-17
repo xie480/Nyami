@@ -1417,6 +1417,11 @@ function FavoritesPage({
     setFavoriteSearchPage(1);
   };
 
+  /** 切换账号时清除旧账号的本地搜索结果，避免跨账号短暂展示。 */
+  useEffect(() => {
+    clearFavoriteSearch();
+  }, [auth.uid]);
+
   useEffect(() => {
     void loadFolders();
     return () => {
