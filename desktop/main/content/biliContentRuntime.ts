@@ -2,6 +2,7 @@ import {
   config,
   createBiliApi,
   createBiliHttpClient,
+  AdaptiveRateLimiter,
   trimFavoriteVideo,
   trimFolder,
   trimPopularVideo,
@@ -27,6 +28,10 @@ import type {
   UserProfile,
 } from '../../shared/types';
 import {CredentialStore} from '../auth/credentialStore';
+import {
+  DESKTOP_INDEX_RATE_BURST,
+  DESKTOP_INDEX_RATE_LIMIT,
+} from '../constants';
 import {AppLogger} from '../logging/appLogger';
 import {normalizeBiliAssetUrl} from '../security/urlPolicy';
 
@@ -85,6 +90,10 @@ export class BiliContentRuntime {
       retryDelayMs: config.retry.delayMs,
       totalTimeoutMs: config.retry.totalTimeoutMs,
       credentials: credentialPort,
+      rateLimiter: new AdaptiveRateLimiter(
+        DESKTOP_INDEX_RATE_LIMIT,
+        DESKTOP_INDEX_RATE_BURST,
+      ),
       onAuthRequired: () => this.onAuthRequired?.(),
     });
     const keyValueStore = new MemoryKeyValueStore();

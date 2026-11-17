@@ -7,6 +7,7 @@ import {
 } from '../../../packages/core/src';
 import {FavoriteSyncTask} from '../../../packages/core/src/favorites/syncTask';
 import type {CredentialStore} from '../auth/credentialStore';
+import {DESKTOP_SYNC_PLAYLIST_CONCURRENCY} from '../constants';
 import type {AppLogger} from '../logging/appLogger';
 import {normalizeBiliAssetUrl} from '../security/urlPolicy';
 import {DesktopLibraryRepository} from '../storage/desktopLibraryRepository';
@@ -56,9 +57,13 @@ export class DesktopLibraryRuntime {
     options.onPhase?.('catalog', 0);
     const targets = await this.buildSyncTargets(uid, options.signal);
     options.onPhase?.('favorites', targets.length);
-    const task = new FavoriteSyncTask(this.repository);
+    const task = new FavoriteSyncTask(
+      this.repository,
+      DESKTOP_SYNC_PLAYLIST_CONCURRENCY,
+    );
     return task.run(targets, {
       force: options.force,
+      concurrency: DESKTOP_SYNC_PLAYLIST_CONCURRENCY,
       signal: options.signal,
       onProgress: options.onFavoriteProgress,
     });

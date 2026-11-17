@@ -77,3 +77,12 @@ export const BILIBILI_IMAGE_HOST_SUFFIXES = [
 ] as const;
 
 export const AUDIO_REQUEST_LOG_LIMIT = 40;
+
+/** PC 端收藏夹同步的并发工作数，利用桌面网络和多核资源缩短批量索引时间。 */
+export const DESKTOP_SYNC_PLAYLIST_CONCURRENCY = 8;
+
+/** PC 端索引请求的自适应限流上限，收到 412/429 后由共享限流器自动退避。 */
+export const DESKTOP_INDEX_RATE_LIMIT = 6;
+
+/** PC 端索引请求启动时允许的令牌突发数。 */
+export const DESKTOP_INDEX_RATE_BURST = 4;

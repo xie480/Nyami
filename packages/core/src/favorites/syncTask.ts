@@ -114,9 +114,10 @@ export class FavoriteSyncTask {
     report: () => void,
   ): Promise<{skipped: boolean}> {
     const force = options.force === true;
-    let meta = await this.repository.getPlaylistMeta(target.playlistId);
+    const initialMeta = await this.repository.getPlaylistMeta(target.playlistId);
+    let meta = initialMeta;
     const remoteCountDecreased =
-      meta !== null && target.remoteVideoCount < meta.remoteVideoCount;
+      initialMeta !== null && target.remoteVideoCount < initialMeta.remoteVideoCount;
     const needsSync =
       force ||
       !meta ||
@@ -159,7 +160,13 @@ export class FavoriteSyncTask {
         page = cursorPage + 1;
       }
     }
-    const fullScan = force || page === 1;
+    const incrementalMode =
+      !force &&
+      !remoteCountDecreased &&
+      initialMeta?.syncCursor === null &&
+      initialMeta.playlistSyncStatus === 'success';
+    const fullScan = !incrementalMode;
+    let incrementalDone = false;
 
     try {
       while (hasMore && !options.signal?.aborted) {
@@ -172,13 +179,24 @@ export class FavoriteSyncTask {
             force,
             cursor: `page_${page}`,
             previousSyncedCount: syncedCount,
-            fullScanCount: force ? remoteVideoIds.size : undefined,
+            fullScanCount: fullScan ? remoteVideoIds.size : undefined,
           },
         );
         syncedCount = writeResult.syncedCount;
         updateProcessed(targetIndex, syncedCount);
         report();
-        hasMore = pageResult.hasMore || pageResult.rawCount === 20;
+        if (incrementalMode && pageResult.list.length > 0) {
+          const pageBvids = new Set(pageResult.list.map(video => video.bvid));
+          const existingOnPage = Array.from(pageBvids).filter(bvid =>
+            writeResult.existingBvids.has(bvid),
+          );
+          incrementalDone = page === 1
+            ? existingOnPage.length === pageBvids.size
+            : existingOnPage.length > 0;
+        }
+        hasMore = !incrementalDone && (
+          pageResult.hasMore || pageResult.rawCount === 20
+        );
         page += 1;
         if (pageResult.list.length === 0 && !pageResult.hasMore) {
           hasMore = false;
