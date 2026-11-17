@@ -9,6 +9,8 @@ import type {
   PlaybackCommand,
   PlaybackSource,
 } from '../../shared/types';
+import type {DesktopAudioSettings} from '../../shared/types';
+import {AudioEffectsController} from './audioEffectsController';
 
 type EventListener = (event: PlaybackAudioEvent) => void;
 
@@ -36,10 +38,14 @@ export class ElectronAudioPlayerAdapter
 
   private setupDone = false;
 
+  private readonly effects: AudioEffectsController;
+
   constructor(
     private readonly audio: HTMLAudioElement,
     private readonly report: (event: PlaybackAudioEvent) => void,
-  ) {}
+  ) {
+    this.effects = new AudioEffectsController(audio);
+  }
 
   /** 绑定媒体事件并设置初始音量。 */
   async setup(): Promise<void> {
@@ -49,6 +55,7 @@ export class ElectronAudioPlayerAdapter
     this.setupDone = true;
     this.audio.preload = 'auto';
     this.audio.volume = this.targetVolume;
+    await this.effects.setup();
     this.bind('loadedmetadata', () => this.emitProgress('loadedmetadata'));
     this.bind('canplay', () => this.emitProgress('canplay'));
     this.bind('playing', () => this.emitSimple('playing'));
@@ -130,6 +137,7 @@ export class ElectronAudioPlayerAdapter
 
   /** 开始 HTMLAudioElement 播放。 */
   async play(): Promise<void> {
+    await this.effects.resume();
     await this.audio.play();
   }
 
@@ -167,6 +175,16 @@ export class ElectronAudioPlayerAdapter
     this.cancelFade();
     this.targetVolume = Math.min(1, Math.max(0, volume));
     this.audio.volume = this.targetVolume;
+  }
+
+  /** 同步主进程设置页保存的 EQ、Limiter 和频谱参数。 */
+  setAudioSettings(settings: DesktopAudioSettings): void {
+    this.effects.setSettings(settings);
+  }
+
+  /** 订阅 AudioWorklet 输出的归一化频谱。 */
+  subscribeSpectrum(listener: (values: number[]) => void): () => void {
+    return this.effects.subscribeSpectrum(listener);
   }
 
   /** 读取标准化播放器状态。 */
@@ -209,6 +227,7 @@ export class ElectronAudioPlayerAdapter
   /** 释放媒体事件和动画帧。 */
   dispose(): void {
     this.cancelFade();
+    this.effects.dispose();
     this.eventHandlers.forEach(({name, handler}) => {
       this.audio.removeEventListener(name, handler as EventListenerOrEventListenerObject);
     });

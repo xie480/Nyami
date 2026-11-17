@@ -111,6 +111,22 @@ export class AppLogger {
   }
 
   /**
+   * 将已脱敏的日志文件复制到用户选择的目标路径。
+   * @param targetPath 用户在保存对话框中选择的导出路径
+   * @returns 导出文件字节数
+   */
+  async exportTo(targetPath: string): Promise<number> {
+    await this.writeQueue;
+    if (!this.logFilePath) {
+      await fs.writeFile(targetPath, '', 'utf8');
+      return 0;
+    }
+    await fs.copyFile(this.logFilePath, targetPath);
+    const stat = await fs.stat(targetPath);
+    return stat.size;
+  }
+
+  /**
    * 等待当前日志写入队列完成。
    * 异常退出前调用该方法，确保脱敏错误摘要已经落盘。
    * @returns 写入队列完成后的 Promise

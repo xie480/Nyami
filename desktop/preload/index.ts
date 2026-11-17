@@ -9,6 +9,7 @@ import type {
   DiscoverContentRequest,
   FavoriteFolderContentRequest,
   FavoriteVideoContentRequest,
+  LogExportResult,
   NyamiDesktopApi,
   PlaybackAudioEvent,
   PlaybackCommandEvent,
@@ -164,6 +165,8 @@ const api: NyamiDesktopApi = {
     getRecent: (limit?: number) =>
       ipcRenderer.invoke(CHANNELS.logs.getRecent, limit),
     clear: () => ipcRenderer.invoke(CHANNELS.logs.clear),
+    export: (): Promise<LogExportResult> =>
+      ipcRenderer.invoke(CHANNELS.logs.export),
     reportRendererError: (report: RendererErrorReport) =>
       ipcRenderer.invoke(CHANNELS.logs.reportRendererError, report),
   },

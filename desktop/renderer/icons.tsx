@@ -9,6 +9,7 @@ export type IconName =
   | 'chevron-left'
   | 'chevron-right'
   | 'compass'
+  | 'download'
   | 'folder'
   | 'heart'
   | 'home'
@@ -22,6 +23,7 @@ export type IconName =
   | 'search'
   | 'settings'
   | 'sparkles'
+  | 'trash'
   | 'user'
   | 'x';
 
@@ -48,6 +50,13 @@ const paths: Record<IconName, JSX.Element> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="m15.2 8.8-1.5 4.9-4.9 1.5 1.5-4.9 4.9-1.5Z" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M4 20h16" />
     </>
   ),
   folder: (
@@ -116,6 +125,14 @@ const paths: Record<IconName, JSX.Element> = {
     <>
       <path d="m12 3 1.2 4.8L18 9l-4.8 1.2L12 15l-1.2-4.8L6 9l4.8-1.2L12 3Z" />
       <path d="m19 15 .6 2.4L22 18l-2.4.6L19 21l-.6-2.4L16 18l2.4-.6L19 15Z" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M5 7h14" />
+      <path d="M10 11v5M14 11v5" />
+      <path d="m7 7 .8 13h8.4L17 7" />
+      <path d="M9 7V4h6v3" />
     </>
   ),
   user: (

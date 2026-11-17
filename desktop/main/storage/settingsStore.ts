@@ -1,6 +1,10 @@
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import type {
+  DesktopAudioSettings,
+  DesktopEqMode,
+  DesktopGraphicPreset,
+  DesktopPeqBand,
   DesktopSettings,
   DesktopSettingsPatch,
   DesktopTheme,
@@ -9,11 +13,60 @@ import type {
 import type {AppDirectories} from './appDirectories';
 
 const SETTINGS_FILE_NAME = 'desktop.json';
-const SETTINGS_VERSION = 1 as const;
+const SETTINGS_VERSION = 2 as const;
 const MIN_WINDOW_WIDTH = 960;
 const MIN_WINDOW_HEIGHT = 640;
 const MAX_WINDOW_WIDTH = 8192;
 const MAX_WINDOW_HEIGHT = 8192;
+const GRAPHIC_BAND_COUNT = 10;
+const PEQ_BAND_COUNT = 8;
+const MIN_GRAPHIC_GAIN = -12;
+const MAX_GRAPHIC_GAIN = 12;
+const MIN_PEQ_FREQUENCY = 20;
+const MAX_PEQ_FREQUENCY = 20000;
+const MIN_PEQ_GAIN = -18;
+const MAX_PEQ_GAIN = 18;
+const MIN_PEQ_Q = 0.1;
+const MAX_PEQ_Q = 20;
+const MIN_LIMITER_THRESHOLD = 0.5;
+const MAX_LIMITER_THRESHOLD = 1;
+
+const GRAPHIC_PRESETS: readonly DesktopGraphicPreset[] = [
+  'flat',
+  'nyami',
+  'cat_bass',
+  'girl_band',
+  'idol_stage',
+  'midnight_radio',
+  'vaporwave',
+  'custom',
+];
+
+const EQ_MODES: readonly DesktopEqMode[] = ['graphic', 'parametric'];
+
+const DEFAULT_GRAPHIC_GAINS = [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+];
+
+const DEFAULT_PEQ_BANDS: DesktopPeqBand[] = [
+  {enabled: false, frequency: 31, gain: 0, q: 1},
+  {enabled: false, frequency: 62, gain: 0, q: 1},
+  {enabled: false, frequency: 125, gain: 0, q: 1},
+  {enabled: false, frequency: 250, gain: 0, q: 1},
+  {enabled: false, frequency: 500, gain: 0, q: 1},
+  {enabled: false, frequency: 1000, gain: 0, q: 1},
+  {enabled: false, frequency: 2000, gain: 0, q: 1},
+  {enabled: false, frequency: 4000, gain: 0, q: 1},
+];
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   version: SETTINGS_VERSION,
@@ -24,6 +77,16 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
     height: 820,
     x: null,
     y: null,
+  },
+  audio: {
+    enabled: false,
+    mode: 'graphic',
+    graphicPreset: 'flat',
+    graphicGains: [...DEFAULT_GRAPHIC_GAINS],
+    peqBands: clonePeqBands(DEFAULT_PEQ_BANDS),
+    limiterEnabled: true,
+    limiterThreshold: 0.95,
+    spectrumEnabled: true,
   },
 };
 
@@ -87,6 +150,10 @@ export class SettingsStore {
       window: {
         ...this.settings.window,
         ...(patch.window ?? {}),
+      },
+      audio: {
+        ...this.settings.audio,
+        ...(patch.audio ?? {}),
       },
     });
     await this.persist();
@@ -165,6 +232,7 @@ export function normalizeSettings(value: unknown): DesktopSettings {
       x: normalizeCoordinate(windowValue.x),
       y: normalizeCoordinate(windowValue.y),
     },
+    audio: normalizeAudioSettings(record.audio),
   };
 }
 
@@ -179,7 +247,123 @@ function cloneSettings(settings: DesktopSettings): DesktopSettings {
     window: {
       ...settings.window,
     },
+    audio: {
+      ...settings.audio,
+      graphicGains: [...settings.audio.graphicGains],
+      peqBands: clonePeqBands(settings.audio.peqBands),
+    },
   };
+}
+
+/**
+ * 校验并规范化桌面音频处理参数。
+ * @param value 外部 JSON 或 Renderer 设置补丁中的音频参数
+ * @returns 可安全发送到 AudioWorklet 的音频设置
+ */
+export function normalizeAudioSettings(value: unknown): DesktopAudioSettings {
+  const record = isRecord(value) ? value : {};
+  const graphicGains = normalizeGraphicGains(record.graphicGains);
+  const peqBands = normalizePeqBands(record.peqBands);
+  return {
+    enabled:
+      typeof record.enabled === 'boolean'
+        ? record.enabled
+        : DEFAULT_DESKTOP_SETTINGS.audio.enabled,
+    mode: isEqMode(record.mode)
+      ? record.mode
+      : DEFAULT_DESKTOP_SETTINGS.audio.mode,
+    graphicPreset: isGraphicPreset(record.graphicPreset)
+      ? record.graphicPreset
+      : DEFAULT_DESKTOP_SETTINGS.audio.graphicPreset,
+    graphicGains,
+    peqBands,
+    limiterEnabled:
+      typeof record.limiterEnabled === 'boolean'
+        ? record.limiterEnabled
+        : DEFAULT_DESKTOP_SETTINGS.audio.limiterEnabled,
+    limiterThreshold: normalizeNumber(
+      record.limiterThreshold,
+      DEFAULT_DESKTOP_SETTINGS.audio.limiterThreshold,
+      MIN_LIMITER_THRESHOLD,
+      MAX_LIMITER_THRESHOLD,
+    ),
+    spectrumEnabled:
+      typeof record.spectrumEnabled === 'boolean'
+        ? record.spectrumEnabled
+        : DEFAULT_DESKTOP_SETTINGS.audio.spectrumEnabled,
+  };
+}
+
+/** 规范化 10 段 Graphic EQ 增益，缺失项使用平直曲线。 */
+function normalizeGraphicGains(value: unknown): number[] {
+  const values = Array.isArray(value) ? value : [];
+  return Array.from({length: GRAPHIC_BAND_COUNT}, (_item, index) =>
+    normalizeNumber(
+      values[index],
+      DEFAULT_GRAPHIC_GAINS[index] ?? 0,
+      MIN_GRAPHIC_GAIN,
+      MAX_GRAPHIC_GAIN,
+    ),
+  );
+}
+
+/** 规范化 8 段 PEQ 参数，避免非法参数进入音频处理线程。 */
+function normalizePeqBands(value: unknown): DesktopPeqBand[] {
+  const values = Array.isArray(value) ? value : [];
+  return Array.from({length: PEQ_BAND_COUNT}, (_item, index) => {
+    const source = isRecord(values[index]) ? values[index] : {};
+    const fallback = DEFAULT_PEQ_BANDS[index] ?? DEFAULT_PEQ_BANDS[0];
+    return {
+      enabled:
+        typeof source.enabled === 'boolean'
+          ? source.enabled
+          : fallback.enabled,
+      frequency: normalizeNumber(
+        source.frequency,
+        fallback.frequency,
+        MIN_PEQ_FREQUENCY,
+        MAX_PEQ_FREQUENCY,
+      ),
+      gain: normalizeNumber(
+        source.gain,
+        fallback.gain,
+        MIN_PEQ_GAIN,
+        MAX_PEQ_GAIN,
+      ),
+      q: normalizeNumber(source.q, fallback.q, MIN_PEQ_Q, MAX_PEQ_Q),
+    };
+  });
+}
+
+/** 复制 PEQ 数组，避免设置快照被 Renderer 修改。 */
+function clonePeqBands(bands: readonly DesktopPeqBand[]): DesktopPeqBand[] {
+  return bands.map(band => ({...band}));
+}
+
+/** 判断值是否为合法 EQ 模式。 */
+function isEqMode(value: unknown): value is DesktopEqMode {
+  return typeof value === 'string' && EQ_MODES.includes(value as DesktopEqMode);
+}
+
+/** 判断值是否为允许的 Graphic EQ 预设。 */
+function isGraphicPreset(value: unknown): value is DesktopGraphicPreset {
+  return (
+    typeof value === 'string' &&
+    GRAPHIC_PRESETS.includes(value as DesktopGraphicPreset)
+  );
+}
+
+/** 将外部数值限制在音频参数允许的范围内。 */
+function normalizeNumber(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 /**

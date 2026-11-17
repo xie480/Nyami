@@ -64,6 +64,7 @@ export const IPC_CHANNELS = {
   logs: {
     getRecent: 'logs:get-recent',
     clear: 'logs:clear',
+    export: 'logs:export',
     reportRendererError: 'logs:report-renderer-error',
   },
   probes: {
@@ -363,6 +364,36 @@ export type CacheSummary = {
 
 export type DesktopTheme = 'system' | 'light' | 'dark' | 'glass';
 
+export type DesktopEqMode = 'graphic' | 'parametric';
+
+export type DesktopGraphicPreset =
+  | 'flat'
+  | 'nyami'
+  | 'cat_bass'
+  | 'girl_band'
+  | 'idol_stage'
+  | 'midnight_radio'
+  | 'vaporwave'
+  | 'custom';
+
+export type DesktopPeqBand = {
+  enabled: boolean;
+  frequency: number;
+  gain: number;
+  q: number;
+};
+
+export type DesktopAudioSettings = {
+  enabled: boolean;
+  mode: DesktopEqMode;
+  graphicPreset: DesktopGraphicPreset;
+  graphicGains: number[];
+  peqBands: DesktopPeqBand[];
+  limiterEnabled: boolean;
+  limiterThreshold: number;
+  spectrumEnabled: boolean;
+};
+
 export type WindowSettings = {
   width: number;
   height: number;
@@ -371,16 +402,21 @@ export type WindowSettings = {
 };
 
 export type DesktopSettings = {
-  version: 1;
+  version: 2;
   theme: DesktopTheme;
   closeToTray: boolean;
   window: WindowSettings;
+  audio: DesktopAudioSettings;
 };
 
-export type DesktopSettingsPatch = Partial<
-  Omit<DesktopSettings, 'version' | 'window'>
-> & {
+export type DesktopSettingsPatch = {
+  theme?: DesktopTheme;
+  closeToTray?: boolean;
   window?: Partial<WindowSettings>;
+  audio?: Partial<DesktopAudioSettings> & {
+    graphicGains?: number[];
+    peqBands?: DesktopPeqBand[];
+  };
 };
 
 export type DesktopLogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -390,6 +426,12 @@ export type DesktopLogEntry = {
   level: DesktopLogLevel;
   event: string;
   details?: Record<string, unknown>;
+};
+
+export type LogExportResult = {
+  cancelled: boolean;
+  path: string | null;
+  bytes: number;
 };
 
 export type RendererErrorReport = {
@@ -595,6 +637,7 @@ export type NyamiDesktopApi = {
   logs: {
     getRecent: (limit?: number) => Promise<DesktopLogEntry[]>;
     clear: () => Promise<void>;
+    export: () => Promise<LogExportResult>;
     reportRendererError: (report: RendererErrorReport) => Promise<void>;
   };
 };

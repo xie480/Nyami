@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  memo,
 } from 'react';
 import type {
   ChangeEvent,
@@ -18,6 +19,8 @@ import {
 import type {
   AuthStatus,
   AuthWebViewState,
+  CacheProgressEvent,
+  CacheSummary,
   DesktopPage,
   DesktopSettings,
   DesktopTheme,
@@ -39,6 +42,8 @@ import type {
   SyncSnapshot,
   UserProfile,
 } from '../shared/types';
+import {AudioSettingsPanel} from './audio/AudioSettingsPanel';
+import {DEFAULT_DESKTOP_AUDIO_SETTINGS} from './audio/eqPresets';
 import {ElectronAudioPlayerAdapter} from './audio/electronAudioPlayer';
 
 type Route = 'home' | 'discover' | 'search' | 'favorites' | 'settings';
@@ -137,6 +142,10 @@ export function App(): JSX.Element {
   const [searchTrigger, setSearchTrigger] = useState(0);
   const [playback, setPlayback] = useState<PlaybackSnapshot>(EMPTY_PLAYBACK);
   const [sync, setSync] = useState<SyncSnapshot>(EMPTY_SYNC);
+  const [spectrum, setSpectrum] = useState<number[]>([]);
+  const [cacheSummary, setCacheSummary] = useState<CacheSummary | null>(null);
+  const [cacheProgress, setCacheProgress] = useState<CacheProgressEvent | null>(null);
+  const [cacheBusy, setCacheBusy] = useState(false);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const audioAdapterRef = useRef<ElectronAudioPlayerAdapter | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -372,6 +381,40 @@ export function App(): JSX.Element {
     [playback.queue, pushNotice],
   );
 
+  /** 读取音频和图片缓存摘要，供设置页展示容量。 */
+  const refreshCacheSummary = useCallback(async (): Promise<void> => {
+    try {
+      setCacheSummary(await window.nyamiDesktop.cache.getSummary());
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '缓存摘要读取失败'));
+    }
+  }, [pushNotice]);
+
+  /** 清理缓存并刷新容量摘要。 */
+  const clearCache = useCallback(async (): Promise<void> => {
+    setCacheBusy(true);
+    try {
+      setCacheSummary(await window.nyamiDesktop.cache.clear());
+      pushNotice('success', '音频和图片缓存已清理');
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '缓存清理失败'));
+    } finally {
+      setCacheBusy(false);
+    }
+  }, [pushNotice]);
+
+  /** 打开系统保存对话框导出脱敏日志。 */
+  const exportLogs = useCallback(async (): Promise<void> => {
+    try {
+      const result = await window.nyamiDesktop.logs.export();
+      if (!result.cancelled && result.path) {
+        pushNotice('success', `日志已导出（${formatBytes(result.bytes)}）`);
+      }
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '日志导出失败'));
+    }
+  }, [pushNotice]);
+
   /** 注册全局快捷键，支持 Ctrl+K、Space 和 Ctrl+方向键。 */
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent): void => {
@@ -423,6 +466,7 @@ export function App(): JSX.Element {
     );
     audioAdapterRef.current = adapter;
     void adapter.setup();
+    const unsubscribeSpectrum = adapter.subscribeSpectrum(setSpectrum);
     const unsubscribeSource = window.nyamiDesktop.playback.onSourceChanged(
       event => adapter.loadSource(event.source),
     );
@@ -455,10 +499,18 @@ export function App(): JSX.Element {
       window.removeEventListener('offline', handleOffline);
       unsubscribeSource();
       unsubscribeCommand();
+      unsubscribeSpectrum();
       adapter.dispose();
       audioAdapterRef.current = null;
     };
   }, []);
+
+  /** 设置变化后把完整音频参数快照发送到 AudioWorklet。 */
+  useEffect(() => {
+    if (settings?.audio) {
+      audioAdapterRef.current?.setAudioSettings(settings.audio);
+    }
+  }, [settings?.audio]);
 
   /** 初始化认证、设置、播放状态和跨进程事件订阅。 */
   useEffect(() => {
@@ -496,11 +548,15 @@ export function App(): JSX.Element {
     const unsubscribeSync = window.nyamiDesktop.sync.onStateChanged(
       event => setSync(event.snapshot),
     );
+    const unsubscribeCache = window.nyamiDesktop.cache.onProgress(
+      (event: CacheProgressEvent) => setCacheProgress(event),
+    );
     void Promise.all([
       refreshAuth(),
       window.nyamiDesktop.settings.get().then(setSettings),
       window.nyamiDesktop.playback.getState().then(setPlayback),
       window.nyamiDesktop.sync.getStatus().then(setSync),
+      window.nyamiDesktop.cache.getSummary().then(setCacheSummary),
     ]).catch(error => {
       pushNotice('error', getErrorMessage(error, '桌面运行时初始化失败'));
     });
@@ -510,6 +566,7 @@ export function App(): JSX.Element {
       unsubscribeSettings();
       unsubscribePlayback();
       unsubscribeSync();
+      unsubscribeCache();
     };
   }, [pushNotice, refreshAuth]);
 
@@ -701,9 +758,15 @@ export function App(): JSX.Element {
             {route === 'settings' ? (
               <SettingsPage
                 auth={auth}
+                cacheBusy={cacheBusy}
+                cacheProgress={cacheProgress}
+                cacheSummary={cacheSummary}
+                onClearCache={() => void clearCache()}
+                onExportLogs={() => void exportLogs()}
                 onLogin={() => setLoginOpen(true)}
                 onLogout={() => void logout()}
                 onRenew={() => void renewLogin()}
+                onRefreshCache={() => void refreshCacheSummary()}
                 onUpdate={updateSettings}
                 profile={profile}
                 settings={settings}
@@ -713,6 +776,7 @@ export function App(): JSX.Element {
 
           <PlayerPlaceholder
             playback={playback}
+            spectrum={spectrum}
             onModeChange={setPlaybackMode}
             onNext={() =>
               void window.nyamiDesktop.playback.skipNext().then(setPlayback)
@@ -1492,17 +1556,29 @@ function FavoritesPage({
 /** 设置页承载桌面主题、窗口行为和账号操作。 */
 function SettingsPage({
   auth,
+  cacheBusy,
+  cacheProgress,
+  cacheSummary,
+  onClearCache,
+  onExportLogs,
   onLogin,
   onLogout,
   onRenew,
+  onRefreshCache,
   onUpdate,
   profile,
   settings,
 }: {
   auth: AuthStatus;
+  cacheBusy: boolean;
+  cacheProgress: CacheProgressEvent | null;
+  cacheSummary: CacheSummary | null;
+  onClearCache: () => void;
+  onExportLogs: () => void;
   onLogin: () => void;
   onLogout: () => void;
   onRenew: () => void;
+  onRefreshCache: () => void;
   onUpdate: (patch: Parameters<typeof window.nyamiDesktop.settings.update>[0]) => void;
   profile: UserProfile | null;
   settings: DesktopSettings | null;
@@ -1548,7 +1624,7 @@ function SettingsPage({
         <label className="setting-row">
           <span>
             <strong>关闭窗口时最小化到托盘</strong>
-            <small>托盘能力将在阶段 6 接入；当前设置会先保存。</small>
+            <small>关闭主窗口后继续在后台播放，可从系统托盘恢复。</small>
           </span>
           <input
             checked={settings?.closeToTray ?? false}
@@ -1556,6 +1632,76 @@ function SettingsPage({
             type="checkbox"
           />
         </label>
+      </section>
+      <AudioSettingsPanel
+        onUpdate={onUpdate}
+        settings={settings?.audio ?? DEFAULT_DESKTOP_AUDIO_SETTINGS}
+      />
+      <section className="settings-card">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">STORAGE</p>
+            <h3>缓存管理</h3>
+          </div>
+          <button
+            aria-label="刷新缓存摘要"
+            className="icon-button"
+            onClick={onRefreshCache}
+            title="刷新缓存摘要"
+            type="button">
+            <Icon name="refresh" size={16} />
+          </button>
+        </div>
+        <div className="cache-summary-grid">
+          <div>
+            <span>音频缓存</span>
+            <strong>{formatBytes(cacheSummary?.audioBytes ?? 0)}</strong>
+          </div>
+          <div>
+            <span>图片缓存</span>
+            <strong>{formatBytes(cacheSummary?.imageBytes ?? 0)}</strong>
+          </div>
+          <div>
+            <span>文件数量</span>
+            <strong>{cacheSummary?.fileCount ?? 0}</strong>
+          </div>
+        </div>
+        {cacheProgress ? (
+          <div className="cache-progress" role="status">
+            <span>
+              {cacheProgress.operation === 'clear' ? '正在清理缓存' : '正在扫描缓存'}
+            </span>
+            <span>
+              {cacheProgress.completed}/{cacheProgress.total}
+            </span>
+          </div>
+        ) : null}
+        <div className="settings-actions-row">
+          <button
+            className="danger-button"
+            disabled={cacheBusy}
+            onClick={onClearCache}
+            type="button">
+            <Icon name="trash" size={16} />
+            {cacheBusy ? '清理中…' : '清空缓存'}
+          </button>
+          <small>清理会删除已下载音频和图片，播放队列会在下次播放时重新获取。</small>
+        </div>
+      </section>
+      <section className="settings-card">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">DIAGNOSTICS</p>
+            <h3>诊断日志</h3>
+          </div>
+        </div>
+        <div className="settings-actions-row">
+          <button className="secondary-button" onClick={onExportLogs} type="button">
+            <Icon name="download" size={16} />
+            导出脱敏日志
+          </button>
+          <small>日志会过滤 Cookie、token、二维码密钥和 URL 查询参数。</small>
+        </div>
       </section>
       <section className="settings-card account-settings-card">
         <div className="panel-heading">
@@ -1900,9 +2046,32 @@ function Pagination({
   );
 }
 
+/** 渲染受 AudioWorklet 驱动的轻量频谱柱，限制柱数和重绘频率。 */
+const SpectrumVisualizer = memo(function SpectrumVisualizer({
+  values,
+}: {
+  values: number[];
+}): JSX.Element {
+  const displayValues = values.slice(0, 24);
+  return (
+    <div aria-label="实时频谱" className="spectrum-visualizer" role="img">
+      {(displayValues.length ? displayValues : Array(24).fill(0)).map(
+        (value, index) => (
+          <span
+            className="spectrum-bar"
+            key={index}
+            style={{height: `${Math.max(6, Math.round(value * 100))}%`}}
+          />
+        ),
+      )}
+    </div>
+  );
+});
+
 /** 渲染底部播放器、进度控制和可拖拽播放队列。 */
 function PlayerPlaceholder({
   playback,
+  spectrum,
   onModeChange,
   onNext,
   onPause,
@@ -1916,6 +2085,7 @@ function PlayerPlaceholder({
   onVolume,
 }: {
   playback: PlaybackSnapshot;
+  spectrum: number[];
   onModeChange: (mode: PlaybackQueueMode) => void;
   onNext: () => void;
   onPause: () => void;
@@ -1978,6 +2148,7 @@ function PlayerPlaceholder({
           <Icon name="arrow-right" size={17} />
         </button>
       </div>
+      <SpectrumVisualizer values={spectrum} />
       <div className="player-status">
         <input
           aria-label="播放进度"
@@ -2166,6 +2337,19 @@ function formatDuration(value: number): string {
     return `${hours}:${String(minutes % 60).padStart(2, '0')}:${remainder}`;
   }
   return `${minutes}:${remainder}`;
+}
+
+/** 将缓存和导出文件大小转成便于设置页阅读的单位。 */
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0 B';
+  }
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const unitIndex = Math.min(
+    units.length - 1,
+    Math.floor(Math.log(value) / Math.log(1024)),
+  );
+  return `${(value / 1024 ** unitIndex).toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 /** 将 Unix 秒时间戳格式化为内容卡片日期。 */

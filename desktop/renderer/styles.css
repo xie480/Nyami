@@ -1218,6 +1218,194 @@ kbd {
   gap: 18px;
 }
 
+.audio-settings-card {
+  gap: 16px;
+}
+
+.status-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.status-chip.active {
+  border-color: rgba(107, 212, 165, 0.35);
+  background: rgba(107, 212, 165, 0.1);
+  color: var(--success);
+}
+
+.audio-control-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.audio-select-control,
+.range-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted-strong);
+  font-size: 11px;
+}
+
+.audio-select-control select,
+.peq-row input[type='number'] {
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 7px 9px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.audio-select-control select {
+  width: 156px;
+}
+
+.graphic-eq-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(36px, 1fr));
+  align-items: end;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  padding: 14px 12px 11px;
+}
+
+.graphic-band {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.graphic-band input {
+  width: 92px;
+  max-width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+  transform: rotate(-90deg);
+}
+
+.graphic-band small {
+  color: var(--text-soft);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.peq-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.peq-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) repeat(3, minmax(90px, 0.8fr));
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding: 4px 0 8px;
+}
+
+.peq-row > label:not(.peq-enable) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.peq-enable {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.range-setting > span {
+  display: flex;
+  min-width: 140px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.range-setting strong {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.range-setting small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.range-setting input[type='range'] {
+  width: min(360px, 52%);
+  accent-color: var(--accent);
+}
+
+.cache-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.cache-summary-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  padding: 11px;
+}
+
+.cache-summary-grid span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.cache-summary-grid strong {
+  color: var(--text-soft);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cache-progress,
+.settings-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cache-progress {
+  border-radius: 8px;
+  background: rgba(132, 184, 255, 0.1);
+  padding: 8px 10px;
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.settings-actions-row small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .theme-options {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1493,7 +1681,7 @@ kbd {
   bottom: 0;
   left: 236px;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+  grid-template-columns: minmax(180px, 0.95fr) auto minmax(150px, 0.5fr) minmax(220px, 1.4fr);
   align-items: center;
   gap: 18px;
   min-height: 76px;
@@ -1552,6 +1740,28 @@ kbd {
 .player-controls {
   justify-content: center;
   gap: 5px;
+}
+
+.spectrum-visualizer {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  width: min(150px, 100%);
+  height: 34px;
+  gap: 2px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 3px 0;
+}
+
+.spectrum-bar {
+  display: block;
+  min-width: 2px;
+  flex: 1;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+  opacity: 0.84;
+  transition: height 100ms linear;
 }
 
 .player-main-button {
