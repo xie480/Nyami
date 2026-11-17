@@ -15,6 +15,8 @@ const AUDIO_REQUEST_FILTER = {
   ],
 };
 
+const registeredSessions = new WeakSet<Electron.Session>();
+
 /**
  * 安装 Bilibili CDN 请求头注入和脱敏观察器。
  * @param targetSession 当前 BrowserWindow 使用的 Session
@@ -24,6 +26,10 @@ export function registerAudioInterception(
   targetSession: Electron.Session,
   recorder: AudioRequestRecorder,
 ): void {
+  if (registeredSessions.has(targetSession)) {
+    return;
+  }
+  registeredSessions.add(targetSession);
   targetSession.webRequest.onBeforeSendHeaders(
     AUDIO_REQUEST_FILTER,
     (details, callback) => {

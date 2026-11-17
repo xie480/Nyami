@@ -3,10 +3,11 @@ import {
   BILIBILI_QR_LIFETIME_MS,
   BILIBILI_QR_POLL_INTERVAL_MS,
 } from '../constants';
-import type {
-  AuthStatus,
-  QrSessionStartResult,
-  QrStatusEvent,
+import {
+  IPC_CHANNELS,
+  type AuthStatus,
+  type QrSessionStartResult,
+  type QrStatusEvent,
 } from '../../shared/types';
 import {CredentialStore} from './credentialStore';
 import {QrClient} from './qrClient';
@@ -183,7 +184,7 @@ export class QrLoginController {
    */
   private emit(event: QrStatusEvent): void {
     if (!this.window.isDestroyed()) {
-      this.window.webContents.send('auth:qr-status', event);
+      this.window.webContents.send(IPC_CHANNELS.auth.qrStatus, event);
     }
   }
 }
