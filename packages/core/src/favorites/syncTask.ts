@@ -165,7 +165,8 @@ export class FavoriteSyncTask {
       !remoteCountDecreased &&
       initialMeta?.syncCursor === null &&
       initialMeta.playlistSyncStatus === 'success';
-    const fullScan = !incrementalMode;
+    // 断点从中间页恢复时不能软删除前面尚未重新读取的关系。
+    const fullScan = force || page === 1;
     let incrementalDone = false;
 
     try {

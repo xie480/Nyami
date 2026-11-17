@@ -190,7 +190,7 @@ export class DesktopShell {
     this.lastSyncNotificationKey = notificationKey;
     const body =
       snapshot.state === 'completed'
-        ? '收藏、标签和推荐索引同步完成'
+        ? '收藏索引同步完成'
         : snapshot.error || '同步失败，可以从任务面板重试';
     this.showNotification(
       snapshot.state === 'completed' ? '同步完成' : '同步失败',

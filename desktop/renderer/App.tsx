@@ -1671,7 +1671,11 @@ function FavoritesPage({
         <Icon name="search" size={19} />
         <input
           aria-label="搜索本地收藏"
-          onChange={event => setFavoriteSearchQuery(event.target.value)}
+          onChange={event => {
+            setFavoriteSearchQuery(event.target.value);
+            setFavoriteSearchResult(null);
+            setFavoriteSearchState('idle');
+          }}
           placeholder="搜索已同步收藏：标题、UP 主或收藏夹"
           value={favoriteSearchQuery}
         />

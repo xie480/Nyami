@@ -55,7 +55,7 @@ npm run desktop:release:check
 
 ## 阶段 4 播放器、队列与离线缓存
 
-- `desktop/main/runtime/playbackRuntime.ts` 在主进程维护队列、播放模式、分 P 展开、推荐页续接、过期请求 revision、失败重试、网络恢复、睡眠定时器和重启恢复状态。
+- `desktop/main/runtime/playbackRuntime.ts` 在主进程维护队列、播放模式、分 P 展开、热门页续接、过期请求 revision、失败重试、网络恢复、睡眠定时器和重启恢复状态。
 - `desktop/renderer/audio/electronAudioPlayer.ts` 将 `HTMLAudioElement` 适配为共享 `AudioPlayer` 契约，处理媒体事件、进度、音量和淡入淡出；Renderer 不解析 Bilibili 播放地址。
 - `desktop/main/audio/biliAudioResolver.ts` 复用共享 WBI/API 和主进程凭证，按 DASH/durl 音频质量选择地址，并在主进程校验 Bilibili CDN 域名。
 - `desktop/main/runtime/audioCacheStore.ts` 使用 BVID、CID 和音质生成缓存键，下载写入临时文件后原子重命名，再以原子索引记录大小、MIME、创建时间和最近访问时间；缓存满载时按 LRU 淘汰非队列项目。
