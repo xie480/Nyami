@@ -1,4 +1,5 @@
 import {app} from 'electron';
+import path from 'node:path';
 import {DESKTOP_APP_ID} from './constants';
 import {
   registerLocalAudioHandler,
@@ -25,6 +26,7 @@ let mainWindow: Electron.BrowserWindow | null = null;
 let desktopShell: import('./tray/desktopShell').DesktopShell | null = null;
 let disposeWindow: (() => void) | null = null;
 let shouldFocusWhenReady = false;
+let pendingAssociatedFile: string | null = findAssociatedFile(process.argv);
 let localAudioHandlerRegistered = false;
 let bootstrapPromise: Promise<void> | null = null;
 
@@ -32,7 +34,11 @@ if (!hasSingleInstance) {
   disposeProcessErrorBoundary();
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, commandLine) => {
+    const associatedFile = findAssociatedFile(commandLine);
+    if (associatedFile) {
+      pendingAssociatedFile = associatedFile;
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       focusMainWindow(mainWindow);
       return;
@@ -83,6 +89,12 @@ async function bootstrap(): Promise<void> {
   const directories = getAppDirectories();
   await ensureAppDirectories(directories);
   await logger.initialize(directories.logs);
+  if (pendingAssociatedFile) {
+    logger.info('app.file-association-opened', {
+      extension: path.extname(pendingAssociatedFile).toLowerCase(),
+    });
+    pendingAssociatedFile = null;
+  }
   const settingsStore = new SettingsStore(directories);
   const settings = await settingsStore.load();
   logger.info('app.ready', {
@@ -136,6 +148,22 @@ function focusMainWindow(window: Electron.BrowserWindow): void {
     window.show();
   }
   window.focus();
+}
+
+/**
+ * 从启动参数中提取 Nyami 播放队列文件，避免将任意参数当作文件打开。
+ * @param commandLine Electron 启动参数
+ * @returns 受支持的 .nyami 文件路径；没有时返回 null
+ */
+function findAssociatedFile(commandLine: readonly string[]): string | null {
+  return (
+    commandLine.find(argument => {
+      if (!argument || argument.startsWith('-')) {
+        return false;
+      }
+      return path.extname(argument).toLowerCase() === '.nyami';
+    }) ?? null
+  );
 }
 
 declare global {

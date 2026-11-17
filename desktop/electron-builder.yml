@@ -1,10 +1,16 @@
 appId: com.nyami.desktop
 productName: Nyami
+icon: icon.png
 directories:
   output: ../release/desktop
   buildResources: ../resource
 files:
   - out/**
+  - '!**/*.map'
+  - '!**/*.log'
+  - '!**/test-credentials/**'
+  - '!**/__tests__/**'
+  - '!**/tests/**'
 extraResources:
   - from: ../resource/silence_10s.wav
     to: resource/silence_10s.wav
@@ -16,15 +22,32 @@ buildDependenciesFromSource: false
 artifactName: Nyami-${version}-${arch}.${ext}
 electronVersion: 45.3.3
 win:
+  publisherName: Nyami Project
+  signExecutable: true
+  verifyUpdateCodeSignature: true
   target:
-    - nsis
-    - portable
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
   requestedExecutionLevel: asInvoker
+fileAssociations:
+  - ext: nyami
+    name: Nyami Playlist
+    description: Nyami playlist and queue file
 nsis:
   artifactName: Nyami-${version}-${arch}-setup.${ext}
   oneClick: false
+  perMachine: true
   allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  differentialPackage: store-asar
   createDesktopShortcut: true
+  createStartMenuShortcut: true
+  menuCategory: Nyami
+  runAfterFinish: true
   shortcutName: Nyami
 portable:
   artifactName: Nyami-${version}-${arch}-portable.${ext}

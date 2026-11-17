@@ -1,8 +1,8 @@
 {
   "name": "nyami-desktop",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
-  "description": "Nyami Windows desktop spike",
-  "author": "Nyami",
+  "description": "Nyami Windows desktop player",
+  "author": "Nyami Project",
   "main": "out/main/index.js"
 }

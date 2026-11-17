@@ -11,6 +11,7 @@ const desktopRoot = resolve(__dirname);
 export default defineConfig({
   main: {
     build: {
+      sourcemap: false,
       lib: {
         entry: resolve(desktopRoot, 'main/index.ts'),
       },
@@ -19,6 +20,7 @@ export default defineConfig({
   },
   preload: {
     build: {
+      sourcemap: false,
       lib: {
         entry: resolve(desktopRoot, 'preload/index.ts'),
       },
@@ -29,6 +31,7 @@ export default defineConfig({
     root: resolve(desktopRoot, 'renderer'),
     plugins: [react()],
     build: {
+      sourcemap: false,
       outDir: resolve(desktopRoot, 'out/renderer'),
       rolldownOptions: {
         input: 'index.html',

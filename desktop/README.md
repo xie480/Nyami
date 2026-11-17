@@ -9,9 +9,23 @@ npm run desktop:dev
 npm run desktop:typecheck
 npm run desktop:build
 npm run desktop:package
+npm run desktop:release:check
 ```
 
-`desktop:package` 使用 `desktop/electron-builder.yml` 生成 NSIS 安装包和便携版，目标为 Windows 10 19041+ / Windows 11 x64。
+`desktop:package` 使用 `desktop/electron-builder.yml` 生成 NSIS 安装包和便携版，目标为 Windows 10 19041+ / Windows 11 x64；构建结束后会在 `release/desktop/` 生成 `latest.json` 和 `SHA256SUMS.txt`。NSIS 使用差分 blockmap 压缩策略，便于后续接入增量更新。
+
+### 阶段 7 发布配置
+
+- 桌面端版本号以 `desktop/package.json` 为唯一来源，当前发布版本为 `1.0.0`。
+- 安装包显式使用 `resource/icon.png`，注册 `.nyami` 播放队列文件关联，并启用已有的单实例锁。
+- NSIS 使用 assisted installer 和 x64 目标；覆盖升级不会删除 `%APPDATA%/Nyami/`，卸载只清理安装目录和卸载注册信息。
+- 构建文件过滤 source map、调试日志、测试目录和测试凭证；`desktop-release.mjs --check` 会校验安装包、便携版、SHA-256 和更新清单。
+- 设置页的“检查更新”读取 `NYAMI_UPDATE_URL`。该变量可以是 `latest.json` 地址，也可以是包含 `latest.json` 的 HTTPS 目录；本机开发允许 `http://localhost`。
+- 当前更新流程只检查清单并打开已校验的下载地址，用户手动运行安装包完成升级。清单中的 `blockmapUrl` 为后续 `electron-updater` 增量下载保留入口。
+
+### 代码签名
+
+公开发布前在构建环境配置 `CSC_LINK`（或 `WIN_CSC_LINK`）和 `CSC_KEY_PASSWORD`，并让证书发布者与 `win.publisherName` 的 `Nyami Project` 一致。未配置证书时仍可生成内部 Alpha 包，但安装器会显示未签名风险，不能视为 Stable 发布。
 
 ## 阶段 2 运行时
 

@@ -15,7 +15,9 @@
     "desktop:dev": "electron-vite dev --config desktop/electron.vite.config.ts",
     "desktop:typecheck": "tsc -p desktop/tsconfig.json --noEmit",
     "desktop:build": "electron-vite build --config desktop/electron.vite.config.ts",
-    "desktop:package": "npm run desktop:build && cd desktop && electron-builder --config electron-builder.yml --win"
+    "desktop:package": "npm run desktop:build && cd desktop && electron-builder --config electron-builder.yml --win --x64 && cd .. && node scripts/desktop-release.mjs",
+    "desktop:release": "npm run desktop:package",
+    "desktop:release:check": "node scripts/desktop-release.mjs --check"
   },
   "dependencies": {
     "@nozbe/watermelondb": "^0.27.0",
