@@ -37,11 +37,13 @@ export function installProcessErrorBoundary(logger: AppLogger): () => void {
     }
     fatalHandled = true;
     const quit = (): void => {
-      try {
-        app.quit();
-      } catch {
-        app.exit(1);
-      }
+      void logger.flush().finally(() => {
+        try {
+          app.quit();
+        } catch {
+          app.exit(1);
+        }
+      });
     };
     if (app.isReady()) {
       quitTimer = setTimeout(quit, 0);

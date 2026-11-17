@@ -111,6 +111,15 @@ export class AppLogger {
   }
 
   /**
+   * 等待当前日志写入队列完成。
+   * 异常退出前调用该方法，确保脱敏错误摘要已经落盘。
+   * @returns 写入队列完成后的 Promise
+   */
+  async flush(): Promise<void> {
+    await this.writeQueue;
+  }
+
+  /**
    * 返回当前日志文件路径，仅供主进程内部使用。
    * @returns 日志文件路径；未初始化时返回 null
    */
