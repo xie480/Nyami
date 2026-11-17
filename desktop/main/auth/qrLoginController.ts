@@ -13,6 +13,7 @@ import {
   type AuthWebViewState,
   type QrSessionStartResult,
   type QrStatusEvent,
+  type UserProfile,
 } from '../../shared/types';
 import {CookieRefreshService} from './cookieRefresh';
 import {CredentialStore} from './credentialStore';
@@ -48,6 +49,7 @@ export class QrLoginController {
   /**
    * 创建二维码登录控制器并绑定当前桌面窗口。
    * @param window 用于发送脱敏认证事件的桌面窗口
+   * @param getProfile 登录凭证保存后读取当前账号资料，用于确认会话真实可用
    */
   constructor(
     private readonly window: BrowserWindow,
@@ -57,6 +59,7 @@ export class QrLoginController {
       previousUid: string | null,
       nextUid: string | null,
     ) => Promise<void> | void,
+    private readonly getProfile?: () => Promise<UserProfile | null>,
   ) {
     this.trustedLoginView = new TrustedLoginViewController(
       window,
@@ -198,12 +201,13 @@ export class QrLoginController {
       const cookie = await this.waitForCookieHeader();
       await this.credentialStore.saveCredentials(cookie, result.refreshToken);
       const status = await this.credentialStore.getStatus();
+      const profile = await this.readProfile();
       this.emit({
         status: 'success',
         message: '登录状态已续期',
-        auth: status,
+        auth: {...status, profile},
       });
-      return status;
+      return {...status, profile};
     } finally {
       this.closeWebLogin();
     }
@@ -322,16 +326,68 @@ export class QrLoginController {
     if (!nextUid) {
       throw new Error('登录 Cookie 缺少有效账号 UID');
     }
-    await this.onAccountChanged?.(previousUid, nextUid);
-    await this.credentialStore.saveCredentials(cookie, nextRefreshToken);
-    this.pendingRefreshToken = null;
-    this.emit({
-      status: 'success',
-      message: '登录成功，Cookie 已安全保存',
-      auth: await this.credentialStore.getStatus(),
-    });
-    this.stopSession();
-    this.closeWebLogin();
+
+    let credentialsSaved = false;
+    try {
+      await this.credentialStore.saveCredentials(cookie, nextRefreshToken);
+      credentialsSaved = true;
+      const profile = await this.validateProfile(nextUid);
+      await this.onAccountChanged?.(previousUid, nextUid);
+      this.pendingRefreshToken = null;
+      const status = await this.credentialStore.getStatus();
+      this.emit({
+        status: 'success',
+        message: '登录成功，账号资料已确认',
+        auth: {...status, profile},
+      });
+      this.stopSession();
+      this.closeWebLogin();
+    } catch (error) {
+      if (credentialsSaved) {
+        await this.restoreCredentials(previous.cookie, previous.refreshToken);
+      }
+      throw error;
+    }
+  }
+
+  /** 登录成功后验证当前 Cookie，并返回与 Cookie UID 匹配的公开资料。 */
+  private async validateProfile(expectedUid: string): Promise<UserProfile | null> {
+    if (!this.getProfile) {
+      return null;
+    }
+    try {
+      const profile = await this.getProfile();
+      if (!profile || profile.uid !== expectedUid) {
+        throw new Error('B 站没有确认当前会话，请重新扫码或检查账号验证');
+      }
+      return profile;
+    } catch {
+      throw new Error('B 站没有确认当前会话，请重新扫码或检查账号验证');
+    }
+  }
+
+  /** 读取续期后的账号资料；资料接口暂时不可用时不阻断已保存的会话。 */
+  private async readProfile(): Promise<UserProfile | null> {
+    if (!this.getProfile) {
+      return null;
+    }
+    try {
+      return await this.getProfile();
+    } catch {
+      return null;
+    }
+  }
+
+  /** 登录资料验证失败时恢复此前的凭证，避免留下未经确认的新账号。 */
+  private async restoreCredentials(
+    cookie: string,
+    refreshToken: string | null,
+  ): Promise<void> {
+    if (hasRequiredLoginCookies(cookie)) {
+      await this.credentialStore.saveCredentials(cookie, refreshToken);
+      return;
+    }
+    await this.credentialStore.clearCredentials();
   }
 
   /** 等待受控 Session 写入新 Cookie，避免读取到续期前的旧值。 */

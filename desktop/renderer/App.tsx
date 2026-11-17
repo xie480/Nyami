@@ -169,6 +169,7 @@ export function App(): JSX.Element {
   const audioAdapterRef = useRef<ElectronAudioPlayerAdapter | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const noticeSequenceRef = useRef(0);
+  const authRefreshSequenceRef = useRef(0);
 
   /** 追加全局任务通知，并保留最近的通知历史。 */
   const pushNotice = useCallback((tone: NoticeTone, message: string): void => {
@@ -181,16 +182,32 @@ export function App(): JSX.Element {
 
   /** 刷新脱敏登录状态和公开账号资料。 */
   const refreshAuth = useCallback(async (): Promise<void> => {
+    const sequence = ++authRefreshSequenceRef.current;
     const status = await window.nyamiDesktop.auth.getStatus();
+    if (sequence !== authRefreshSequenceRef.current) {
+      return;
+    }
     setAuth(status);
     if (!status.loggedIn) {
       setProfile(null);
       return;
     }
+    if (status.profile) {
+      setProfile(status.profile);
+    }
     try {
-      setProfile(await window.nyamiDesktop.auth.getProfile());
+      const nextProfile = await window.nyamiDesktop.auth.getProfile();
+      if (sequence !== authRefreshSequenceRef.current) {
+        return;
+      }
+      setProfile(nextProfile);
     } catch (error) {
-      setProfile(null);
+      if (sequence !== authRefreshSequenceRef.current) {
+        return;
+      }
+      setProfile(current =>
+        current?.uid === status.uid ? current : status.profile ?? null,
+      );
       pushNotice('error', getErrorMessage(error, '账号资料加载失败'));
     }
   }, [pushNotice]);
@@ -255,6 +272,7 @@ export function App(): JSX.Element {
   const logout = useCallback(async (): Promise<void> => {
     try {
       await window.nyamiDesktop.auth.logout();
+      authRefreshSequenceRef.current += 1;
       setAuth({loggedIn: false, uid: null});
       setProfile(null);
       setLoginOpen(false);
@@ -612,6 +630,9 @@ export function App(): JSX.Element {
         }
         if (event.auth) {
           setAuth(event.auth);
+          if (event.auth.profile !== undefined) {
+            setProfile(event.auth.profile ?? null);
+          }
         }
         if (event.status === 'success') {
           setQrBusy(false);
@@ -740,6 +761,8 @@ export function App(): JSX.Element {
     void window.nyamiDesktop.window.close();
   }, []);
 
+  const activeProfile = getActiveProfile(auth, profile);
+
   return (
     <div
       className={`desktop-app ${themeClassName} ${
@@ -754,7 +777,7 @@ export function App(): JSX.Element {
       <div className="desktop-frame">
         <Sidebar
           auth={auth}
-          profile={profile}
+          profile={activeProfile}
           route={route}
           onLogin={() => setLoginOpen(true)}
           onRouteChange={setRoute}
@@ -833,8 +856,8 @@ export function App(): JSX.Element {
                 className="account-trigger"
                 onClick={() => setLoginOpen(true)}
                 type="button">
-                <Avatar profile={profile} />
-                <span>{profile?.name ?? '登录 Bilibili'}</span>
+                <Avatar profile={activeProfile} />
+                <span>{getAccountLabel(auth, activeProfile)}</span>
                 <Icon name="chevron-down" size={14} />
               </button>
             </div>
@@ -887,7 +910,7 @@ export function App(): JSX.Element {
                 onLogin={() => setLoginOpen(true)}
                 onNotice={pushNotice}
                 onPlayVideo={playVideo}
-                profile={profile}
+                profile={activeProfile}
               />
             ) : null}
             {route === 'settings' ? (
@@ -905,7 +928,7 @@ export function App(): JSX.Element {
                 onCheckForUpdates={() => void checkForUpdates()}
                 onUpdate={updateSettings}
                 onOpenUpdateDownload={() => void openUpdateDownload()}
-                profile={profile}
+                profile={activeProfile}
                 settings={settings}
                 updateInfo={updateInfo}
               />
@@ -951,7 +974,7 @@ export function App(): JSX.Element {
           onRenew={() => void renewLogin()}
           onStartQr={() => void startQrLogin()}
           onWebLogin={() => void openWebLogin()}
-          profile={profile}
+          profile={activeProfile}
           status={qrStatus}
         />
       ) : null}
@@ -1065,12 +1088,12 @@ function Sidebar({
         </button>
       </nav>
       <div className="sidebar-bottom">
-        {profile ? (
+        {auth.loggedIn ? (
           <button className="sidebar-account" onClick={onLogin} type="button">
             <Avatar profile={profile} />
             <span className="sidebar-account-copy">
-              <strong>{profile.name}</strong>
-              <small>UID {profile.uid}</small>
+              <strong>{profile?.name ?? 'Bilibili 账号'}</strong>
+              <small>{profile?.uid ?? auth.uid ? `UID ${profile?.uid ?? auth.uid}` : '已登录'}</small>
             </span>
             <Icon name="chevron-right" size={15} />
           </button>
@@ -1956,12 +1979,12 @@ function SettingsPage({
             <h3>账号与登录</h3>
           </div>
         </div>
-        {auth.loggedIn && profile ? (
+        {auth.loggedIn ? (
           <div className="account-settings-summary">
             <Avatar profile={profile} size="large" />
             <div>
-              <strong>{profile.name}</strong>
-              <span>UID {profile.uid}</span>
+              <strong>{profile?.name ?? 'Bilibili 账号'}</strong>
+              <span>{profile?.uid ?? auth.uid ? `UID ${profile?.uid ?? auth.uid}` : '已登录'}</span>
               <small>{auth.refreshAvailable ? '支持自动续期' : '建议重新扫码获取续期凭证'}</small>
             </div>
             <div className="account-settings-actions">
@@ -2039,11 +2062,11 @@ function LoginDialog({
             <Icon name="x" size={18} />
           </button>
         </div>
-        {auth.loggedIn && profile ? (
+        {auth.loggedIn ? (
           <div className="logged-in-dialog">
             <Avatar profile={profile} size="large" />
-            <strong>{profile.name}</strong>
-            <span>UID {profile.uid}</span>
+            <strong>{profile?.name ?? 'Bilibili 账号'}</strong>
+            <span>{profile?.uid ?? auth.uid ? `UID ${profile?.uid ?? auth.uid}` : '已登录'}</span>
             <p>登录凭证保存在 Windows 安全存储中，Renderer 不会读取完整 Cookie。</p>
             <div className="dialog-actions">
               <button className="secondary-button" onClick={onRenew} type="button">
@@ -2631,6 +2654,34 @@ function Avatar({
     return <img alt="" className={`avatar avatar-${size}`} src={profile.avatar} />;
   }
   return <span className={`avatar avatar-${size} avatar-placeholder`}><Icon name="user" size={size === 'large' ? 22 : 16} /></span>;
+}
+
+/** 只保留属于当前账号的资料，避免登录切换期间显示旧用户。 */
+function getActiveProfile(
+  auth: AuthStatus,
+  profile: UserProfile | null,
+): UserProfile | null {
+  if (!auth.loggedIn || !profile) {
+    return null;
+  }
+  if (auth.uid && profile.uid !== auth.uid) {
+    return null;
+  }
+  return profile;
+}
+
+/** 生成右上角账号入口的展示名称，资料请求失败时仍保留已登录状态。 */
+function getAccountLabel(
+  auth: AuthStatus,
+  profile: UserProfile | null,
+): string {
+  if (!auth.loggedIn) {
+    return '登录 Bilibili';
+  }
+  if (profile?.name) {
+    return profile.name;
+  }
+  return auth.uid ? `UID ${auth.uid}` : 'Bilibili 账号';
 }
 
 /** 将秒数格式化为播放器和卡片可读的时长。 */

@@ -121,6 +121,7 @@ export function createMainWindow(
       }
       libraryRuntime.handleAccountChanged(previousUid, nextUid);
     },
+    () => contentRuntime.getProfile(),
   );
   const audioProbe = new AudioProbe();
   const audioCache = new AudioCacheStore(
