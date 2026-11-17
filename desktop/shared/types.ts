@@ -49,6 +49,7 @@ export const IPC_CHANNELS = {
     getRecommendations: 'content:get-recommendations',
     getFavoriteFolders: 'content:get-favorite-folders',
     getFavoriteVideos: 'content:get-favorite-videos',
+    searchFavorites: 'content:search-favorites',
     cancel: 'content:cancel',
   },
   cache: {
@@ -519,6 +520,12 @@ export type FavoriteVideoContentRequest = ContentRequestBase & {
   page: number;
 };
 
+export type FavoriteSearchContentRequest = ContentRequestBase & {
+  uid: string;
+  keyword: string;
+  page: number;
+};
+
 export type RecommendationContentRequest = ContentRequestBase & {
   uid: string;
   page?: number;
@@ -662,6 +669,9 @@ export type NyamiDesktopApi = {
     ) => Promise<FavoriteFolderSummary[]>;
     getFavoriteVideos: (
       request: FavoriteVideoContentRequest,
+    ) => Promise<DesktopPage<DesktopVideo>>;
+    searchFavorites: (
+      request: FavoriteSearchContentRequest,
     ) => Promise<DesktopPage<DesktopVideo>>;
     cancel: (request: ContentRequestBase) => Promise<void>;
   };

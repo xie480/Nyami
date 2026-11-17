@@ -94,6 +94,11 @@ type RecommendationCollectionRecord = CollectionRecommendation & {
   expiresAt?: number;
 };
 
+type FavoriteSearchResult = {
+  items: FavoriteVideo[];
+  total: number;
+};
+
 const SYNC_STATUS_VALUES = new Set<FavoritePlaylistMeta['playlistSyncStatus']>([
   'idle',
   'syncing',
@@ -408,6 +413,46 @@ export class DesktopLibraryRepository implements FavoriteRepository {
       }
     }
     return Array.from(merged.values());
+  }
+
+  /** 在本地收藏关系中搜索标题、UP 主或收藏夹名称。 */
+  searchFavorites(
+    uid: string,
+    keyword: string,
+    page = 1,
+    pageSize = 20,
+  ): FavoriteSearchResult {
+    const normalizedUid = normalizeUid(uid);
+    const normalizedKeyword = keyword.trim();
+    const normalizedPage = Math.max(1, Math.floor(page));
+    const normalizedPageSize = Math.max(1, Math.min(100, Math.floor(pageSize)));
+    if (!normalizedUid || !normalizedKeyword) {
+      return {items: [], total: 0};
+    }
+    const pattern = `%${escapeLikePattern(normalizedKeyword)}%`;
+    const params = [normalizedUid, pattern, pattern, pattern];
+    const rows = this.database.all<VideoRow & {kind: string}>(
+      `SELECT video_meta.*, playlist_meta.kind
+       FROM video_meta
+       INNER JOIN playlist_meta
+         ON playlist_meta.uid = video_meta.uid
+        AND playlist_meta.playlist_id = video_meta.playlist_id
+       WHERE video_meta.uid = ?
+         AND video_meta.is_deleted = 0
+         AND (
+           video_meta.title LIKE ? ESCAPE '\\'
+           OR video_meta.author LIKE ? ESCAPE '\\'
+           OR playlist_meta.title LIKE ? ESCAPE '\\'
+         )
+       ORDER BY video_meta.fav_time DESC, video_meta.updated_at DESC`,
+      params,
+    );
+    const merged = mergeFavoriteRows(rows);
+    const offset = (normalizedPage - 1) * normalizedPageSize;
+    return {
+      items: merged.slice(offset, offset + normalizedPageSize),
+      total: merged.length,
+    };
   }
 
   /** 读取同步后的来源目录，供合集推荐和同步诊断使用。 */
@@ -802,6 +847,37 @@ function parseJsonArray<T>(value: string | null | undefined): T[] {
   }
 }
 
+/** 转义 SQLite LIKE 通配符，避免本地搜索把用户输入当成模式。 */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, match => `\\${match}`);
+}
+
+/** 将同一 BVID 在多个收藏夹中的关系合并为一条本地搜索结果。 */
+function mergeFavoriteRows(
+  rows: Array<VideoRow & {kind: string}>,
+): FavoriteVideo[] {
+  const merged = new Map<string, FavoriteVideo>();
+  for (const row of rows) {
+    const current = rowToFavoriteVideo(row);
+    const previous = merged.get(current.bvid);
+    if (!previous) {
+      merged.set(current.bvid, current);
+      continue;
+    }
+    previous.folderIds = Array.from(
+      new Set([...(previous.folderIds ?? []), ...(current.folderIds ?? [])]),
+    );
+    previous.sourceKeys = Array.from(
+      new Set([...(previous.sourceKeys ?? []), ...(current.sourceKeys ?? [])]),
+    );
+    previous.favTime = Math.max(previous.favTime, current.favTime);
+    if (!previous.parts?.length && current.parts?.length) {
+      previous.parts = current.parts;
+    }
+  }
+  return Array.from(merged.values());
+}
+
 /** 将数据库视频关系还原为共享 FavoriteVideo，并保留来源去重信息。 */
 function rowToFavoriteVideo(
   row: VideoRow & {kind: string},
@@ -835,6 +911,7 @@ function rowToFavoriteVideo(
 }
 
 export type {
+  FavoriteSearchResult,
   PlaylistCatalogRecord,
   RecommendationCollectionRecord,
 };

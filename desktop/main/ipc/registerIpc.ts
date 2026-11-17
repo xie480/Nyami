@@ -14,6 +14,7 @@ import {
   type DiscoverContentRequest,
   type DesktopWindowState,
   type FavoriteFolderContentRequest,
+  type FavoriteSearchContentRequest,
   type FavoriteVideoContentRequest,
   type PlaybackAudioEvent,
   type PlaybackQueueContext,
@@ -258,6 +259,10 @@ export function registerIpcHandlers(
     assertFavoriteVideoContentRequest(request);
     return dependencies.contentRuntime.getFavoriteVideos(request);
   });
+  register(IPC_CHANNELS.content.searchFavorites, (_event, request) => {
+    assertFavoriteSearchContentRequest(request);
+    return dependencies.libraryRuntime.searchFavorites(request);
+  });
   register(IPC_CHANNELS.content.cancel, (_event, request) => {
     assertContentRequestBase(request);
     dependencies.contentRuntime.cancel(request);
@@ -463,6 +468,27 @@ function assertFavoriteVideoContentRequest(
   }
   if (!isPositiveInteger(request.page) || request.page > 1000) {
     throw new Error('收藏视频页码无效');
+  }
+}
+
+/** 校验本地收藏搜索请求，限制关键词和分页范围。 */
+function assertFavoriteSearchContentRequest(
+  value: unknown,
+): asserts value is FavoriteSearchContentRequest {
+  assertContentRequestBase(value);
+  const request = value as ContentRequestBase & {
+    uid?: unknown;
+    keyword?: unknown;
+    page?: unknown;
+  };
+  if (!isBoundedString(request.uid, 64) || !request.uid.trim()) {
+    throw new Error('收藏账号 UID 无效');
+  }
+  if (!isBoundedString(request.keyword, 128) || !request.keyword.trim()) {
+    throw new Error('收藏搜索关键词无效');
+  }
+  if (!isPositiveInteger(request.page) || request.page > 1000) {
+    throw new Error('收藏搜索页码无效');
   }
 }
 

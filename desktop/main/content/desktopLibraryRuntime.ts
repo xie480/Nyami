@@ -25,6 +25,7 @@ import {
 } from '../storage/desktopLibraryRepository';
 import type {
   DesktopVideo,
+  FavoriteSearchContentRequest,
   RecommendationCollection,
   RecommendationContentRequest,
   RecommendationProfile,
@@ -64,7 +65,7 @@ export class DesktopLibraryRuntime {
     private readonly logger: AppLogger,
   ) {}
 
-  /** 同步自有收藏夹、外部收藏夹、订阅合集和视频标签。 */
+  /** 同步当前账号的自有收藏夹，建立轻量本地收藏索引。 */
   async synchronize(
     uid: string,
     options: LibrarySyncOptions = {},
@@ -74,17 +75,12 @@ export class DesktopLibraryRuntime {
     options.onPhase?.('catalog', 0);
     const targets = await this.buildSyncTargets(uid, options.signal);
     options.onPhase?.('favorites', targets.length);
-    const task = new FavoriteSyncTask(
-      this.repository,
-      config.favoriteSync.playlistConcurrency,
-    );
+    const task = new FavoriteSyncTask(this.repository);
     const progress = await task.run(targets, {
       force: options.force,
-      concurrency: config.favoriteSync.playlistConcurrency,
       signal: options.signal,
       onProgress: options.onFavoriteProgress,
     });
-    await this.backfillTags(uid, options);
     return progress;
   }
 
@@ -108,6 +104,33 @@ export class DesktopLibraryRuntime {
     await this.assertCurrentAccount(uid);
     this.repository.switchAccount(uid);
     return this.repository.getGlobalIndex(uid);
+  }
+
+  /** 在本地收藏索引中按标题、UP 主或收藏夹名称搜索。 */
+  async searchFavorites(
+    request: FavoriteSearchContentRequest,
+  ): Promise<{
+    items: DesktopVideo[];
+    page: number;
+    hasMore: boolean;
+    total: number;
+  }> {
+    return this.withRequest(request.requestId, async () => {
+      await this.assertCurrentAccount(request.uid);
+      this.repository.switchAccount(request.uid);
+      const result = this.repository.searchFavorites(
+        request.uid,
+        request.keyword,
+        request.page,
+        FAVORITE_PAGE_SIZE,
+      );
+      return {
+        items: result.items.map(video => toFavoriteDesktopVideo(video)),
+        page: request.page,
+        hasMore: request.page * FAVORITE_PAGE_SIZE < result.total,
+        total: result.total,
+      };
+    });
   }
 
   /** 生成首页歌曲与合集推荐，并写入七日推荐历史。 */
@@ -204,21 +227,6 @@ export class DesktopLibraryRuntime {
         },
       }));
 
-    const imported = await this.loadImportedPlaylists(uid, signal);
-    for (const source of imported) {
-      targets.push({
-        playlistId: source.sourceKey,
-        title: source.title,
-        remoteVideoCount: source.mediaCount,
-        kind: source.kind,
-        ownerMid: source.ownerMid,
-        ownerName: source.ownerName,
-        cover: source.cover,
-        description: source.description,
-        fetchPage: (page, pageSignal) =>
-          this.fetchImportedPage(source, page, pageSignal),
-      });
-    }
     return targets;
   }
 
@@ -641,6 +649,24 @@ function toDesktopVideo(video: TagRecommendation): DesktopVideo {
     author: video.author,
     tags: video.tags,
     source: 'recommendation',
+  };
+}
+
+/** 将本地收藏视频转换为安全的桌面内容卡片。 */
+function toFavoriteDesktopVideo(video: FavoriteVideo): DesktopVideo {
+  return {
+    aid: video.aid,
+    bvid: video.bvid,
+    title: video.title,
+    cover: normalizeBiliAssetUrl(video.cover),
+    duration: video.duration,
+    pubtime: video.pubtime,
+    authorId: video.upper.mid,
+    author: video.upper.name,
+    tags: [],
+    page: video.page,
+    favTime: video.favTime,
+    source: 'favorite',
   };
 }
 

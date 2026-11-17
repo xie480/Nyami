@@ -30,6 +30,7 @@ import type {
   DiscoverContentRequest,
   FavoriteFolderContentRequest,
   FavoriteFolderSummary,
+  FavoriteSearchContentRequest,
   FavoriteVideoContentRequest,
   HomeSnapshot,
   PlaybackAudioEvent,
@@ -1572,9 +1573,14 @@ function FavoritesPage({
   const [videoState, setVideoState] = useState<AsyncState>('idle');
   const [videos, setVideos] = useState<DesktopPage<DesktopVideo> | null>(null);
   const [videoPage, setVideoPage] = useState(1);
+  const [favoriteSearchQuery, setFavoriteSearchQuery] = useState('');
+  const [favoriteSearchState, setFavoriteSearchState] = useState<AsyncState>('idle');
+  const [favoriteSearchResult, setFavoriteSearchResult] = useState<DesktopPage<DesktopVideo> | null>(null);
+  const [favoriteSearchPage, setFavoriteSearchPage] = useState(1);
   const [error, setError] = useState('');
   const folderRequestRef = useRef(makeRequestId('favorite-folders'));
   const videoRequestRef = useRef(makeRequestId('favorite-videos'));
+  const favoriteSearchRequestRef = useRef(makeRequestId('favorite-search'));
 
   /** 加载当前账号收藏夹目录。 */
   const loadFolders = useCallback(async (): Promise<void> => {
@@ -1642,11 +1648,66 @@ function FavoritesPage({
     [auth.loggedIn, auth.uid, onNotice],
   );
 
+  /** 搜索已经同步到本地的收藏视频。 */
+  const loadFavoriteSearch = useCallback(
+    async (targetPage: number): Promise<void> => {
+      if (!auth.loggedIn || !auth.uid || !favoriteSearchQuery.trim()) {
+        return;
+      }
+      const requestId = makeRequestId('favorite-search');
+      favoriteSearchRequestRef.current = requestId;
+      setFavoriteSearchState('loading');
+      setError('');
+      const request: FavoriteSearchContentRequest = {
+        requestId,
+        uid: auth.uid,
+        keyword: favoriteSearchQuery.trim(),
+        page: targetPage,
+      };
+      try {
+        const next = await window.nyamiDesktop.content.searchFavorites(request);
+        setFavoriteSearchResult(next);
+        setFavoriteSearchPage(targetPage);
+        setFavoriteSearchState('success');
+      } catch (requestError) {
+        if (isAbortError(requestError)) {
+          return;
+        }
+        const message = getErrorMessage(requestError, '本地收藏搜索失败');
+        setError(message);
+        setFavoriteSearchState('error');
+        onNotice('error', message);
+      }
+    },
+    [auth.loggedIn, auth.uid, favoriteSearchQuery, onNotice],
+  );
+
+  /** 提交本地收藏搜索，并切换到搜索结果视图。 */
+  const submitFavoriteSearch = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (!favoriteSearchQuery.trim()) {
+      setFavoriteSearchResult(null);
+      setFavoriteSearchState('idle');
+      return;
+    }
+    setSelectedFolderId(null);
+    void loadFavoriteSearch(1);
+  };
+
+  /** 清除本地收藏搜索并恢复收藏夹浏览。 */
+  const clearFavoriteSearch = (): void => {
+    setFavoriteSearchQuery('');
+    setFavoriteSearchResult(null);
+    setFavoriteSearchState('idle');
+    setFavoriteSearchPage(1);
+  };
+
   useEffect(() => {
     void loadFolders();
     return () => {
       void window.nyamiDesktop.content.cancel({requestId: folderRequestRef.current});
       void window.nyamiDesktop.content.cancel({requestId: videoRequestRef.current});
+      void window.nyamiDesktop.content.cancel({requestId: favoriteSearchRequestRef.current});
     };
   }, [loadFolders]);
 
@@ -1687,9 +1748,71 @@ function FavoritesPage({
       <PageIntro
         eyebrow="LIBRARY"
         title={profile?.name ? `${profile.name} 的收藏夹` : '我的收藏夹'}
-        description="目录和视频列表采用独立请求，切换收藏夹时不会阻塞整个窗口。"
+        description="目录和视频列表采用独立请求，切换收藏夹时不会阻塞整个窗口；搜索使用已同步的本地索引。"
       />
-      <div className="library-layout">
+      <form className="search-panel library-search-panel" onSubmit={submitFavoriteSearch}>
+        <Icon name="search" size={19} />
+        <input
+          aria-label="搜索本地收藏"
+          onChange={event => setFavoriteSearchQuery(event.target.value)}
+          placeholder="搜索已同步收藏：标题、UP 主或收藏夹"
+          value={favoriteSearchQuery}
+        />
+        {favoriteSearchQuery ? (
+          <button
+            className="subtle-button"
+            onClick={event => {
+              event.preventDefault();
+              clearFavoriteSearch();
+            }}
+            type="button">
+            清除
+          </button>
+        ) : null}
+        <button className="primary-button compact" type="submit">
+          搜索收藏
+        </button>
+      </form>
+      {favoriteSearchQuery.trim() ? (
+        <section className="library-content favorite-search-results">
+          <div className="panel-heading">
+            <div>
+              <p className="section-kicker">LOCAL INDEX</p>
+              <h3>收藏搜索结果</h3>
+            </div>
+            {favoriteSearchResult?.total !== null && favoriteSearchResult?.total !== undefined ? (
+              <span className="muted-label">{favoriteSearchResult.total.toLocaleString()} 个视频</span>
+            ) : null}
+          </div>
+          {favoriteSearchState === 'idle' ? (
+            <EmptyState icon="search" message="提交关键词搜索已同步收藏" />
+          ) : null}
+          {favoriteSearchState === 'loading' ? <LoadingState label="正在搜索本地收藏" /> : null}
+          {favoriteSearchState === 'error' ? (
+            <ErrorState message={error} onRetry={() => void loadFavoriteSearch(favoriteSearchPage)} />
+          ) : null}
+          {favoriteSearchState === 'success' && favoriteSearchResult?.items.length === 0 ? (
+            <EmptyState icon="search" message={`没有找到“${favoriteSearchQuery.trim()}”的收藏`} />
+          ) : null}
+          {favoriteSearchState === 'success' && favoriteSearchResult?.items.length ? (
+            <>
+              <VideoGrid
+                items={favoriteSearchResult.items}
+                onAddVideo={onAddVideo}
+                onPlayVideo={onPlayVideo}
+              />
+              <Pagination
+                hasMore={favoriteSearchResult.hasMore}
+                loading={false}
+                onNext={() => void loadFavoriteSearch(favoriteSearchPage + 1)}
+                onPrevious={() => void loadFavoriteSearch(favoriteSearchPage - 1)}
+                page={favoriteSearchPage}
+              />
+            </>
+          ) : null}
+        </section>
+      ) : null}
+      {!favoriteSearchQuery.trim() ? <div className="library-layout">
         <aside className="folder-panel">
           <div className="panel-heading">
             <div>
@@ -1766,7 +1889,7 @@ function FavoritesPage({
             </>
           ) : null}
         </section>
-      </div>
+      </div> : null}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import type {
   DesktopWindowState,
   DiscoverContentRequest,
   FavoriteFolderContentRequest,
+  FavoriteSearchContentRequest,
   FavoriteVideoContentRequest,
   LogExportResult,
   NyamiDesktopApi,
@@ -147,6 +148,8 @@ const api: NyamiDesktopApi = {
       ipcRenderer.invoke(CHANNELS.content.getFavoriteFolders, request),
     getFavoriteVideos: (request: FavoriteVideoContentRequest) =>
       ipcRenderer.invoke(CHANNELS.content.getFavoriteVideos, request),
+    searchFavorites: (request: FavoriteSearchContentRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.searchFavorites, request),
     cancel: (request: ContentRequestBase) =>
       ipcRenderer.invoke(CHANNELS.content.cancel, request),
   },
