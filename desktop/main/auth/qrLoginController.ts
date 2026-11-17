@@ -60,6 +60,11 @@ export class QrLoginController {
   async start(): Promise<QrSessionStartResult> {
     this.stopSession();
     const qr = await this.client.generate();
+    const qrImageDataUrl = await QRCode.toDataURL(qr.url, {
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: 480,
+    });
     const expiresAt = Date.now() + BILIBILI_QR_LIFETIME_MS;
     this.session = {
       key: qr.qrcode_key,
@@ -74,11 +79,7 @@ export class QrLoginController {
     });
     this.schedulePoll();
     return {
-      qrImageDataUrl: await QRCode.toDataURL(qr.url, {
-        errorCorrectionLevel: 'M',
-        margin: 2,
-        width: 480,
-      }),
+      qrImageDataUrl,
       expiresAt,
     };
   }
