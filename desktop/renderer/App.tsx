@@ -2079,10 +2079,6 @@ function LoginDialog({
                 <Icon name="refresh" size={16} />
                 {busy ? '生成中…' : '重新生成二维码'}
               </button>
-              <button className="secondary-button" onClick={onWebLogin} type="button">
-                <Icon name="log-in" size={16} />
-                使用网页登录
-              </button>
             </div>
           </>
         )}
@@ -2396,29 +2392,91 @@ function PlayerPlaceholder({
 
   return (
     <footer className="player-placeholder">
-      <div className="player-track">
-        <PlayerArtworkImage src={playback.artwork} />
-        <div>
-          <strong>{playback.trackTitle ?? '尚未选择歌曲'}</strong>
-          <span>
-            {playback.trackArtist ?? '选择内容卡片开始播放'}
-            {playback.cached ? ' · 已缓存' : ''}
-          </span>
+      <div className="player-main-row">
+        <div className="player-track">
+          <PlayerArtworkImage src={playback.artwork} />
+          <div className="player-track-copy">
+            <strong title={playback.trackTitle ?? '尚未选择歌曲'}>
+              {playback.trackTitle ?? '尚未选择歌曲'}
+            </strong>
+            <div className="player-track-meta">
+              <span>{playback.trackArtist ?? '选择内容卡片开始播放'}</span>
+              {playback.cached ? (
+                <span className="player-state-badge cached">已缓存</span>
+              ) : null}
+              {playback.state === 'error' ? (
+                <span className="player-state-badge error">播放失败</span>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        <div className="player-controls">
+          <button aria-label="上一首" className="player-step-button" onClick={onPrevious} title="上一首" type="button">
+            <Icon name="arrow-left" size={17} />
+          </button>
+          <button aria-label={isPlaying ? '暂停' : '播放'} className="player-main-button" onClick={isPlaying ? onPause : onPlay} title={isPlaying ? '暂停' : '播放'} type="button">
+            <Icon name={isPlaying ? 'pause' : 'play'} size={18} />
+          </button>
+          <button aria-label="下一首" className="player-step-button" onClick={onNext} title="下一首" type="button">
+            <Icon name="arrow-right" size={17} />
+          </button>
+        </div>
+        <div className="player-actions">
+          <label className="player-volume-control">
+            <Icon name="volume" size={15} />
+            <span className="sr-only">音量</span>
+            <input
+              aria-label="音量"
+              max="1"
+              min="0"
+              onChange={event => onVolume(Number(event.target.value))}
+              step="0.01"
+              type="range"
+              value={playback.volume}
+            />
+          </label>
+          <button
+            aria-expanded={queueOpen}
+            className="player-tool-button queue-toggle"
+            onClick={() => setQueueOpen(current => !current)}
+            title="播放队列"
+            type="button">
+            <Icon name="list" size={15} />
+            <span>队列</span>
+            <strong>{playback.queueLength}</strong>
+          </button>
+          <button
+            aria-label="切换播放模式"
+            aria-pressed={playback.mode === 'shuffle'}
+            className="player-tool-button queue-mode-button"
+            onClick={() => onModeChange(playback.mode === 'shuffle' ? 'sequential' : 'shuffle')}
+            title={playback.mode === 'shuffle' ? '随机播放' : '顺序播放'}
+            type="button">
+            <Icon name="shuffle" size={15} />
+            <span>{playback.mode === 'shuffle' ? '随机' : '顺序'}</span>
+          </button>
+          <label className="sleep-timer-control">
+            <Icon name="moon" size={15} />
+            <span className="sr-only">睡眠定时器</span>
+            <select
+              aria-label="睡眠定时器"
+              className="sleep-timer-select"
+              onChange={event => {
+                const value = event.target.value;
+                onSleepTimer(value === 'active' ? null : value ? Number(value) : null);
+              }}
+              value={sleepValue}>
+              <option value="">睡眠</option>
+              <option value="900">15 分钟</option>
+              <option value="1800">30 分钟</option>
+              <option value="3600">60 分钟</option>
+              {sleepValue === 'active' ? <option value="active">剩余 {playback.sleepTimerSeconds} 秒</option> : null}
+            </select>
+          </label>
         </div>
       </div>
-      <div className="player-controls">
-        <button aria-label="上一首" className="icon-button" onClick={onPrevious} title="上一首" type="button">
-          <Icon name="arrow-left" size={17} />
-        </button>
-        <button aria-label={isPlaying ? '暂停' : '播放'} className="player-main-button" onClick={isPlaying ? onPause : onPlay} title={isPlaying ? '暂停' : '播放'} type="button">
-          <Icon name={isPlaying ? 'pause' : 'play'} size={18} />
-        </button>
-        <button aria-label="下一首" className="icon-button" onClick={onNext} title="下一首" type="button">
-          <Icon name="arrow-right" size={17} />
-        </button>
-      </div>
-      <SpectrumVisualizer values={spectrum} />
-      <div className="player-status">
+      <div className="player-progress-row">
+        <span className="player-time">{formatDuration(playback.position)}</span>
         <input
           aria-label="播放进度"
           className="player-progress-input"
@@ -2430,48 +2488,8 @@ function PlayerPlaceholder({
           type="range"
           value={Math.min(playback.position, duration)}
         />
-        <span>{formatDuration(playback.position)} / {formatDuration(playback.duration)}</span>
-        <label className="player-volume-control">
-          <span className="sr-only">音量</span>
-          <input
-            aria-label="音量"
-            max="1"
-            min="0"
-            onChange={event => onVolume(Number(event.target.value))}
-            step="0.01"
-            type="range"
-            value={playback.volume}
-          />
-        </label>
-        <button
-          aria-expanded={queueOpen}
-          className="queue-toggle"
-          onClick={() => setQueueOpen(current => !current)}
-          type="button">
-          队列 {playback.queueLength}
-        </button>
-        <button
-          aria-label="切换播放模式"
-          className="queue-mode-button"
-          onClick={() => onModeChange(playback.mode === 'shuffle' ? 'sequential' : 'shuffle')}
-          title={playback.mode === 'shuffle' ? '随机播放' : '顺序播放'}
-          type="button">
-          {playback.mode === 'shuffle' ? '随机' : '顺序'}
-        </button>
-        <select
-          aria-label="睡眠定时器"
-          className="sleep-timer-select"
-          onChange={event => {
-            const value = event.target.value;
-            onSleepTimer(value === 'active' ? null : value ? Number(value) : null);
-          }}
-          value={sleepValue}>
-          <option value="">睡眠</option>
-          <option value="900">15 分钟</option>
-          <option value="1800">30 分钟</option>
-          <option value="3600">60 分钟</option>
-          {sleepValue === 'active' ? <option value="active">剩余 {playback.sleepTimerSeconds} 秒</option> : null}
-        </select>
+        <span className="player-time">{formatDuration(playback.duration)}</span>
+        <SpectrumVisualizer values={spectrum} />
       </div>
       {playback.diagnostic ? (
         <div className="player-diagnostic" role="status">

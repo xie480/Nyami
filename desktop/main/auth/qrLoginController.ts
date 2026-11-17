@@ -2,6 +2,8 @@ import {BrowserWindow} from 'electron';
 import QRCode from 'qrcode';
 import {
   BILIBILI_AUTH_ENDPOINTS,
+  BILIBILI_LOGIN_COOKIE_NAMES,
+  BILIBILI_REFRESH_TOKEN_PATTERN,
   BILIBILI_QR_LIFETIME_MS,
   BILIBILI_QR_POLL_INTERVAL_MS,
 } from '../constants';
@@ -16,6 +18,10 @@ import {CookieRefreshService} from './cookieRefresh';
 import {CredentialStore} from './credentialStore';
 import {QrClient} from './qrClient';
 import {TrustedLoginViewController} from './trustedLoginView';
+import {
+  hasRequiredLoginCookies,
+  isTrustedBiliUrl,
+} from '../security/urlPolicy';
 
 type QrSession = {
   key: string;
@@ -36,6 +42,8 @@ export class QrLoginController {
   private readonly trustedLoginView: TrustedLoginViewController;
 
   private session: QrSession | null = null;
+
+  private pendingRefreshToken: string | null = null;
 
   /**
    * 创建二维码登录控制器并绑定当前桌面窗口。
@@ -96,6 +104,7 @@ export class QrLoginController {
       clearTimeout(this.session.timer);
     }
     this.session = null;
+    this.pendingRefreshToken = null;
   }
 
   /**
@@ -147,6 +156,7 @@ export class QrLoginController {
   /** 关闭当前受控网页登录页面。 */
   closeWebLogin(): void {
     this.trustedLoginView.dispose();
+    this.pendingRefreshToken = null;
     this.emitWebViewState({open: false, mode: null});
   }
 
@@ -231,14 +241,38 @@ export class QrLoginController {
     try {
       const result = await this.client.poll(current.key);
       const description = this.client.describeStatus(result.code);
-      this.emit({
-        status: description.status,
-        message: result.message || description.message,
-        expiresAt: current.expiresAt,
-      });
+      if (description.status !== 'success') {
+        this.emit({
+          status: description.status,
+          message: result.message || description.message,
+          expiresAt: current.expiresAt,
+        });
+      }
 
-      if (description.status === 'success' && result.url) {
+      if (description.status === 'success') {
         this.stopSession();
+        const refreshToken = normalizeRefreshToken(result.refresh_token);
+        const cookieHeader =
+          result.cookieHeader ||
+          (isTrustedBiliUrl(result.url)
+            ? extractLoginCookieHeaderFromUrl(result.url)
+            : '');
+        if (hasRequiredLoginCookies(cookieHeader)) {
+          await this.completeLogin(cookieHeader, refreshToken);
+          return;
+        }
+        if (!result.url) {
+          throw new Error('B 站未返回可用的登录凭证，请重新扫码');
+        }
+        if (cookieHeader) {
+          await this.trustedLoginView.seedCookies(cookieHeader);
+        }
+        this.pendingRefreshToken = refreshToken;
+        this.emit({
+          status: 'scanned',
+          message: '扫码成功，正在完成登录',
+          expiresAt: current.expiresAt,
+        });
         this.emitWebViewState({open: true, mode: 'login'});
         await this.trustedLoginView.open(result.url);
         return;
@@ -248,6 +282,7 @@ export class QrLoginController {
         return;
       }
     } catch (error) {
+      this.closeWebLogin();
       this.emit({
         status: 'error',
         message: error instanceof Error ? error.message : '二维码轮询失败',
@@ -278,6 +313,7 @@ export class QrLoginController {
     const previous = await this.credentialStore.getCredentials();
     const nextRefreshToken =
       refreshToken ??
+      this.pendingRefreshToken ??
       (extractUid(cookie) === extractUid(previous.cookie)
         ? previous.refreshToken
         : null);
@@ -288,6 +324,7 @@ export class QrLoginController {
     }
     await this.onAccountChanged?.(previousUid, nextUid);
     await this.credentialStore.saveCredentials(cookie, nextRefreshToken);
+    this.pendingRefreshToken = null;
     this.emit({
       status: 'success',
       message: '登录成功，Cookie 已安全保存',
@@ -315,6 +352,31 @@ export class QrLoginController {
     if (!this.window.isDestroyed()) {
       this.window.webContents.send(IPC_CHANNELS.auth.webViewState, event);
     }
+  }
+}
+
+/** 只接受 B 站二维码接口返回的受限 refresh token。 */
+function normalizeRefreshToken(value: string | undefined): string | null {
+  return value && BILIBILI_REFRESH_TOKEN_PATTERN.test(value) ? value : null;
+}
+
+/** 兼容旧版二维码接口，把成功 URL 查询参数中的登录 Cookie 转成请求头。 */
+function extractLoginCookieHeaderFromUrl(value: string): string {
+  if (!value) {
+    return '';
+  }
+
+  try {
+    const url = new URL(value);
+    return Array.from(BILIBILI_LOGIN_COOKIE_NAMES)
+      .map(name => {
+        const cookie = url.searchParams.get(name);
+        return cookie ? `${name}=${cookie}` : '';
+      })
+      .filter(Boolean)
+      .join('; ');
+  } catch {
+    return '';
   }
 }
 

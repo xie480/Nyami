@@ -8,6 +8,7 @@ import {
   BILIBILI_AUTH_ENDPOINTS,
   BILIBILI_LOGIN_COOKIE_NAMES,
   BILIBILI_REFERER,
+  DESKTOP_USER_AGENT,
 } from '../constants';
 import {
   hasRequiredLoginCookies,
@@ -68,6 +69,7 @@ export class TrustedLoginViewController {
       },
     });
     this.view = view;
+    view.webContents.setUserAgent(DESKTOP_USER_AGENT);
     this.window.contentView.addChildView(view);
     this.window.on('resize', this.resizeHandler);
     this.resize();
@@ -117,7 +119,11 @@ export class TrustedLoginViewController {
       }
       const name = part.slice(0, separator).trim();
       const value = part.slice(separator + 1).trim();
-      if (!name || !value) {
+      if (
+        !name ||
+        !value ||
+        !BILIBILI_LOGIN_COOKIE_NAMES.has(name)
+      ) {
         continue;
       }
       await this.loginSession.cookies.set({
@@ -145,7 +151,7 @@ export class TrustedLoginViewController {
     return cookies
       .filter(
         cookie =>
-          cookie.domain?.endsWith('bilibili.com') &&
+          isBiliCookieDomain(cookie.domain) &&
           BILIBILI_LOGIN_COOKIE_NAMES.has(cookie.name),
       )
       .map(cookie => `${cookie.name}=${cookie.value}`)
@@ -159,7 +165,7 @@ export class TrustedLoginViewController {
     const cookies = await this.loginSession.cookies.get({});
     await Promise.all(
       cookies
-        .filter(cookie => cookie.domain?.endsWith('bilibili.com'))
+        .filter(cookie => isBiliCookieDomain(cookie.domain))
         .map(cookie =>
           this.loginSession.cookies.remove(
             `https://${cookie.domain?.replace(/^\./, '')}${cookie.path}`,
@@ -233,4 +239,15 @@ export class TrustedLoginViewController {
       this.view = null;
     }
   }
+}
+
+/** 判断 Cookie 是否来自 B 站主域或登录跨域使用的游戏子域。 */
+function isBiliCookieDomain(domain: string | undefined): boolean {
+  const normalized = domain?.toLowerCase().replace(/^\./, '') ?? '';
+  return (
+    normalized === 'bilibili.com' ||
+    normalized.endsWith('.bilibili.com') ||
+    normalized === 'biligame.com' ||
+    normalized.endsWith('.biligame.com')
+  );
 }

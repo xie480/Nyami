@@ -2,6 +2,7 @@ import {
   BILIBILI_AUTH_ENDPOINTS,
   BILIBILI_QR_SOURCE,
   BILIBILI_QR_STATUS,
+  BILIBILI_LOGIN_COOKIE_NAMES,
   DESKTOP_USER_AGENT,
 } from '../constants';
 
@@ -21,6 +22,12 @@ export type QrPollResponse = {
   refresh_token?: string;
   code: number;
   message?: string;
+  cookieHeader?: string;
+};
+
+type HttpResponse<T> = {
+  data: T;
+  cookieHeader: string;
 };
 
 /**
@@ -36,14 +43,15 @@ export class QrClient {
     const response = await this.request<BiliEnvelope<QrCodeResponse>>(
       BILIBILI_AUTH_ENDPOINTS.qrGenerate,
     );
+    const body = response.data;
     if (
-      response.code !== 0 ||
-      !response.data?.url ||
-      !response.data?.qrcode_key
+      body.code !== 0 ||
+      !body.data?.url ||
+      !body.data?.qrcode_key
     ) {
       throw new Error('B 站暂时无法生成二维码，请稍后重试');
     }
-    return response.data;
+    return body.data;
   }
 
   /**
@@ -57,10 +65,13 @@ export class QrClient {
     url.searchParams.set('source', BILIBILI_QR_SOURCE);
     return this.request<BiliEnvelope<QrPollResponse>>(url.toString()).then(
       response => {
-        if (!response.data) {
+        if (!response.data.data) {
           throw new Error('B 站暂时无法查询扫码状态');
         }
-        return response.data;
+        return {
+          ...response.data.data,
+          cookieHeader: response.cookieHeader,
+        };
       },
     );
   }
@@ -94,7 +105,7 @@ export class QrClient {
    * @param url 请求地址
    * @returns JSON 响应
    */
-  private async request<T>(url: string): Promise<T> {
+  private async request<T>(url: string): Promise<HttpResponse<T>> {
     let response: Response;
     try {
       response = await fetch(url, {
@@ -113,9 +124,47 @@ export class QrClient {
     }
 
     try {
-      return (await response.json()) as T;
+      return {
+        data: (await response.json()) as T,
+        cookieHeader: extractLoginCookieHeader(response.headers),
+      };
     } catch {
       throw new Error('B 站登录服务返回了无效响应');
     }
   }
+}
+
+/** 从二维码轮询响应中提取 B 站登录 Cookie，过滤掉响应属性和无关 Cookie。 */
+function extractLoginCookieHeader(headers: Headers): string {
+  const headersWithSetCookie = headers as Headers & {
+    getSetCookie?: () => string[];
+  };
+  const rawHeaders =
+    typeof headersWithSetCookie.getSetCookie === 'function'
+      ? headersWithSetCookie.getSetCookie()
+      : [headers.get('set-cookie') ?? ''];
+  if (!rawHeaders.some(Boolean)) {
+    return '';
+  }
+
+  const cookies = new Map<string, string>();
+  const entries = rawHeaders.flatMap(header =>
+    header.split(/\r?\n|,(?=\s*[^;,=\s]+=)/),
+  );
+  for (const entry of entries) {
+    const pair = entry.split(';', 1)[0]?.trim() ?? '';
+    const separator = pair.indexOf('=');
+    if (separator <= 0) {
+      continue;
+    }
+    const name = pair.slice(0, separator).trim();
+    if (!BILIBILI_LOGIN_COOKIE_NAMES.has(name)) {
+      continue;
+    }
+    cookies.set(name, pair.slice(separator + 1).trim());
+  }
+
+  return Array.from(cookies.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
 }

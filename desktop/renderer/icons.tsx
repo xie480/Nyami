@@ -16,18 +16,22 @@ export type IconName =
   | 'loader'
   | 'log-in'
   | 'log-out'
+  | 'list'
   | 'maximize'
+  | 'moon'
   | 'minus'
   | 'pause'
   | 'play'
   | 'plus'
   | 'refresh'
+  | 'shuffle'
   | 'restore'
   | 'search'
   | 'settings'
   | 'sparkles'
   | 'trash'
   | 'user'
+  | 'volume'
   | 'x';
 
 type IconProps = SVGProps<SVGSVGElement> & {
@@ -91,7 +95,18 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M6 12h11" />
     </>
   ),
+  list: (
+    <>
+      <path d="M5 6h14" />
+      <path d="M5 12h14" />
+      <path d="M5 18h14" />
+      <path d="M3 6h.01" />
+      <path d="M3 12h.01" />
+      <path d="M3 18h.01" />
+    </>
+  ),
   maximize: <path d="M5 5h14v14H5Z" />,
+  moon: <path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z" />,
   minus: <path d="M5 12h14" />,
   pause: (
     <>
@@ -112,6 +127,15 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M3 4v6h6" />
       <path d="M4 13a8 8 0 0 0 14.8 4L21 14" />
       <path d="M21 20v-6h-6" />
+    </>
+  ),
+  shuffle: (
+    <>
+      <path d="M4 7h3c3.6 0 5.2 10 9 10h4" />
+      <path d="m17 14 3 3-3 3" />
+      <path d="M4 17h3c1.1 0 2-1 2.7-2.1" />
+      <path d="M14.3 9.1C15 8 16 7 17 7h3" />
+      <path d="m17 4 3 3-3 3" />
     </>
   ),
   restore: (
@@ -150,6 +174,13 @@ const paths: Record<IconName, JSX.Element> = {
     <>
       <circle cx="12" cy="8" r="3.5" />
       <path d="M5 20a7 7 0 0 1 14 0" />
+    </>
+  ),
+  volume: (
+    <>
+      <path d="M4 10v4h4l5 4V6l-5 4H4Z" />
+      <path d="M17 9.5a4 4 0 0 1 0 5" />
+      <path d="M19.5 7a7.5 7.5 0 0 1 0 10" />
     </>
   ),
   x: (
