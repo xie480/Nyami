@@ -868,10 +868,9 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
         uid: props.auth.uid,
         sourceKeys: visibleSourceKeys,
       });
-      const nextIndex = await window.nyamiDesktop.content.getFavoriteIndex({
-        requestId: makeRequestId('favorite-index-refresh'),
+      const refreshedIndex = await window.nyamiDesktop.content.getFavoriteIndex({
+        requestId: makeRequestId('favorite-index-refresh-all'),
         uid: props.auth.uid,
-        sourceKeys: visibleSourceKeys,
       });
       setSources(current => {
         const refreshed = new Map(
@@ -879,11 +878,10 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
         );
         return current.map(source => refreshed.get(source.sourceKey) ?? source);
       });
-      setAllFavoriteIndex(current => {
-        const refreshed = new Map(nextIndex.map(video => [video.bvid, video]));
-        return current.map(video => refreshed.get(video.bvid) ?? video);
-      });
-      setFavoriteIndex(nextIndex);
+      setAllFavoriteIndex(refreshedIndex);
+      setFavoriteIndex(
+        filterVisibleFavoriteIndex(refreshedIndex, visibleSourceKeys),
+      );
       props.onNotice('success', '导入收藏夹已刷新');
     } catch (error) {
       props.onNotice(
