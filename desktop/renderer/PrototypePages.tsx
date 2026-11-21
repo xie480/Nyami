@@ -1,10 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import type {ChangeEvent, CSSProperties, FormEvent} from 'react';
 import {Icon} from './icons';
 import type {
@@ -16,10 +10,8 @@ import type {
   DesktopSettingsPatch,
   DesktopVideo,
   FavoriteFolderSummary,
-  HomeSnapshot,
   PlaybackSnapshot,
   PlaybackQueueMode,
-  SyncSnapshot,
   UserProfile,
 } from '../shared/types';
 import {
@@ -27,7 +19,6 @@ import {
   DESKTOP_GRAPHIC_PRESETS,
   GRAPHIC_BAND_FREQUENCIES,
 } from './audio/eqPresets';
-import {loadDesktopUserPreferences} from './preferences';
 import coverBlueUrl from './assets/cover-blue.png';
 import coverForestUrl from './assets/cover-forest.png';
 import coverNightUrl from './assets/cover-night.png';
@@ -37,15 +28,12 @@ import coverSummerUrl from './assets/cover-summer.png';
 
 /** PC 端设计稿对应的路由集合，沉浸式页面不参与普通导航。 */
 export type PrototypeRoute =
-  | 'discover'
   | 'search'
   | 'library'
   | 'folder-detail'
-  | 'taste'
   | 'sound-lab'
   | 'settings'
-  | 'immersive-windowed'
-  | 'immersive-fullscreen';
+  | 'immersive-windowed';
 
 type PrototypeNoticeTone = 'info' | 'success' | 'error';
 
@@ -73,11 +61,9 @@ type PrototypePageProps = {
   onSeek: (position: number) => void;
   onVolume: (volume: number) => void;
   onModeChange: (mode: PlaybackQueueMode) => void;
-  onStartSync: (force?: boolean) => void;
   onSelectTrack: (trackId: string) => void;
   onRemoveTrack: (trackId: string) => void;
   selectedFolderId: number | null;
-  sync: SyncSnapshot;
 };
 
 type PrototypeTrack = {
@@ -179,346 +165,21 @@ const EQ_FREQUENCIES = [...GRAPHIC_BAND_FREQUENCIES];
 /** 渲染设计稿对应的普通页面内容。 */
 export function PrototypePage(props: PrototypePageProps): JSX.Element {
   switch (props.route) {
-    case 'discover':
-      return <DiscoverPage {...props} />;
     case 'search':
       return <DesignSearchPage {...props} />;
     case 'library':
       return <DesignLibraryPage {...props} />;
     case 'folder-detail':
       return <FolderDetailPage {...props} />;
-    case 'taste':
-      return <TastePage {...props} />;
     case 'sound-lab':
       return <SoundLabPage {...props} />;
     case 'settings':
       return <div className="prototype-empty-page" />;
     case 'immersive-windowed':
-    case 'immersive-fullscreen':
       return <PrototypeImmersivePage {...props} />;
     default:
-      return <DiscoverPage {...props} />;
+      return <DesignLibraryPage {...props} />;
   }
-}
-
-/** 发现页优先读取真实热门内容，网络不可用时保持可预览的设计稿数据。 */
-function DiscoverPage(props: PrototypePageProps): JSX.Element {
-  const [home, setHome] = useState<HomeSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshSeed, setRefreshSeed] = useState(0);
-  const [curated, setCurated] = useState<DesktopVideo[]>([]);
-  const [recentTracks, setRecentTracks] = useState<DesktopVideo[]>([]);
-  const [collectionsOpen, setCollectionsOpen] = useState(false);
-  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
-  const [subscribed, setSubscribed] = useState(false);
-
-  useEffect(() => {
-    let disposed = false;
-    const requestId = makeRequestId('home');
-    setLoading(true);
-    void window.nyamiDesktop.content
-      .getHome({requestId})
-      .then(result => {
-        if (!disposed) {
-          setHome(result);
-        }
-      })
-      .catch(() => {
-        if (!disposed) {
-          setHome(null);
-        }
-      })
-      .finally(() => {
-        if (!disposed) {
-          setLoading(false);
-        }
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [refreshSeed]);
-
-  const collectionItems = useMemo(() => {
-    const source = [...(home?.featured ?? []), ...(home?.popular ?? [])];
-    const fallback = MOCK_TRACKS.map(toDesktopVideo);
-    const videos = dedupeVideos(source.length ? source : fallback);
-    const shuffled = shuffleVideos(videos);
-    return Array.from(
-      {length: Math.min(6, Math.max(1, Math.ceil(shuffled.length / 4)))},
-      (_, index) => {
-        const items = shuffled.slice(index * 4, index * 4 + 4);
-        return {
-          id: `recommended-collection-${index + 1}`,
-          title:
-            index === 0
-              ? '本周推荐合辑'
-              : `推荐收藏 · ${String(index + 1).padStart(2, '0')}`,
-          subtitle:
-            index === 0 ? '根据近期播放与热门内容整理' : '来自 NYAMI 推荐档案',
-          cover: items[0]?.cover || coverSummerUrl,
-          items,
-        };
-      },
-    );
-  }, [home, refreshSeed]);
-
-  const featureCollection = collectionItems[0] ?? {
-    id: 'recommended-collection-empty',
-    title: '本周推荐合辑',
-    subtitle: '等待内容同步',
-    cover: coverSummerUrl,
-    items: [toDesktopVideo(MOCK_TRACKS[0])],
-  };
-
-  useEffect(() => {
-    const source = collectionItems.flatMap(collection => collection.items);
-    const pool = dedupeVideos([...source, ...MOCK_TRACKS.map(toDesktopVideo)]);
-    const preferences = loadDesktopUserPreferences();
-    const blockedTags = preferences.recommendationTagBlacklist.map(tag =>
-      tag.toLocaleLowerCase(),
-    );
-    const durationLimit = preferences.recommendationDurationFilterEnabled
-      ? preferences.recommendationDurationLimitMinutes * 60
-      : null;
-    const eligible = pool.filter(video => {
-      const matchesBlockedTag = video.tags.some(tag =>
-        blockedTags.includes(tag.toLocaleLowerCase()),
-      );
-      const matchesDuration =
-        durationLimit === null || video.duration <= durationLimit;
-      return !matchesBlockedTag && matchesDuration;
-    });
-    let favoredTags: string[] = [];
-    try {
-      const raw = window.localStorage.getItem('nyami-preferred-tags');
-      favoredTags = raw
-        ? (JSON.parse(raw) as string[]).map(tag => tag.toLocaleLowerCase())
-        : [];
-    } catch {
-      favoredTags = [];
-    }
-    const favored = eligible.filter(video =>
-      video.tags.some(tag => favoredTags.includes(tag.toLocaleLowerCase())),
-    );
-    const others = eligible.filter(video => !favored.includes(video));
-    const storageKey = `nyami-home-curated-${new Date()
-      .toISOString()
-      .slice(0, 10)}`;
-    let seen: string[] = [];
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      seen = raw ? (JSON.parse(raw) as string[]) : [];
-    } catch {
-      seen = [];
-    }
-    const fresh = shuffleVideos(favored)
-      .concat(shuffleVideos(others))
-      .filter(video => !seen.includes(video.bvid))
-      .slice(0, 8);
-    const nextSeen = Array.from(
-      new Set([...seen, ...fresh.map(video => video.bvid)]),
-    );
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(nextSeen));
-    } catch {
-      // 本地存储不可用时仍允许刷新当前页面内容。
-    }
-    setCurated(current => (fresh.length ? fresh : current));
-  }, [collectionItems, refreshSeed]);
-
-  useEffect(() => {
-    let next: DesktopVideo[] = [];
-    try {
-      const raw = window.localStorage.getItem('nyami-recent-played');
-      next = raw ? (JSON.parse(raw) as DesktopVideo[]) : [];
-    } catch {
-      next = [];
-    }
-    const fallback = collectionItems.flatMap(collection => collection.items);
-    setRecentTracks(
-      shuffleVideos(dedupeVideos([...next, ...fallback])).slice(0, 5),
-    );
-  }, [collectionItems]);
-
-  useEffect(() => {
-    try {
-      setSubscribed(
-        window.localStorage.getItem('nyami-subscription-recommended') === '1',
-      );
-    } catch {
-      setSubscribed(false);
-    }
-  }, []);
-
-  const toggleSubscription = (): void => {
-    const next = !subscribed;
-    setSubscribed(next);
-    try {
-      window.localStorage.setItem(
-        'nyami-subscription-recommended',
-        next ? '1' : '0',
-      );
-    } catch {
-      // 订阅状态只影响当前界面时也保持可用。
-    }
-  };
-
-  return (
-    <div className="prototype-content">
-      <section className="prototype-hero">
-        <div className="prototype-hero-art">
-          <img
-            alt={`${featureCollection.title}封面`}
-            src={featureCollection.cover}
-          />
-        </div>
-        <div className="prototype-hero-copy">
-          <button
-            aria-label="查看更多推荐合集"
-            className="prototype-hero-more"
-            onClick={() => setCollectionsOpen(true)}
-            type="button">
-            查看更多
-            <Icon name="arrow-right" size={14} />
-          </button>
-          <div className="prototype-meta">
-            RECOMMENDED COLLECTION / {featureCollection.items.length} VIDEOS
-          </div>
-          <h2>{featureCollection.title}</h2>
-          <div className="prototype-actions">
-            <button
-              className="prototype-button prototype-button-primary"
-              onClick={() => props.onPlayVideos(featureCollection.items, false)}
-              type="button">
-              {props.playback.trackId === featureCollection.items[0]?.bvid
-                ? '继续播放'
-                : '开始播放'}
-            </button>
-            <button
-              className="prototype-button prototype-button-quiet"
-              onClick={() => setCollectionsOpen(true)}
-              type="button">
-              查看合集
-            </button>
-            <button
-              className={
-                subscribed
-                  ? 'prototype-button prototype-button-subscribed'
-                  : 'prototype-button prototype-button-quiet'
-              }
-              aria-label={subscribed ? '取消订阅推荐合集' : '订阅推荐合集'}
-              onClick={toggleSubscription}
-              type="button">
-              {subscribed ? '✓' : '+'}
-            </button>
-          </div>
-          {loading ? (
-            <span className="prototype-loading">同步热门内容…</span>
-          ) : null}
-        </div>
-      </section>
-      {collectionsOpen ? (
-        <section className="prototype-collection-list">
-          <SectionHeading title="推荐合集" note="ALL RECOMMENDED COLLECTIONS" />
-          <div className="prototype-collection-grid">
-            {collectionItems.map(collection => (
-              <button
-                className="prototype-collection-item"
-                key={collection.id}
-                onClick={() => setSelectedCollectionId(collection.id)}
-                type="button">
-                <img alt="" src={collection.cover} />
-                <span>
-                  <strong>{collection.title}</strong>
-                  <small>
-                    {collection.items.length} 个视频 · {collection.subtitle}
-                  </small>
-                </span>
-                <Icon name="play" size={15} />
-              </button>
-            ))}
-          </div>
-          {selectedCollectionId ? (
-            <div className="prototype-collection-detail">
-              {collectionItems
-                .filter(collection => collection.id === selectedCollectionId)
-                .map(collection => (
-                  <div key={collection.id}>
-                    <div className="prototype-collection-detail-head">
-                      <div>
-                        <strong>{collection.title}</strong>
-                        <span>{collection.items.length} 个视频</span>
-                      </div>
-                      <button
-                        className="prototype-button prototype-button-primary"
-                        onClick={() =>
-                          props.onPlayVideos(collection.items, false)
-                        }
-                        type="button">
-                        播放合集
-                      </button>
-                    </div>
-                    <TrackList
-                      currentTrackId={props.playback.trackId}
-                      items={collection.items}
-                      onPlay={props.onPlayVideo}
-                    />
-                  </div>
-                ))}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-      <section className="prototype-section">
-        <SectionHeading
-          action={
-            <button
-              aria-label="刷新今日精选"
-              className="prototype-icon-action"
-              onClick={() => setRefreshSeed(seed => seed + 1)}
-              title="刷新今日精选"
-              type="button">
-              <Icon name="refresh" size={15} />
-              刷新
-            </button>
-          }
-          title="今日精选"
-          note={`CURATED / ${String(curated.length).padStart(2, '0')} RECORDS`}
-        />
-        {loading && curated.length ? (
-          <div className="prototype-inline-loading" role="status">
-            <span className="prototype-spinner" />
-            正在更新今日精选…
-          </div>
-        ) : null}
-        {loading && !curated.length ? (
-          <div className="prototype-loading-panel" role="status">
-            <span className="prototype-spinner" />
-            正在加载今日精选…
-          </div>
-        ) : null}
-        <div className="prototype-card-grid">
-          {curated.map((video, index) => (
-            <TrackCard
-              index={index + 1}
-              key={video.bvid}
-              onPlay={() => props.onPlayVideo(video)}
-              onQueue={() => props.onAddVideo(video)}
-              track={video}
-            />
-          ))}
-        </div>
-      </section>
-      <section className="prototype-section">
-        <SectionHeading title="继续聆听" note="FROM YOUR ARCHIVE" />
-        <TrackList
-          items={recentTracks}
-          onPlay={props.onPlayVideo}
-          currentTrackId={props.playback.trackId}
-        />
-      </section>
-    </div>
-  );
 }
 
 /** 设计稿搜索页，回车后立即请求真实 Bilibili 搜索结果并应用筛选。 */
@@ -1319,184 +980,6 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
   );
 }
 
-/** 音乐偏好页只展示全局索引中的真实标签，并要求先完成索引同步。 */
-function TastePage(props: PrototypePageProps): JSX.Element {
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
-  const [activeTags, setActiveTags] = useState<string[]>([]);
-  const [syncedAt, setSyncedAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (
-      !props.auth.loggedIn ||
-      !props.auth.uid ||
-      props.sync.state !== 'completed'
-    ) {
-      setAvailableTags([]);
-      setActiveTags([]);
-      return;
-    }
-    let disposed = false;
-    setLoading(true);
-    void window.nyamiDesktop.content
-      .getFavoriteFolders({
-        requestId: makeRequestId('taste-folders'),
-        uid: props.auth.uid,
-      })
-      .then(async folders => {
-        const pages = await Promise.all(
-          folders.slice(0, 12).map(folder =>
-            window.nyamiDesktop.content.getFavoriteVideos({
-              mediaId: folder.id,
-              page: 1,
-              requestId: makeRequestId(`taste-${folder.id}`),
-              uid: props.auth.uid as string,
-            }),
-          ),
-        );
-        if (disposed) {
-          return;
-        }
-        const nextTags = Array.from(
-          new Set(pages.flatMap(page => page.items.flatMap(item => item.tags))),
-        ).sort((left, right) => left.localeCompare(right));
-        setAvailableTags(nextTags);
-        try {
-          const saved = JSON.parse(
-            window.localStorage.getItem('nyami-preferred-tags') ?? '[]',
-          ) as unknown;
-          setActiveTags(
-            Array.isArray(saved)
-              ? saved.filter(
-                  (tag): tag is string =>
-                    typeof tag === 'string' && nextTags.includes(tag),
-                )
-              : [],
-          );
-          setSyncedAt(
-            window.localStorage.getItem('nyami-preferred-tags-synced-at'),
-          );
-        } catch {
-          setActiveTags([]);
-        }
-      })
-      .catch(() => {
-        if (!disposed) {
-          setAvailableTags([]);
-          setActiveTags([]);
-        }
-      })
-      .finally(() => {
-        if (!disposed) {
-          setLoading(false);
-        }
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [props.auth.loggedIn, props.auth.uid, props.sync.state]);
-
-  /** 保存索引中已有的标签；未完成全局同步时先启动同步。 */
-  const syncTags = (): void => {
-    if (props.sync.state !== 'completed') {
-      props.onStartSync(false);
-      props.onNotice('info', '请先同步全局索引，再同步音乐偏好');
-      return;
-    }
-    const timestamp = new Date().toLocaleString();
-    setSyncedAt(timestamp);
-    try {
-      window.localStorage.setItem(
-        'nyami-preferred-tags',
-        JSON.stringify(activeTags),
-      );
-      window.localStorage.setItem('nyami-preferred-tags-synced-at', timestamp);
-    } catch {
-      // 本地存储不可用时仍保持当前页面的同步状态。
-    }
-    props.onNotice('success', '音乐偏好标签已同步');
-  };
-
-  const toggleTag = (tag: string): void => {
-    setActiveTags(current =>
-      current.includes(tag)
-        ? current.filter(item => item !== tag)
-        : [...current, tag],
-    );
-  };
-  const indexReady =
-    props.sync.state === 'completed' && availableTags.length > 0;
-
-  return (
-    <div className="prototype-content">
-      <div className="prototype-metrics">
-        <Metric
-          value={indexReady ? String(availableTags.length) : '—'}
-          label="INDEX TAGS"
-        />
-        <Metric
-          value={indexReady ? String(activeTags.length) : '—'}
-          label="SAVED TAGS"
-        />
-        <Metric
-          value={props.sync.state === 'completed' ? 'READY' : 'WAITING'}
-          label="GLOBAL INDEX"
-        />
-        <Metric accent value={indexReady ? 'SYNCED' : '—'} label="PREFERENCE" />
-      </div>
-      <section className="prototype-preference-layout">
-        <div className="prototype-radar">
-          {indexReady ? (
-            <RadarChart />
-          ) : (
-            <div className="prototype-empty-state">
-              <Icon name="folder" size={28} />
-              <strong>请先同步全局索引</strong>
-              <span>索引完成后，这里才会根据真实收藏内容生成画像。</span>
-            </div>
-          )}
-        </div>
-        <div>
-          <div className="prototype-preference-panel">
-            <SectionHeading
-              action={
-                <button
-                  className="prototype-button prototype-button-quiet"
-                  disabled={loading}
-                  onClick={syncTags}
-                  type="button">
-                  {loading ? '读取中…' : '同步标签'}
-                </button>
-              }
-              title="你的标签"
-              note={syncedAt ? `已同步 ${syncedAt}` : '来自全局收藏索引'}
-            />
-            {indexReady ? (
-              <div className="prototype-tag-cloud">
-                {availableTags.map(tag => (
-                  <button
-                    className={
-                      activeTags.includes(tag)
-                        ? 'prototype-taste-tag is-hot'
-                        : 'prototype-taste-tag'
-                    }
-                    key={tag}
-                    onClick={() => toggleTag(tag)}
-                    type="button">
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="prototype-empty-inline">暂无可用标签</div>
-            )}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 /** 声音实验室采用真实桌面音频设置，同时保留原型的频谱布局。 */
 function SoundLabPage(props: PrototypePageProps): JSX.Element {
   const audio = props.settings?.audio ?? DEFAULT_DESKTOP_AUDIO_SETTINGS;
@@ -1764,9 +1247,8 @@ function SoundLabPage(props: PrototypePageProps): JSX.Element {
   );
 }
 
-/** 渲染窗口版与全屏版共用的沉浸式播放器，并支持 ESC 返回普通播放界面。 */
+/** 渲染窗口版沉浸式播放器，并支持 ESC 返回音乐库。 */
 export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
-  const isFullscreen = props.route === 'immersive-fullscreen';
   const {onNext, onPause, onPlay, onPrevious, onRouteChange, playback} = props;
   const [queueOpen, setQueueOpen] = useState(false);
   const [paletteIndex, setPaletteIndex] = useState(0);
@@ -1808,29 +1290,15 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
     backgroundImage: `linear-gradient(120deg, ${palette[0]}e8, ${palette[1]}dd 52%, ${palette[2]}e8), url(${track.cover})`,
   } as CSSProperties;
 
-  /** 进入浏览器内容全屏并切换到独立的全屏布局。 */
-  const enterFullscreen = (): void => {
-    if (document.fullscreenEnabled && !document.fullscreenElement) {
-      void document.documentElement.requestFullscreen().catch(() => undefined);
-    }
-    props.onRouteChange('immersive-fullscreen');
-  };
-
-  /** 从全屏回到窗口版，从窗口版回到发现页。 */
-  const exitFullscreen = useCallback((): void => {
-    if (document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => undefined);
-    }
-    onRouteChange(isFullscreen ? 'immersive-windowed' : 'discover');
-  }, [isFullscreen, onRouteChange]);
+  /** 退出沉浸式播放器并返回音乐库。 */
+  const exitImmersive = useCallback((): void => {
+    onRouteChange('library');
+  }, [onRouteChange]);
 
   useEffect(() => {
     setQueueOpen(false);
     setPaletteIndex(0);
-    if (!isFullscreen && document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => undefined);
-    }
-  }, [isFullscreen, track.bvid]);
+  }, [track.bvid]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1908,11 +1376,11 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
   }, [playback.state]);
 
   useEffect(() => {
-    /** 沉浸式快捷键：ESC 退出、空格播放、左右键切歌。 */
+    /** 沉浸式快捷键：ESC 返回音乐库、空格播放、左右键切歌。 */
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        exitFullscreen();
+        exitImmersive();
         return;
       }
       if (
@@ -1934,38 +1402,25 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [exitFullscreen, onNext, onPause, onPlay, onPrevious, playback.state]);
+  }, [exitImmersive, onNext, onPause, onPlay, onPrevious, playback.state]);
 
   const sleepValue = props.playback.sleepTimerSeconds ? 'active' : '';
 
   return (
     <div
-      className={
-        isFullscreen
-          ? 'prototype-immersive prototype-immersive-fullscreen'
-          : 'prototype-immersive prototype-immersive-windowed'
-      }
+      className="prototype-immersive prototype-immersive-windowed"
       style={immersiveStyle}>
       <div className="prototype-immersive-backdrop" />
       <header className="prototype-immersive-heading">
         <div>
-          <span className="prototype-meta">
-            {isFullscreen
-              ? 'NYAMI / FULLSCREEN IMMERSIVE'
-              : 'NYAMI / WINDOWED IMMERSIVE'}
-          </span>
+          <span className="prototype-meta">NYAMI / WINDOWED IMMERSIVE</span>
           <strong>{track.author}</strong>
           <span>{track.title}</span>
         </div>
         <div className="prototype-immersive-heading-actions">
-          {!isFullscreen ? (
-            <button
-              aria-label="进入全屏播放器"
-              onClick={enterFullscreen}
-              type="button">
-              <Icon name="fullscreen" size={17} />
-            </button>
-          ) : null}
+          <button aria-label="返回音乐库" onClick={exitImmersive} type="button">
+            <Icon name="arrow-left" size={17} />
+          </button>
           <button
             aria-expanded={queueOpen}
             aria-label="打开播放列表"
@@ -1973,14 +1428,6 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
             type="button">
             <Icon name="list" size={17} />
           </button>
-          {isFullscreen ? (
-            <button
-              aria-label="退出沉浸式播放器"
-              onClick={exitFullscreen}
-              type="button">
-              <Icon name="x" size={17} />
-            </button>
-          ) : null}
         </div>
       </header>
       <main className="prototype-immersive-main">
@@ -2306,28 +1753,6 @@ function TrackList({
   );
 }
 
-function Metric({
-  accent = false,
-  label,
-  value,
-}: {
-  accent?: boolean;
-  label: string;
-  value: string;
-}): JSX.Element {
-  return (
-    <div className="prototype-metric">
-      <span
-        className={
-          accent ? 'prototype-metric-value accent' : 'prototype-metric-value'
-        }>
-        {value}
-      </span>
-      <span className="prototype-metric-label">{label}</span>
-    </div>
-  );
-}
-
 function SettingSwitch({
   checked,
   label,
@@ -2352,50 +1777,6 @@ function SettingSwitch({
         type="button"
       />
     </div>
-  );
-}
-
-function RadarChart(): JSX.Element {
-  return (
-    <svg aria-label="音乐偏好雷达图" role="img" viewBox="0 0 320 280">
-      <polygon
-        fill="none"
-        points="160,20 258,91 220,223 100,223 62,91"
-        stroke="currentColor"
-      />
-      <polygon
-        fill="none"
-        points="160,54 224,101 200,187 120,187 96,101"
-        stroke="currentColor"
-      />
-      <polygon
-        fill="rgba(200,76,49,.17)"
-        points="160,44 238,104 192,210 105,180 86,104"
-        stroke="var(--prototype-accent)"
-        strokeWidth="2"
-      />
-      <g
-        fill="var(--prototype-ink-2)"
-        fontFamily="var(--prototype-sans)"
-        fontSize="13"
-        fontWeight="600">
-        <text x="145" y="15">
-          氛围
-        </text>
-        <text x="266" y="96">
-          节奏
-        </text>
-        <text x="226" y="237">
-          人声
-        </text>
-        <text x="76" y="237">
-          器乐
-        </text>
-        <text x="35" y="96">
-          实验
-        </text>
-      </g>
-    </svg>
   );
 }
 

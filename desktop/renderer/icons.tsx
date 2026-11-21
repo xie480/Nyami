@@ -12,7 +12,6 @@ export type IconName =
   | 'compass'
   | 'download'
   | 'folder'
-  | 'fullscreen'
   | 'heart'
   | 'home'
   | 'loader'
@@ -78,18 +77,6 @@ const paths: Record<IconName, JSX.Element> = {
     <>
       <path d="M3.5 6.5h6l1.7 2H20a1 1 0 0 1 1 1v7.8a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 17.3V7.2a.7.7 0 0 1 .5-.7Z" />
       <path d="M3 10h18" />
-    </>
-  ),
-  fullscreen: (
-    <>
-      <path d="M8 3H3v5" />
-      <path d="M3 3l6 6" />
-      <path d="M16 3h5v5" />
-      <path d="m21 3-6 6" />
-      <path d="M8 21H3v-5" />
-      <path d="m3 21 6-6" />
-      <path d="M16 21h5v-5" />
-      <path d="m21 21-6-6" />
     </>
   ),
   heart: (

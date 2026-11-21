@@ -1,7 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import type {
   ChangeEvent,
-  CSSProperties,
   FormEvent,
   KeyboardEvent,
   ReactNode,
@@ -60,10 +59,8 @@ const NAV_ITEMS: Array<{
   label: string;
   icon: IconName;
 }> = [
-  {route: 'discover', label: '发现', icon: 'home'},
-  {route: 'search', label: '搜索', icon: 'search'},
   {route: 'library', label: '音乐库', icon: 'folder'},
-  {route: 'taste', label: '音乐偏好', icon: 'heart'},
+  {route: 'search', label: '搜索', icon: 'search'},
   {route: 'sound-lab', label: '声音实验室', icon: 'sparkles'},
   {route: 'settings', label: '设置', icon: 'settings'},
 ];
@@ -130,7 +127,7 @@ const EMPTY_UPDATE: DesktopUpdateInfo = {
 
 /** 阶段 3 桌面端应用根组件，负责导航、认证状态和全局任务通知。 */
 export function App(): JSX.Element {
-  const [route, setRoute] = useState<Route>('discover');
+  const [route, setRoute] = useState<Route>('library');
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [auth, setAuth] = useState<AuthStatus>({
     loggedIn: false,
@@ -810,8 +807,7 @@ export function App(): JSX.Element {
   }, []);
 
   const activeProfile = getActiveProfile(auth, profile);
-  const isImmersiveRoute =
-    route === 'immersive-windowed' || route === 'immersive-fullscreen';
+  const isImmersiveRoute = route === 'immersive-windowed';
   const prototypePageProps = {
     auth,
     onAddVideo: addVideoToQueue,
@@ -834,14 +830,6 @@ export function App(): JSX.Element {
     },
     onRemoveTrack: removePlaybackItem,
     onRouteChange: setRoute,
-    onStartSync: (force = false) => {
-      void window.nyamiDesktop.sync
-        .start({force})
-        .then(setSync)
-        .catch(error => {
-          pushNotice('error', getErrorMessage(error, '收藏同步启动失败'));
-        });
-    },
     onSelectFolder: (folderId: number) => {
       setSelectedFolderId(folderId);
     },
@@ -857,7 +845,6 @@ export function App(): JSX.Element {
     spectrum,
     route,
     selectedFolderId,
-    sync,
   } satisfies Parameters<typeof PrototypePage>[0];
 
   return (
@@ -1582,7 +1569,7 @@ function FavoritesPage({
           }
           icon="heart"
           message="登录后解锁收藏夹"
-          secondary="公开搜索和发现内容仍然可以正常使用"
+          secondary="公开搜索内容仍然可以正常使用"
         />
       </div>
     );
@@ -1955,7 +1942,7 @@ function SettingsPage({
                 ? sync.message ?? '正在同步收藏夹索引…'
                 : sync.state === 'completed'
                 ? `已同步 ${sync.processedVideos} 个视频`
-                : '先同步全局索引，音乐库和音乐偏好才能读取最新内容。'}
+                : '先同步全局索引，音乐库才能读取最新内容。'}
             </small>
           </span>
           <button
@@ -3300,23 +3287,17 @@ function getPopularQueueContext(
 /** 返回设计稿顶栏使用的路由编号、分组和标题。 */
 function getRouteHeader(route: Route): {eyebrow: string; title: string} {
   const headers: Record<Route, {eyebrow: string; title: string}> = {
-    discover: {eyebrow: '01 / DISCOVER', title: 'DISCOVER'},
+    library: {eyebrow: '01 / LIBRARY', title: 'LIBRARY'},
     search: {eyebrow: '02 / SEARCH', title: 'SEARCH'},
-    library: {eyebrow: '03 / LIBRARY', title: 'LIBRARY'},
     'folder-detail': {
-      eyebrow: '04 / LIBRARY / FOLDER',
+      eyebrow: '01 / LIBRARY / FOLDER',
       title: 'FOLDER DETAIL',
     },
-    taste: {eyebrow: '05 / MUSIC TASTE', title: 'MUSIC TASTE'},
-    'sound-lab': {eyebrow: '06 / SOUND LAB', title: 'SOUND LAB'},
-    settings: {eyebrow: '07 / SETTINGS', title: 'SETTINGS'},
+    'sound-lab': {eyebrow: '03 / SOUND LAB', title: 'SOUND LAB'},
+    settings: {eyebrow: '04 / SETTINGS', title: 'SETTINGS'},
     'immersive-windowed': {
-      eyebrow: '08 / IMMERSIVE',
+      eyebrow: '05 / IMMERSIVE',
       title: 'WINDOWED IMMERSIVE',
-    },
-    'immersive-fullscreen': {
-      eyebrow: '09 / IMMERSIVE',
-      title: 'FULLSCREEN IMMERSIVE',
     },
   };
   return headers[route];
