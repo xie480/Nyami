@@ -1,21 +1,12 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  memo,
-} from 'react';
+import {useCallback, useEffect, useRef, useState, memo} from 'react';
 import type {
   ChangeEvent,
+  CSSProperties,
   FormEvent,
   KeyboardEvent,
   ReactNode,
 } from 'react';
-import {
-  Icon,
-  type IconName,
-} from './icons';
+import {Icon, type IconName} from './icons';
 import type {
   AuthStatus,
   AuthWebViewState,
@@ -41,11 +32,19 @@ import type {
   SyncSnapshot,
   UserProfile,
 } from '../shared/types';
-import {AudioSettingsPanel} from './audio/AudioSettingsPanel';
-import {DEFAULT_DESKTOP_AUDIO_SETTINGS} from './audio/eqPresets';
 import {ElectronAudioPlayerAdapter} from './audio/electronAudioPlayer';
+import {
+  PrototypeImmersivePage,
+  PrototypePage,
+  type PrototypeRoute,
+} from './PrototypePages';
+import {
+  loadDesktopUserPreferences,
+  saveDesktopUserPreferences,
+  type DesktopUserPreferences,
+} from './preferences';
 
-type Route = 'search' | 'favorites' | 'settings';
+type Route = PrototypeRoute;
 type NoticeTone = 'info' | 'success' | 'error';
 
 type Notice = {
@@ -61,20 +60,19 @@ const NAV_ITEMS: Array<{
   label: string;
   icon: IconName;
 }> = [
+  {route: 'discover', label: '发现', icon: 'home'},
   {route: 'search', label: '搜索', icon: 'search'},
-  {route: 'favorites', label: '收藏夹', icon: 'heart'},
+  {route: 'library', label: '音乐库', icon: 'folder'},
+  {route: 'taste', label: '音乐偏好', icon: 'heart'},
+  {route: 'sound-lab', label: '声音实验室', icon: 'sparkles'},
+  {route: 'settings', label: '设置', icon: 'settings'},
 ];
 
 const THEME_OPTIONS: Array<{
   value: DesktopTheme;
   label: string;
   description: string;
-}> = [
-  {value: 'system', label: '跟随系统', description: '使用 Windows 当前外观'},
-  {value: 'light', label: '浅色', description: '适合明亮环境'},
-  {value: 'dark', label: '深色', description: '降低夜间眩光'},
-  {value: 'glass', label: '玻璃', description: '保留半透明层次'},
-];
+}> = [{value: 'light', label: '浅色', description: '适合明亮环境'}];
 
 const EMPTY_PLAYBACK: PlaybackSnapshot = {
   state: 'idle',
@@ -132,7 +130,8 @@ const EMPTY_UPDATE: DesktopUpdateInfo = {
 
 /** 阶段 3 桌面端应用根组件，负责导航、认证状态和全局任务通知。 */
 export function App(): JSX.Element {
-  const [route, setRoute] = useState<Route>('search');
+  const [route, setRoute] = useState<Route>('discover');
+  const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [auth, setAuth] = useState<AuthStatus>({
     loggedIn: false,
     uid: null,
@@ -151,13 +150,14 @@ export function App(): JSX.Element {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [taskCenterOpen, setTaskCenterOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchTrigger, setSearchTrigger] = useState(0);
   const [playback, setPlayback] = useState<PlaybackSnapshot>(EMPTY_PLAYBACK);
   const [sync, setSync] = useState<SyncSnapshot>(EMPTY_SYNC);
   const [updateInfo, setUpdateInfo] = useState<DesktopUpdateInfo>(EMPTY_UPDATE);
   const [spectrum, setSpectrum] = useState<number[]>([]);
   const [cacheSummary, setCacheSummary] = useState<CacheSummary | null>(null);
-  const [cacheProgress, setCacheProgress] = useState<CacheProgressEvent | null>(null);
+  const [cacheProgress, setCacheProgress] = useState<CacheProgressEvent | null>(
+    null,
+  );
   const [cacheBusy, setCacheBusy] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
@@ -289,8 +289,20 @@ export function App(): JSX.Element {
     const normalized = value.trim();
     setSearchQuery(normalized);
     setRoute('search');
-    if (normalized) {
-      setSearchTrigger(current => current + 1);
+  }, []);
+
+  /** 记录最近播放的视频，供首页继续聆听区恢复真实播放轨迹。 */
+  const rememberRecentVideo = useCallback((video: DesktopVideo): void => {
+    try {
+      const raw = window.localStorage.getItem('nyami-recent-played');
+      const previous = raw ? (JSON.parse(raw) as DesktopVideo[]) : [];
+      const next = [
+        video,
+        ...previous.filter(item => item.bvid !== video.bvid),
+      ].slice(0, 30);
+      window.localStorage.setItem('nyami-recent-played', JSON.stringify(next));
+    } catch {
+      // 本地存储不可用时不影响播放流程。
     }
   }, []);
 
@@ -317,6 +329,7 @@ export function App(): JSX.Element {
   /** 从内容卡片创建队列项目并立即播放。 */
   const playVideo = useCallback(
     (video: DesktopVideo): void => {
+      rememberRecentVideo(video);
       void window.nyamiDesktop.playback
         .loadQueue({
           items: [toPlaybackQueueItem(video)],
@@ -333,6 +346,36 @@ export function App(): JSX.Element {
         })
         .catch(error => {
           pushNotice('error', getErrorMessage(error, '音频加载失败'));
+        });
+    },
+    [pushNotice, rememberRecentVideo],
+  );
+
+  /** 将多个真实视频一次性载入播放器，支持收藏夹全局随机播放。 */
+  const playVideos = useCallback(
+    (videos: DesktopVideo[], shuffle: boolean): void => {
+      const items = videos.map(toPlaybackQueueItem);
+      if (!items.length) {
+        pushNotice('info', '当前收藏夹没有可播放内容');
+        return;
+      }
+      const queue = shuffle ? shuffleQueueItems(items) : items;
+      void window.nyamiDesktop.playback
+        .loadQueue({
+          items: queue,
+          startIndex: 0,
+          autoplay: true,
+          expandParts: false,
+          context: null,
+        })
+        .then(snapshot => {
+          setPlayback(snapshot);
+          if (snapshot.error) {
+            pushNotice('error', snapshot.error);
+          }
+        })
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '收藏夹播放失败'));
         });
     },
     [pushNotice],
@@ -359,64 +402,82 @@ export function App(): JSX.Element {
   );
 
   /** 调整播放进度并同步主进程状态。 */
-  const seekPlayback = useCallback((position: number): void => {
-    void window.nyamiDesktop.playback
-      .seek({position})
-      .then(setPlayback)
-      .catch(error => {
-        pushNotice('error', getErrorMessage(error, '调整播放进度失败'));
-      });
-  }, [pushNotice]);
+  const seekPlayback = useCallback(
+    (position: number): void => {
+      void window.nyamiDesktop.playback
+        .seek({position})
+        .then(setPlayback)
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '调整播放进度失败'));
+        });
+    },
+    [pushNotice],
+  );
 
   /** 调整播放器音量。 */
-  const setPlaybackVolume = useCallback((volume: number): void => {
-    void window.nyamiDesktop.playback
-      .setVolume({volume})
-      .then(setPlayback)
-      .catch(error => {
-        pushNotice('error', getErrorMessage(error, '调整音量失败'));
-      });
-  }, [pushNotice]);
+  const setPlaybackVolume = useCallback(
+    (volume: number): void => {
+      void window.nyamiDesktop.playback
+        .setVolume({volume})
+        .then(setPlayback)
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '调整音量失败'));
+        });
+    },
+    [pushNotice],
+  );
 
   /** 切换播放顺序模式。 */
-  const setPlaybackMode = useCallback((mode: PlaybackQueueMode): void => {
-    void window.nyamiDesktop.playback
-      .setMode({mode})
-      .then(setPlayback)
-      .catch(error => {
-        pushNotice('error', getErrorMessage(error, '切换播放模式失败'));
-      });
-  }, [pushNotice]);
+  const setPlaybackMode = useCallback(
+    (mode: PlaybackQueueMode): void => {
+      void window.nyamiDesktop.playback
+        .setMode({mode})
+        .then(setPlayback)
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '切换播放模式失败'));
+        });
+    },
+    [pushNotice],
+  );
 
   /** 设置或取消睡眠定时器。 */
-  const setPlaybackSleepTimer = useCallback((seconds: number | null): void => {
-    void window.nyamiDesktop.playback
-      .setSleepTimer({seconds})
-      .then(setPlayback)
-      .catch(error => {
-        pushNotice('error', getErrorMessage(error, '设置睡眠定时器失败'));
-      });
-  }, [pushNotice]);
+  const setPlaybackSleepTimer = useCallback(
+    (seconds: number | null): void => {
+      void window.nyamiDesktop.playback
+        .setSleepTimer({seconds})
+        .then(setPlayback)
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '设置睡眠定时器失败'));
+        });
+    },
+    [pushNotice],
+  );
 
   /** 从播放队列移除一个项目。 */
-  const removePlaybackItem = useCallback((trackId: string): void => {
-    void window.nyamiDesktop.playback
-      .removeFromQueue({trackId})
-      .then(setPlayback)
-      .catch(error => {
-        pushNotice('error', getErrorMessage(error, '移除队列项目失败'));
-      });
-  }, [pushNotice]);
+  const removePlaybackItem = useCallback(
+    (trackId: string): void => {
+      void window.nyamiDesktop.playback
+        .removeFromQueue({trackId})
+        .then(setPlayback)
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '移除队列项目失败'));
+        });
+    },
+    [pushNotice],
+  );
 
   /** 按拖拽结果保存播放队列顺序。 */
-  const reorderPlaybackQueue = useCallback((trackIds: string[]): void => {
-    void window.nyamiDesktop.playback
-      .reorderQueue({trackIds})
-      .then(setPlayback)
-      .catch(error => {
-        pushNotice('error', getErrorMessage(error, '调整播放队列失败'));
-      });
-  }, [pushNotice]);
+  const reorderPlaybackQueue = useCallback(
+    (trackIds: string[]): void => {
+      void window.nyamiDesktop.playback
+        .reorderQueue({trackIds})
+        .then(setPlayback)
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '调整播放队列失败'));
+        });
+    },
+    [pushNotice],
+  );
 
   /** 从队列面板选择指定歌曲并保持其余项目顺序。 */
   const playQueueTrack = useCallback(
@@ -443,7 +504,7 @@ export function App(): JSX.Element {
           pushNotice('error', getErrorMessage(error, '切换队列项目失败'));
         });
     },
-    [playback.queue, pushNotice],
+    [playback.queue, playback.queueContext, pushNotice],
   );
 
   /** 读取音频和图片缓存摘要，供设置页展示容量。 */
@@ -558,33 +619,28 @@ export function App(): JSX.Element {
     if (!element) {
       return;
     }
-    const adapter = new ElectronAudioPlayerAdapter(
-      element,
-      event => {
-        void window.nyamiDesktop.playback
-          .reportAudioEvent(event)
-          .then(setPlayback)
-          .catch(() => undefined);
-      },
-    );
+    const adapter = new ElectronAudioPlayerAdapter(element, event => {
+      void window.nyamiDesktop.playback
+        .reportAudioEvent(event)
+        .then(setPlayback)
+        .catch(() => undefined);
+    });
     audioAdapterRef.current = adapter;
     void adapter.setup();
     const unsubscribeSpectrum = adapter.subscribeSpectrum(setSpectrum);
     const unsubscribeSource = window.nyamiDesktop.playback.onSourceChanged(
       event => adapter.loadSource(event.source),
     );
-    const unsubscribeCommand = window.nyamiDesktop.playback.onCommand(
-      event => {
-        void adapter.handleCommand(event.command).catch(error => {
-          const audioEvent: PlaybackAudioEvent = {
-            type: 'error',
-            trackId: event.command.trackId,
-            message: getErrorMessage(error, '音频播放命令失败'),
-          };
-          void window.nyamiDesktop.playback.reportAudioEvent(audioEvent);
-        });
-      },
-    );
+    const unsubscribeCommand = window.nyamiDesktop.playback.onCommand(event => {
+      void adapter.handleCommand(event.command).catch(error => {
+        const audioEvent: PlaybackAudioEvent = {
+          type: 'error',
+          trackId: event.command.trackId,
+          message: getErrorMessage(error, '音频播放命令失败'),
+        };
+        void window.nyamiDesktop.playback.reportAudioEvent(audioEvent);
+      });
+    });
     const reportNetwork = (type: 'network-online' | 'network-offline') => {
       const event: PlaybackAudioEvent = {type};
       void window.nyamiDesktop.playback
@@ -645,14 +701,13 @@ export function App(): JSX.Element {
         setWebViewState(event);
       },
     );
-    const unsubscribeSettings = window.nyamiDesktop.settings.onChanged(
-      setSettings,
-    );
+    const unsubscribeSettings =
+      window.nyamiDesktop.settings.onChanged(setSettings);
     const unsubscribePlayback = window.nyamiDesktop.playback.onStateChanged(
       event => setPlayback(event.snapshot),
     );
-    const unsubscribeSync = window.nyamiDesktop.sync.onStateChanged(
-      event => setSync(event.snapshot),
+    const unsubscribeSync = window.nyamiDesktop.sync.onStateChanged(event =>
+      setSync(event.snapshot),
     );
     const unsubscribeCache = window.nyamiDesktop.cache.onProgress(
       (event: CacheProgressEvent) => setCacheProgress(event),
@@ -682,9 +737,8 @@ export function App(): JSX.Element {
     const handleWindowState = (state: DesktopWindowState): void => {
       setIsWindowMaximized(state.isMaximized);
     };
-    const unsubscribe = window.nyamiDesktop.window.onStateChanged(
-      handleWindowState,
-    );
+    const unsubscribe =
+      window.nyamiDesktop.window.onStateChanged(handleWindowState);
     void window.nyamiDesktop.window
       .getState()
       .then(handleWindowState)
@@ -719,14 +773,13 @@ export function App(): JSX.Element {
   }, [auth.loggedIn, loginOpen, qrBusy, qrImageDataUrl, startQrLogin]);
 
   /** 根据用户设置将页面映射为桌面主题类名。 */
-  const themeClassName = useMemo(
-    () => `theme-${settings?.theme ?? 'dark'}`,
-    [settings?.theme],
-  );
+  const themeClassName = 'theme-light';
 
   /** 修改桌面设置，并在失败时恢复可见提示。 */
   const updateSettings = useCallback(
-    async (patch: Parameters<typeof window.nyamiDesktop.settings.update>[0]) => {
+    async (
+      patch: Parameters<typeof window.nyamiDesktop.settings.update>[0],
+    ) => {
       try {
         setSettings(await window.nyamiDesktop.settings.update(patch));
       } catch (error) {
@@ -757,186 +810,225 @@ export function App(): JSX.Element {
   }, []);
 
   const activeProfile = getActiveProfile(auth, profile);
+  const isImmersiveRoute =
+    route === 'immersive-windowed' || route === 'immersive-fullscreen';
+  const prototypePageProps = {
+    auth,
+    onAddVideo: addVideoToQueue,
+    onNext: () => {
+      void window.nyamiDesktop.playback.skipNext().then(setPlayback);
+    },
+    onNotice: pushNotice,
+    onOpenLogin: () => setLoginOpen(true),
+    onPause: () => {
+      void window.nyamiDesktop.playback.pause().then(setPlayback);
+    },
+    onPlay: () => {
+      void togglePlayback();
+    },
+    onPlayVideo: playVideo,
+    onPlayVideos: playVideos,
+    onPrevious: () => {
+      void window.nyamiDesktop.playback.skipPrevious().then(setPlayback);
+    },
+    onRemoveTrack: removePlaybackItem,
+    onRouteChange: setRoute,
+    onSelectFolder: (folderId: number) => {
+      setSelectedFolderId(folderId);
+    },
+    onSeek: seekPlayback,
+    onSleepTimer: setPlaybackSleepTimer,
+    onSelectTrack: playQueueTrack,
+    onUpdateSettings: updateSettings,
+    onVolume: setPlaybackVolume,
+    playback,
+    profile: activeProfile,
+    settings,
+    searchQuery,
+    spectrum,
+    route,
+    selectedFolderId,
+  } satisfies Parameters<typeof PrototypePage>[0];
 
   return (
     <div
-      className={`desktop-app ${themeClassName} ${
+      className={`desktop-app prototype-app ${themeClassName} ${
         isWindowMaximized ? 'window-maximized' : 'window-restored'
       }`}>
-      <WindowTitlebar
-        isMaximized={isWindowMaximized}
-        onClose={closeWindow}
-        onMinimize={minimizeWindow}
-        onToggleMaximize={() => void toggleWindowMaximize()}
-      />
-      <div className="desktop-frame">
-        <Sidebar
-          auth={auth}
-          profile={activeProfile}
-          route={route}
-          onLogin={() => setLoginOpen(true)}
-          onRouteChange={setRoute}
-        />
-        <section className="workspace">
-          <header className="workspace-header">
-            <div className="breadcrumb-block">
-              <p className="section-kicker">NYAMI / WINDOWS</p>
-              <h1>{getRouteTitle(route)}</h1>
-            </div>
-            <form
-              className="global-search"
-              onSubmit={(event: FormEvent<HTMLFormElement>) => {
-                event.preventDefault();
-                submitSearch(searchQuery);
-              }}>
-              <Icon name="search" size={18} />
-              <input
-                aria-label="搜索 Bilibili 视频"
-                onChange={event => setSearchQuery(event.target.value)}
-                placeholder="搜索视频、音乐或 UP 主"
-                ref={searchInputRef}
-                value={searchQuery}
-              />
-              <kbd>Ctrl K</kbd>
-            </form>
-            <div className="header-actions">
-              {webViewState.open ? (
-                <button
-                  className="webview-close-button"
-                  onClick={() => void closeWebLoginAndReturn()}
-                  type="button">
-                  <Icon name="x" size={16} />
-                  {webViewState.mode === 'login'
-                    ? '返回登录方式'
-                    : '关闭网页登录'}
-                </button>
-              ) : null}
-              <div className="task-center-wrap">
-                <button
-                  aria-expanded={taskCenterOpen}
-                  aria-label="打开任务通知"
-                  className="icon-button notification-button"
-                  onClick={() => setTaskCenterOpen(current => !current)}
-                  title="任务通知"
-                  type="button">
-                  <Icon name="alert" size={18} />
-                  {notices.length ? (
-                    <span className="notification-count">{notices.length}</span>
-                  ) : null}
-                </button>
-                {taskCenterOpen ? (
-                  <TaskCenter
-                    notices={notices}
-                    onCancelSync={() => {
-                      void window.nyamiDesktop.sync.cancel().then(setSync);
-                    }}
-                    onDismiss={id =>
-                      setNotices(current =>
-                        current.filter(notice => notice.id !== id),
-                      )
-                    }
-                    onStartSync={(force = false) => {
-                      void window.nyamiDesktop.sync
-                        .start({force})
-                        .then(setSync)
-                        .catch(error => {
-                          pushNotice('error', getErrorMessage(error, '同步启动失败'));
-                        });
-                    }}
-                    sync={sync}
-                  />
-                ) : null}
-              </div>
-              <button
-                className="account-trigger"
-                onClick={() => setLoginOpen(true)}
-                type="button">
-                <Avatar profile={activeProfile} />
-                <span>{getAccountLabel(auth, activeProfile)}</span>
-                <Icon name="chevron-down" size={14} />
-              </button>
-            </div>
-          </header>
-
-          {webViewState.open ? (
-            <div className="webview-banner" role="status">
-              <span className="status-dot online" />
-              {webViewState.mode === 'refresh'
-                ? '正在安全续期 Bilibili 登录状态…'
-                : 'Bilibili 网页已打开，请在上方页面完成登录'}
-            </div>
-          ) : null}
-
-          <main className="page-scroll">
-            {route === 'search' ? (
-              <SearchPage
-                initialTrigger={searchTrigger}
-                inputRef={searchInputRef}
-                onAddVideo={addVideoToQueue}
-                onNotice={pushNotice}
-                onPlayVideo={playVideo}
-                onSearch={submitSearch}
-                query={searchQuery}
-                setQuery={setSearchQuery}
-              />
-            ) : null}
-            {route === 'favorites' ? (
-              <FavoritesPage
-                auth={auth}
-                onAddVideo={addVideoToQueue}
-                onLogin={() => setLoginOpen(true)}
-                onNotice={pushNotice}
-                onPlayVideo={playVideo}
-                profile={activeProfile}
-              />
-            ) : null}
-            {route === 'settings' ? (
-              <SettingsPage
-                auth={auth}
-                cacheBusy={cacheBusy}
-                cacheProgress={cacheProgress}
-                cacheSummary={cacheSummary}
-                onClearCache={() => void clearCache()}
-                onExportLogs={() => void exportLogs()}
-                onLogin={() => setLoginOpen(true)}
-                onLogout={() => void logout()}
-                onRenew={() => void renewLogin()}
-                onRefreshCache={() => void refreshCacheSummary()}
-                onCheckForUpdates={() => void checkForUpdates()}
-                onUpdate={updateSettings}
-                onOpenUpdateDownload={() => void openUpdateDownload()}
-                profile={activeProfile}
-                settings={settings}
-                updateInfo={updateInfo}
-              />
-            ) : null}
-          </main>
-
-          <PlayerPlaceholder
-            playback={playback}
-            spectrum={spectrum}
-            onModeChange={setPlaybackMode}
-            onNext={() =>
-              void window.nyamiDesktop.playback.skipNext().then(setPlayback)
-            }
-            onPause={() =>
-              void window.nyamiDesktop.playback.pause().then(setPlayback)
-            }
-            onPlay={() => void togglePlayback()}
-            onPrevious={() =>
-              void window.nyamiDesktop.playback.skipPrevious().then(setPlayback)
-            }
-            onRemove={removePlaybackItem}
-            onReorder={reorderPlaybackQueue}
-            onSeek={seekPlayback}
-            onSleepTimer={setPlaybackSleepTimer}
-            onSelectTrack={playQueueTrack}
-            onVolume={setPlaybackVolume}
+      {isImmersiveRoute ? (
+        <PrototypeImmersivePage {...prototypePageProps} />
+      ) : (
+        <>
+          <WindowTitlebar
+            isMaximized={isWindowMaximized}
+            onClose={closeWindow}
+            onMinimize={minimizeWindow}
+            onToggleMaximize={() => void toggleWindowMaximize()}
           />
-        </section>
-      </div>
+          <div className="desktop-frame">
+            <Sidebar
+              auth={auth}
+              profile={activeProfile}
+              route={route}
+              onLogin={() => setLoginOpen(true)}
+              onRouteChange={setRoute}
+            />
+            <section className="workspace">
+              <header
+                className={
+                  route === 'search'
+                    ? 'workspace-header search-route'
+                    : 'workspace-header'
+                }>
+                <div className="breadcrumb-block">
+                  <p className="section-kicker">
+                    {getRouteHeader(route).eyebrow}
+                  </p>
+                  <h1>{getRouteHeader(route).title}</h1>
+                </div>
+                <form
+                  className={
+                    route === 'search'
+                      ? 'global-search is-hidden'
+                      : 'global-search'
+                  }
+                  onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                    event.preventDefault();
+                    submitSearch(searchQuery);
+                  }}>
+                  <Icon name="search" size={18} />
+                  <input
+                    aria-label="搜索 Bilibili 视频"
+                    onChange={event => setSearchQuery(event.target.value)}
+                    placeholder="搜索视频、音乐或 UP 主"
+                    ref={searchInputRef}
+                    value={searchQuery}
+                  />
+                  <kbd>Ctrl K</kbd>
+                </form>
+                <div className="header-actions">
+                  {webViewState.open ? (
+                    <button
+                      className="webview-close-button"
+                      onClick={() => void closeWebLoginAndReturn()}
+                      type="button">
+                      <Icon name="x" size={16} />
+                      {webViewState.mode === 'login'
+                        ? '返回登录方式'
+                        : '关闭网页登录'}
+                    </button>
+                  ) : null}
+                  <div className="task-center-wrap">
+                    <button
+                      aria-expanded={taskCenterOpen}
+                      aria-label="打开任务通知"
+                      className="icon-button notification-button"
+                      onClick={() => setTaskCenterOpen(current => !current)}
+                      title="任务通知"
+                      type="button">
+                      <Icon name="bell" size={18} />
+                      {notices.length ? (
+                        <span className="notification-count">
+                          {notices.length}
+                        </span>
+                      ) : null}
+                    </button>
+                    {taskCenterOpen ? (
+                      <TaskCenter
+                        notices={notices}
+                        onCancelSync={() => {
+                          void window.nyamiDesktop.sync.cancel().then(setSync);
+                        }}
+                        onDismiss={id =>
+                          setNotices(current =>
+                            current.filter(notice => notice.id !== id),
+                          )
+                        }
+                        onStartSync={(force = false) => {
+                          void window.nyamiDesktop.sync
+                            .start({force})
+                            .then(setSync)
+                            .catch(error => {
+                              pushNotice(
+                                'error',
+                                getErrorMessage(error, '同步启动失败'),
+                              );
+                            });
+                        }}
+                        sync={sync}
+                      />
+                    ) : null}
+                  </div>
+                </div>
+              </header>
 
-      <audio aria-hidden="true" className="desktop-audio-element" ref={audioElementRef} />
+              {webViewState.open ? (
+                <div className="webview-banner" role="status">
+                  <span className="status-dot online" />
+                  {webViewState.mode === 'refresh'
+                    ? '正在安全续期 Bilibili 登录状态…'
+                    : 'Bilibili 网页已打开，请在上方页面完成登录'}
+                </div>
+              ) : null}
+
+              <main className="page-scroll">
+                {route === 'settings' ? (
+                  <SettingsPage
+                    auth={auth}
+                    cacheBusy={cacheBusy}
+                    cacheProgress={cacheProgress}
+                    cacheSummary={cacheSummary}
+                    onClearCache={() => void clearCache()}
+                    onExportLogs={() => void exportLogs()}
+                    onLogin={() => setLoginOpen(true)}
+                    onLogout={() => void logout()}
+                    onRenew={() => void renewLogin()}
+                    onRefreshCache={() => void refreshCacheSummary()}
+                    onCheckForUpdates={() => void checkForUpdates()}
+                    onUpdate={updateSettings}
+                    onOpenUpdateDownload={() => void openUpdateDownload()}
+                    profile={activeProfile}
+                    settings={settings}
+                    updateInfo={updateInfo}
+                  />
+                ) : (
+                  <PrototypePage {...prototypePageProps} />
+                )}
+              </main>
+
+              <PlayerPlaceholder
+                playback={playback}
+                spectrum={spectrum}
+                onModeChange={setPlaybackMode}
+                onNext={() =>
+                  void window.nyamiDesktop.playback.skipNext().then(setPlayback)
+                }
+                onPause={() =>
+                  void window.nyamiDesktop.playback.pause().then(setPlayback)
+                }
+                onPlay={() => void togglePlayback()}
+                onPrevious={() =>
+                  void window.nyamiDesktop.playback
+                    .skipPrevious()
+                    .then(setPlayback)
+                }
+                onRemove={removePlaybackItem}
+                onReorder={reorderPlaybackQueue}
+                onSeek={seekPlayback}
+                onSelectTrack={playQueueTrack}
+                onOpenPlayback={() => setRoute('immersive-windowed')}
+                onVolume={setPlaybackVolume}
+              />
+            </section>
+          </div>
+        </>
+      )}
+
+      <audio
+        aria-hidden="true"
+        className="desktop-audio-element"
+        ref={audioElementRef}
+      />
 
       <NoticeStack notices={notices.slice(-3)} />
 
@@ -1033,36 +1125,27 @@ function Sidebar({
   return (
     <aside className="sidebar">
       <div className="brand-lockup">
-        <div className="brand-mark">N</div>
-        <div>
-          <strong>Nyami</strong>
-          <span>桌面播放器</span>
-        </div>
+        <div className="brand-mark">NYAMI</div>
+        <span>art book / record archive</span>
       </div>
       <nav aria-label="主导航" className="primary-nav">
-        <p className="nav-label">浏览</p>
-        {NAV_ITEMS.map(item => (
-          <button
-            aria-current={route === item.route ? 'page' : undefined}
-            className={route === item.route ? 'nav-item active' : 'nav-item'}
-            key={item.route}
-            onClick={() => onRouteChange(item.route)}
-            type="button">
-            <Icon name={item.icon} size={18} />
-            <span>{item.label}</span>
-            {item.route === 'favorites' && auth.loggedIn ? (
-              <span className="nav-hint">账号</span>
-            ) : null}
-          </button>
-        ))}
-        <p className="nav-label nav-label-spaced">应用</p>
-        <button
-          className={route === 'settings' ? 'nav-item active' : 'nav-item'}
-          onClick={() => onRouteChange('settings')}
-          type="button">
-          <Icon name="settings" size={18} />
-          <span>设置</span>
-        </button>
+        <p className="nav-label">LIBRARY</p>
+        <div className="nav-list">
+          {NAV_ITEMS.map(item => (
+            <button
+              aria-current={route === item.route ? 'page' : undefined}
+              className={route === item.route ? 'nav-item active' : 'nav-item'}
+              key={item.route}
+              onClick={() => onRouteChange(item.route)}
+              type="button">
+              <Icon name={item.icon} size={18} />
+              <span>{item.label}</span>
+              {item.route === 'library' && auth.loggedIn ? (
+                <span className="nav-hint">账号</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
       </nav>
       <div className="sidebar-bottom">
         {auth.loggedIn ? (
@@ -1070,9 +1153,12 @@ function Sidebar({
             <Avatar profile={profile} />
             <span className="sidebar-account-copy">
               <strong>{profile?.name ?? 'Bilibili 账号'}</strong>
-              <small>{profile?.uid ?? auth.uid ? `UID ${profile?.uid ?? auth.uid}` : '已登录'}</small>
+              <small>
+                {profile?.uid ?? auth.uid
+                  ? `UID ${profile?.uid ?? auth.uid}`
+                  : '已登录'}
+              </small>
             </span>
-            <Icon name="chevron-right" size={15} />
           </button>
         ) : (
           <button className="sidebar-login" onClick={onLogin} type="button">
@@ -1087,6 +1173,7 @@ function Sidebar({
 }
 
 /** 搜索页支持分页、取消请求、重试和公开结果浏览。 */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function SearchPage({
   initialTrigger,
   inputRef,
@@ -1124,45 +1211,48 @@ function SearchPage({
   }, []);
 
   /** 请求搜索分页，并将取消视为正常的交互结果。 */
-  const load = useCallback(async (targetPage: number): Promise<void> => {
-    const normalized = queryRef.current.trim();
-    if (!normalized) {
-      setState('idle');
-      setResult(null);
-      return;
-    }
-    cancelActiveRequest();
-    const requestId = makeRequestId('search');
-    requestIdRef.current = requestId;
-    setState('loading');
-    setError('');
-    const request: SearchContentRequest = {
-      requestId,
-      keyword: normalized,
-      page: targetPage,
-    };
-    try {
-      const next = await window.nyamiDesktop.content.search(request);
-      if (requestIdRef.current !== requestId) {
+  const load = useCallback(
+    async (targetPage: number): Promise<void> => {
+      const normalized = queryRef.current.trim();
+      if (!normalized) {
+        setState('idle');
+        setResult(null);
         return;
       }
-      setResult(next);
-      setPage(targetPage);
-      setState('success');
-    } catch (requestError) {
-      if (requestIdRef.current !== requestId || isAbortError(requestError)) {
-        return;
+      cancelActiveRequest();
+      const requestId = makeRequestId('search');
+      requestIdRef.current = requestId;
+      setState('loading');
+      setError('');
+      const request: SearchContentRequest = {
+        requestId,
+        keyword: normalized,
+        page: targetPage,
+      };
+      try {
+        const next = await window.nyamiDesktop.content.search(request);
+        if (requestIdRef.current !== requestId) {
+          return;
+        }
+        setResult(next);
+        setPage(targetPage);
+        setState('success');
+      } catch (requestError) {
+        if (requestIdRef.current !== requestId || isAbortError(requestError)) {
+          return;
+        }
+        const message = getErrorMessage(requestError, '搜索失败');
+        setError(message);
+        setState('error');
+        onNotice('error', message);
+      } finally {
+        if (requestIdRef.current === requestId) {
+          requestIdRef.current = null;
+        }
       }
-      const message = getErrorMessage(requestError, '搜索失败');
-      setError(message);
-      setState('error');
-      onNotice('error', message);
-    } finally {
-      if (requestIdRef.current === requestId) {
-        requestIdRef.current = null;
-      }
-    }
-  }, [cancelActiveRequest, onNotice]);
+    },
+    [cancelActiveRequest, onNotice],
+  );
 
   useEffect(() => {
     if (initialTrigger > 0) {
@@ -1246,7 +1336,9 @@ function SearchPage({
         <>
           <div className="result-meta-row">
             <span>“{query}”的搜索结果</span>
-            {result.total !== null ? <small>约 {result.total.toLocaleString()} 条</small> : null}
+            {result.total !== null ? (
+              <small>约 {result.total.toLocaleString()} 条</small>
+            ) : null}
           </div>
           <VideoGrid
             items={result.items}
@@ -1267,6 +1359,7 @@ function SearchPage({
 }
 
 /** 收藏页展示当前账号的收藏夹目录和视频分页。 */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function FavoritesPage({
   auth,
   onAddVideo,
@@ -1289,8 +1382,10 @@ function FavoritesPage({
   const [videos, setVideos] = useState<DesktopPage<DesktopVideo> | null>(null);
   const [videoPage, setVideoPage] = useState(1);
   const [favoriteSearchQuery, setFavoriteSearchQuery] = useState('');
-  const [favoriteSearchState, setFavoriteSearchState] = useState<AsyncState>('idle');
-  const [favoriteSearchResult, setFavoriteSearchResult] = useState<DesktopPage<DesktopVideo> | null>(null);
+  const [favoriteSearchState, setFavoriteSearchState] =
+    useState<AsyncState>('idle');
+  const [favoriteSearchResult, setFavoriteSearchResult] =
+    useState<DesktopPage<DesktopVideo> | null>(null);
   const [favoriteSearchPage, setFavoriteSearchPage] = useState(1);
   const [error, setError] = useState('');
   const folderRequestRef = useRef(makeRequestId('favorite-folders'));
@@ -1314,7 +1409,9 @@ function FavoritesPage({
       uid: auth.uid,
     };
     try {
-      const next = await window.nyamiDesktop.content.getFavoriteFolders(request);
+      const next = await window.nyamiDesktop.content.getFavoriteFolders(
+        request,
+      );
       setFolders(next);
       setSelectedFolderId(current => current ?? next[0]?.id ?? null);
       setFolderState('success');
@@ -1346,7 +1443,9 @@ function FavoritesPage({
         page: targetPage,
       };
       try {
-        const next = await window.nyamiDesktop.content.getFavoriteVideos(request);
+        const next = await window.nyamiDesktop.content.getFavoriteVideos(
+          request,
+        );
         setVideos(next);
         setVideoPage(targetPage);
         setVideoState('success');
@@ -1425,9 +1524,15 @@ function FavoritesPage({
   useEffect(() => {
     void loadFolders();
     return () => {
-      void window.nyamiDesktop.content.cancel({requestId: folderRequestRef.current});
-      void window.nyamiDesktop.content.cancel({requestId: videoRequestRef.current});
-      void window.nyamiDesktop.content.cancel({requestId: favoriteSearchRequestRef.current});
+      void window.nyamiDesktop.content.cancel({
+        requestId: folderRequestRef.current,
+      });
+      void window.nyamiDesktop.content.cancel({
+        requestId: videoRequestRef.current,
+      });
+      void window.nyamiDesktop.content.cancel({
+        requestId: favoriteSearchRequestRef.current,
+      });
     };
   }, [loadFolders]);
 
@@ -1470,7 +1575,9 @@ function FavoritesPage({
         title={profile?.name ? `${profile.name} 的收藏夹` : '我的收藏夹'}
         description="目录和视频列表采用独立请求，切换收藏夹时不会阻塞整个窗口；搜索使用已同步的本地索引。"
       />
-      <form className="search-panel library-search-panel" onSubmit={submitFavoriteSearch}>
+      <form
+        className="search-panel library-search-panel"
+        onSubmit={submitFavoriteSearch}>
         <Icon name="search" size={19} />
         <input
           aria-label="搜索本地收藏"
@@ -1504,21 +1611,34 @@ function FavoritesPage({
               <p className="section-kicker">LOCAL INDEX</p>
               <h3>收藏搜索结果</h3>
             </div>
-            {favoriteSearchResult?.total !== null && favoriteSearchResult?.total !== undefined ? (
-              <span className="muted-label">{favoriteSearchResult.total.toLocaleString()} 个视频</span>
+            {favoriteSearchResult?.total !== null &&
+            favoriteSearchResult?.total !== undefined ? (
+              <span className="muted-label">
+                {favoriteSearchResult.total.toLocaleString()} 个视频
+              </span>
             ) : null}
           </div>
           {favoriteSearchState === 'idle' ? (
             <EmptyState icon="search" message="提交关键词搜索已同步收藏" />
           ) : null}
-          {favoriteSearchState === 'loading' ? <LoadingState label="正在搜索本地收藏" /> : null}
+          {favoriteSearchState === 'loading' ? (
+            <LoadingState label="正在搜索本地收藏" />
+          ) : null}
           {favoriteSearchState === 'error' ? (
-            <ErrorState message={error} onRetry={() => void loadFavoriteSearch(favoriteSearchPage)} />
+            <ErrorState
+              message={error}
+              onRetry={() => void loadFavoriteSearch(favoriteSearchPage)}
+            />
           ) : null}
-          {favoriteSearchState === 'success' && favoriteSearchResult?.items.length === 0 ? (
-            <EmptyState icon="search" message={`没有找到“${favoriteSearchQuery.trim()}”的收藏`} />
+          {favoriteSearchState === 'success' &&
+          favoriteSearchResult?.items.length === 0 ? (
+            <EmptyState
+              icon="search"
+              message={`没有找到“${favoriteSearchQuery.trim()}”的收藏`}
+            />
           ) : null}
-          {favoriteSearchState === 'success' && favoriteSearchResult?.items.length ? (
+          {favoriteSearchState === 'success' &&
+          favoriteSearchResult?.items.length ? (
             <>
               <VideoGrid
                 items={favoriteSearchResult.items}
@@ -1529,96 +1649,125 @@ function FavoritesPage({
                 hasMore={favoriteSearchResult.hasMore}
                 loading={false}
                 onNext={() => void loadFavoriteSearch(favoriteSearchPage + 1)}
-                onPrevious={() => void loadFavoriteSearch(favoriteSearchPage - 1)}
+                onPrevious={() =>
+                  void loadFavoriteSearch(favoriteSearchPage - 1)
+                }
                 page={favoriteSearchPage}
               />
             </>
           ) : null}
         </section>
       ) : null}
-      {!favoriteSearchQuery.trim() ? <div className="library-layout">
-        <aside className="folder-panel">
-          <div className="panel-heading">
-            <div>
-              <p className="section-kicker">FOLDERS</p>
-              <h3>收藏目录</h3>
+      {!favoriteSearchQuery.trim() ? (
+        <div className="library-layout">
+          <aside className="folder-panel">
+            <div className="panel-heading">
+              <div>
+                <p className="section-kicker">FOLDERS</p>
+                <h3>收藏目录</h3>
+              </div>
+              <span className="count-badge">{folders.length}</span>
             </div>
-            <span className="count-badge">{folders.length}</span>
-          </div>
-          {folderState === 'loading' ? <LoadingState label="正在读取目录" compact /> : null}
-          {folderState === 'error' ? (
-            <ErrorState compact message={error} onRetry={() => void loadFolders()} />
-          ) : null}
-          {folderState === 'success' && folders.length === 0 ? (
-            <EmptyState compact icon="folder" message="还没有收藏夹" />
-          ) : null}
-          <div className="folder-list">
-            {folders.map(folder => (
-              <button
-                className={selectedFolderId === folder.id ? 'folder-item active' : 'folder-item'}
-                key={folder.id}
-                onClick={() => setSelectedFolderId(folder.id)}
-                type="button">
-                <Icon name="folder" size={17} />
-                <span>
-                  <strong>{folder.title}</strong>
-                  <small>{folder.mediaCount.toLocaleString()} 个视频</small>
-                </span>
-                <Icon name="chevron-right" size={14} />
-              </button>
-            ))}
-          </div>
-        </aside>
-        <section className="library-content">
-          <div className="panel-heading">
-            <div>
-              <p className="section-kicker">VIDEOS</p>
-              <h3>{folders.find(folder => folder.id === selectedFolderId)?.title ?? '选择收藏夹'}</h3>
-            </div>
-            {videos?.total !== null && videos?.total !== undefined ? (
-              <span className="muted-label">{videos.total.toLocaleString()} 个视频</span>
+            {folderState === 'loading' ? (
+              <LoadingState label="正在读取目录" compact />
             ) : null}
-          </div>
-          {videoState === 'loading' ? <LoadingState label="正在读取收藏视频" /> : null}
-          {videoState === 'error' ? (
-            <ErrorState
-              message={error}
-              onRetry={() =>
-                selectedFolderId === null ? undefined : void loadVideos(selectedFolderId, videoPage)
-              }
-            />
-          ) : null}
-          {videoState === 'success' && videos?.items.length === 0 ? (
-            <EmptyState icon="folder" message="这个收藏夹暂时为空" />
-          ) : null}
-          {videoState === 'success' && videos?.items.length ? (
-            <>
-              {videos.description ? <p className="folder-description">{videos.description}</p> : null}
-              <VideoGrid
-                items={videos.items}
-                onAddVideo={onAddVideo}
-                onPlayVideo={onPlayVideo}
+            {folderState === 'error' ? (
+              <ErrorState
+                compact
+                message={error}
+                onRetry={() => void loadFolders()}
               />
-              <Pagination
-                hasMore={videos.hasMore}
-                loading={false}
-                onNext={() =>
-                  selectedFolderId === null ? undefined : void loadVideos(selectedFolderId, videoPage + 1)
+            ) : null}
+            {folderState === 'success' && folders.length === 0 ? (
+              <EmptyState compact icon="folder" message="还没有收藏夹" />
+            ) : null}
+            <div className="folder-list">
+              {folders.map(folder => (
+                <button
+                  className={
+                    selectedFolderId === folder.id
+                      ? 'folder-item active'
+                      : 'folder-item'
+                  }
+                  key={folder.id}
+                  onClick={() => setSelectedFolderId(folder.id)}
+                  type="button">
+                  <Icon name="folder" size={17} />
+                  <span>
+                    <strong>{folder.title}</strong>
+                    <small>{folder.mediaCount.toLocaleString()} 个视频</small>
+                  </span>
+                  <Icon name="chevron-right" size={14} />
+                </button>
+              ))}
+            </div>
+          </aside>
+          <section className="library-content">
+            <div className="panel-heading">
+              <div>
+                <p className="section-kicker">VIDEOS</p>
+                <h3>
+                  {folders.find(folder => folder.id === selectedFolderId)
+                    ?.title ?? '选择收藏夹'}
+                </h3>
+              </div>
+              {videos?.total !== null && videos?.total !== undefined ? (
+                <span className="muted-label">
+                  {videos.total.toLocaleString()} 个视频
+                </span>
+              ) : null}
+            </div>
+            {videoState === 'loading' ? (
+              <LoadingState label="正在读取收藏视频" />
+            ) : null}
+            {videoState === 'error' ? (
+              <ErrorState
+                message={error}
+                onRetry={() =>
+                  selectedFolderId === null
+                    ? undefined
+                    : void loadVideos(selectedFolderId, videoPage)
                 }
-                onPrevious={() =>
-                  selectedFolderId === null ? undefined : void loadVideos(selectedFolderId, videoPage - 1)
-                }
-                page={videoPage}
               />
-            </>
-          ) : null}
-        </section>
-      </div> : null}
+            ) : null}
+            {videoState === 'success' && videos?.items.length === 0 ? (
+              <EmptyState icon="folder" message="这个收藏夹暂时为空" />
+            ) : null}
+            {videoState === 'success' && videos?.items.length ? (
+              <>
+                {videos.description ? (
+                  <p className="folder-description">{videos.description}</p>
+                ) : null}
+                <VideoGrid
+                  items={videos.items}
+                  onAddVideo={onAddVideo}
+                  onPlayVideo={onPlayVideo}
+                />
+                <Pagination
+                  hasMore={videos.hasMore}
+                  loading={false}
+                  onNext={() =>
+                    selectedFolderId === null
+                      ? undefined
+                      : void loadVideos(selectedFolderId, videoPage + 1)
+                  }
+                  onPrevious={() =>
+                    selectedFolderId === null
+                      ? undefined
+                      : void loadVideos(selectedFolderId, videoPage - 1)
+                  }
+                  page={videoPage}
+                />
+              </>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/** 设置页承载桌面主题、窗口行为和账号操作。 */
+/** 设置页承载浅色主题、窗口行为、Android 同步偏好和账号操作。 */
 function SettingsPage({
   auth,
   cacheBusy,
@@ -1649,11 +1798,56 @@ function SettingsPage({
   onRenew: () => void;
   onRefreshCache: () => void;
   onOpenUpdateDownload: () => void;
-  onUpdate: (patch: Parameters<typeof window.nyamiDesktop.settings.update>[0]) => void;
+  onUpdate: (
+    patch: Parameters<typeof window.nyamiDesktop.settings.update>[0],
+  ) => void;
   profile: UserProfile | null;
   settings: DesktopSettings | null;
   updateInfo: DesktopUpdateInfo;
 }): JSX.Element {
+  const [preferences, setPreferences] = useState<DesktopUserPreferences>(() =>
+    loadDesktopUserPreferences(),
+  );
+  const [blacklistInput, setBlacklistInput] = useState('');
+
+  /** 更新 Android 端同步到桌面的偏好并立即持久化。 */
+  const updatePreference = useCallback(
+    (patch: Partial<DesktopUserPreferences>): void => {
+      setPreferences(previous => {
+        const next = {...previous, ...patch};
+        saveDesktopUserPreferences(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  /** 将文本输入转换为正整数，避免推荐时长写入非法值。 */
+  const updateDurationLimit = (value: string): void => {
+    const parsed = Number(value);
+    if (value.trim() && Number.isFinite(parsed) && parsed > 0) {
+      updatePreference({
+        recommendationDurationLimitMinutes: Math.floor(parsed),
+      });
+    }
+  };
+
+  /** 将黑名单输入按 Android 端支持的分隔符拆分并去重。 */
+  const addBlacklistTags = (value: string): void => {
+    const tags = value
+      .split(/[\n,，、;；\t]+/)
+      .map(item => item.trim())
+      .filter(Boolean);
+    if (!tags.length) {
+      return;
+    }
+    updatePreference({
+      recommendationTagBlacklist: Array.from(
+        new Set([...preferences.recommendationTagBlacklist, ...tags]),
+      ),
+    });
+  };
+
   return (
     <div className="page-stack settings-page">
       <PageIntro
@@ -1671,16 +1865,16 @@ function SettingsPage({
         <div className="theme-options">
           {THEME_OPTIONS.map(option => (
             <button
-              className={settings?.theme === option.value ? 'theme-option active' : 'theme-option'}
+              className="theme-option active"
               key={option.value}
-              onClick={() => onUpdate({theme: option.value})}
+              onClick={() => onUpdate({theme: 'light'})}
               type="button">
               <span className={`theme-swatch swatch-${option.value}`} />
               <span>
                 <strong>{option.label}</strong>
                 <small>{option.description}</small>
               </span>
-              {settings?.theme === option.value ? <Icon name="check" size={17} /> : null}
+              <Icon name="check" size={17} />
             </button>
           ))}
         </div>
@@ -1723,10 +1917,247 @@ function SettingsPage({
           />
         </label>
       </section>
-      <AudioSettingsPanel
-        onUpdate={onUpdate}
-        settings={settings?.audio ?? DEFAULT_DESKTOP_AUDIO_SETTINGS}
-      />
+      <section className="settings-card">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">STARTUP / SYNC</p>
+            <h3>启动与同步</h3>
+          </div>
+        </div>
+        <label className="setting-row">
+          <span>
+            <strong>启动时拉取收藏夹最新视频</strong>
+            <small>重新启动时增量检查收藏夹，仍可在任务通知中手动同步。</small>
+          </span>
+          <input
+            checked={preferences.autoRefreshFavoritesOnLaunch}
+            onChange={event =>
+              updatePreference({
+                autoRefreshFavoritesOnLaunch: event.target.checked,
+              })
+            }
+            type="checkbox"
+          />
+        </label>
+        <label className="setting-row">
+          <span>
+            <strong>自动刷新首页推荐</strong>
+            <small>
+              {preferences.homeRefreshMode === 'automatic'
+                ? `每 ${preferences.homeRefreshIntervalHours} 小时自动检查`
+                : '手动模式 · 通过首页刷新按钮更新'}
+            </small>
+          </span>
+          <input
+            checked={preferences.homeRefreshMode === 'automatic'}
+            onChange={event =>
+              updatePreference({
+                homeRefreshMode: event.target.checked ? 'automatic' : 'manual',
+              })
+            }
+            type="checkbox"
+          />
+        </label>
+        {preferences.homeRefreshMode === 'automatic' ? (
+          <label className="setting-row setting-row-select">
+            <span>
+              <strong>自动刷新间隔</strong>
+              <small>控制首页推荐的检查频率。</small>
+            </span>
+            <select
+              aria-label="首页自动刷新间隔"
+              onChange={event =>
+                updatePreference({
+                  homeRefreshIntervalHours: Number(event.target.value),
+                })
+              }
+              value={preferences.homeRefreshIntervalHours}>
+              <option value="6">6 小时</option>
+              <option value="12">12 小时</option>
+              <option value="24">24 小时</option>
+            </select>
+          </label>
+        ) : null}
+      </section>
+      <section className="settings-card">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">RECOMMENDATION</p>
+            <h3>推荐偏好</h3>
+          </div>
+        </div>
+        <label className="setting-row">
+          <span>
+            <strong>推荐视频时长筛选</strong>
+            <small>开启后，首页个性化推荐只保留限定时长内的视频。</small>
+          </span>
+          <input
+            checked={preferences.recommendationDurationFilterEnabled}
+            onChange={event =>
+              updatePreference({
+                recommendationDurationFilterEnabled: event.target.checked,
+              })
+            }
+            type="checkbox"
+          />
+        </label>
+        <label className="setting-row setting-row-input">
+          <span>
+            <strong>最长时长（分钟）</strong>
+            <small>只填写最大时长，留空时不限制。</small>
+          </span>
+          <input
+            aria-label="推荐视频最长时长"
+            disabled={!preferences.recommendationDurationFilterEnabled}
+            min="1"
+            onChange={event => updateDurationLimit(event.target.value)}
+            type="number"
+            value={preferences.recommendationDurationLimitMinutes}
+          />
+        </label>
+        <div className="setting-row setting-row-tags">
+          <span>
+            <strong>推荐关键词屏蔽</strong>
+            <small>使用换行或逗号分隔，匹配标签后不再进入推荐。</small>
+          </span>
+          <div className="setting-tags-control">
+            <input
+              aria-label="添加推荐屏蔽标签"
+              onChange={event => setBlacklistInput(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addBlacklistTags(blacklistInput);
+                  setBlacklistInput('');
+                }
+              }}
+              placeholder="例如：搬运"
+              value={blacklistInput}
+            />
+            <button
+              className="text-button"
+              onClick={() => {
+                addBlacklistTags(blacklistInput);
+                setBlacklistInput('');
+              }}
+              type="button">
+              添加
+            </button>
+            <div className="setting-tags-list">
+              {preferences.recommendationTagBlacklist.map(tag => (
+                <button
+                  aria-label={`移除屏蔽标签 ${tag}`}
+                  key={tag}
+                  onClick={() =>
+                    updatePreference({
+                      recommendationTagBlacklist:
+                        preferences.recommendationTagBlacklist.filter(
+                          item => item !== tag,
+                        ),
+                    })
+                  }
+                  type="button">
+                  {tag} ×
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <label className="setting-row">
+          <span>
+            <strong>个性化播放缓存</strong>
+            <small>按当前偏好缓存推荐内容，减少重复加载。</small>
+          </span>
+          <input
+            checked={preferences.cachePersonalizedRecommendations}
+            onChange={event =>
+              updatePreference({
+                cachePersonalizedRecommendations: event.target.checked,
+              })
+            }
+            type="checkbox"
+          />
+        </label>
+      </section>
+      <section className="settings-card">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">NETWORK / PLAYBACK</p>
+            <h3>网络与播放</h3>
+          </div>
+        </div>
+        <label className="setting-row">
+          <span>
+            <strong>仅 Wi-Fi 下加载</strong>
+            <small>使用移动网络时不加载新的在线音频。</small>
+          </span>
+          <input
+            checked={preferences.wifiOnly}
+            onChange={event =>
+              updatePreference({wifiOnly: event.target.checked})
+            }
+            type="checkbox"
+          />
+        </label>
+        <label className="setting-row">
+          <span>
+            <strong>Wi-Fi 下自动缓存已播放音频</strong>
+            <small>再次播放时优先使用本机缓存。</small>
+          </span>
+          <input
+            checked={preferences.autoCacheOnWifi}
+            onChange={event =>
+              updatePreference({autoCacheOnWifi: event.target.checked})
+            }
+            type="checkbox"
+          />
+        </label>
+        <label className="setting-row">
+          <span>
+            <strong>自动展开视频分集</strong>
+            <small>多分集视频加入队列时展开全部分集。</small>
+          </span>
+          <input
+            checked={preferences.expandMultiPart}
+            onChange={event =>
+              updatePreference({expandMultiPart: event.target.checked})
+            }
+            type="checkbox"
+          />
+        </label>
+        <label className="setting-row">
+          <span>
+            <strong>与其他应用同时播放</strong>
+            <small>允许音频与其他桌面应用混合播放。</small>
+          </span>
+          <input
+            checked={preferences.mixWithOthers}
+            onChange={event =>
+              updatePreference({mixWithOthers: event.target.checked})
+            }
+            type="checkbox"
+          />
+        </label>
+        <label className="setting-row setting-row-select">
+          <span>
+            <strong>播放音质</strong>
+            <small>仅影响后续请求，实际质量仍以 Bilibili 音源为准。</small>
+          </span>
+          <select
+            aria-label="播放音质"
+            onChange={event =>
+              updatePreference({
+                quality: event.target
+                  .value as DesktopUserPreferences['quality'],
+              })
+            }
+            value={preferences.quality}>
+            <option value="standard">标准</option>
+            <option value="high">高品质</option>
+            <option value="best">最高可用</option>
+          </select>
+        </label>
+      </section>
       <section className="settings-card">
         <div className="panel-heading">
           <div>
@@ -1759,7 +2190,9 @@ function SettingsPage({
         {cacheProgress ? (
           <div className="cache-progress" role="status">
             <span>
-              {cacheProgress.operation === 'clear' ? '正在清理缓存' : '正在扫描缓存'}
+              {cacheProgress.operation === 'clear'
+                ? '正在清理缓存'
+                : '正在扫描缓存'}
             </span>
             <span>
               {cacheProgress.completed}/{cacheProgress.total}
@@ -1775,7 +2208,9 @@ function SettingsPage({
             <Icon name="trash" size={16} />
             {cacheBusy ? '清理中…' : '清空缓存'}
           </button>
-          <small>清理会删除已下载音频和图片，播放队列会在下次播放时重新获取。</small>
+          <small>
+            清理会删除已下载音频和图片，播放队列会在下次播放时重新获取。
+          </small>
         </div>
       </section>
       <section className="settings-card">
@@ -1786,7 +2221,10 @@ function SettingsPage({
           </div>
         </div>
         <div className="settings-actions-row">
-          <button className="secondary-button" onClick={onExportLogs} type="button">
+          <button
+            className="secondary-button"
+            onClick={onExportLogs}
+            type="button">
             <Icon name="download" size={16} />
             导出脱敏日志
           </button>
@@ -1800,7 +2238,9 @@ function SettingsPage({
             <h3>版本与更新</h3>
           </div>
           <span className="status-chip">
-            {updateInfo.currentVersion ? `v${updateInfo.currentVersion}` : '读取版本…'}
+            {updateInfo.currentVersion
+              ? `v${updateInfo.currentVersion}`
+              : '读取版本…'}
           </span>
         </div>
         <div className="update-summary" role="status">
@@ -1850,15 +2290,29 @@ function SettingsPage({
             <Avatar profile={profile} size="large" />
             <div>
               <strong>{profile?.name ?? 'Bilibili 账号'}</strong>
-              <span>{profile?.uid ?? auth.uid ? `UID ${profile?.uid ?? auth.uid}` : '已登录'}</span>
-              <small>{auth.refreshAvailable ? '支持自动续期' : '建议重新扫码获取续期凭证'}</small>
+              <span>
+                {profile?.uid ?? auth.uid
+                  ? `UID ${profile?.uid ?? auth.uid}`
+                  : '已登录'}
+              </span>
+              <small>
+                {auth.refreshAvailable
+                  ? '支持自动续期'
+                  : '建议重新扫码获取续期凭证'}
+              </small>
             </div>
             <div className="account-settings-actions">
-              <button className="secondary-button" onClick={onRenew} type="button">
+              <button
+                className="secondary-button"
+                onClick={onRenew}
+                type="button">
                 <Icon name="refresh" size={16} />
                 续期登录
               </button>
-              <button className="danger-button" onClick={onLogout} type="button">
+              <button
+                className="danger-button"
+                onClick={onLogout}
+                type="button">
                 <Icon name="log-out" size={16} />
                 退出登录
               </button>
@@ -1866,7 +2320,9 @@ function SettingsPage({
           </div>
         ) : (
           <div className="account-settings-summary logged-out">
-            <div className="avatar avatar-large avatar-placeholder"><Icon name="user" size={22} /></div>
+            <div className="avatar avatar-large avatar-placeholder">
+              <Icon name="user" size={22} />
+            </div>
             <div>
               <strong>尚未登录</strong>
               <span>公开内容仍可浏览</span>
@@ -1924,7 +2380,11 @@ function LoginDialog({
             <p className="section-kicker">BILIBILI ACCOUNT</p>
             <h2>{auth.loggedIn ? '账号已连接' : '连接 Bilibili 账号'}</h2>
           </div>
-          <button aria-label="关闭登录窗口" className="icon-button" onClick={onClose} type="button">
+          <button
+            aria-label="关闭登录窗口"
+            className="icon-button"
+            onClick={onClose}
+            type="button">
             <Icon name="x" size={18} />
           </button>
         </div>
@@ -1932,14 +2392,26 @@ function LoginDialog({
           <div className="logged-in-dialog">
             <Avatar profile={profile} size="large" />
             <strong>{profile?.name ?? 'Bilibili 账号'}</strong>
-            <span>{profile?.uid ?? auth.uid ? `UID ${profile?.uid ?? auth.uid}` : '已登录'}</span>
-            <p>登录凭证保存在 Windows 安全存储中，Renderer 不会读取完整 Cookie。</p>
+            <span>
+              {profile?.uid ?? auth.uid
+                ? `UID ${profile?.uid ?? auth.uid}`
+                : '已登录'}
+            </span>
+            <p>
+              登录凭证保存在 Windows 安全存储中，Renderer 不会读取完整 Cookie。
+            </p>
             <div className="dialog-actions">
-              <button className="secondary-button" onClick={onRenew} type="button">
+              <button
+                className="secondary-button"
+                onClick={onRenew}
+                type="button">
                 <Icon name="refresh" size={16} />
                 续期登录
               </button>
-              <button className="danger-button" onClick={onLogout} type="button">
+              <button
+                className="danger-button"
+                onClick={onLogout}
+                type="button">
                 <Icon name="log-out" size={16} />
                 退出登录
               </button>
@@ -1949,22 +2421,42 @@ function LoginDialog({
           <>
             <div className="login-method-tabs">
               <span className="login-method active">扫码登录</span>
-              <button className="text-button" onClick={onWebLogin} type="button">
+              <button
+                className="text-button"
+                onClick={onWebLogin}
+                type="button">
                 <Icon name="user" size={15} />
                 网页登录
               </button>
             </div>
             <div className="qr-login-stage">
               {imageDataUrl ? (
-                <img alt="Bilibili 登录二维码" className="qr-image" src={imageDataUrl} />
+                <img
+                  alt="Bilibili 登录二维码"
+                  className="qr-image"
+                  src={imageDataUrl}
+                />
               ) : (
-                <div className="qr-placeholder"><Icon name="loader" size={22} />正在准备二维码</div>
+                <div className="qr-placeholder">
+                  <Icon name="loader" size={22} />
+                  正在准备二维码
+                </div>
               )}
             </div>
-            <p aria-live="polite" className="login-status">{status}</p>
-            {expiresAt ? <p className="muted-label">二维码有效期至 {new Date(expiresAt).toLocaleTimeString()}</p> : null}
+            <p aria-live="polite" className="login-status">
+              {status}
+            </p>
+            {expiresAt ? (
+              <p className="muted-label">
+                二维码有效期至 {new Date(expiresAt).toLocaleTimeString()}
+              </p>
+            ) : null}
             <div className="dialog-actions">
-              <button className="primary-button" disabled={busy} onClick={onStartQr} type="button">
+              <button
+                className="primary-button"
+                disabled={busy}
+                onClick={onStartQr}
+                type="button">
                 <Icon name="refresh" size={16} />
                 {busy ? '生成中…' : '重新生成二维码'}
               </button>
@@ -2027,7 +2519,9 @@ function VideoCard({
         <p>{item.author}</p>
         <div className="video-card-meta">
           <span>{formatDate(item.pubtime)}</span>
-          {item.source === 'favorite' ? <span className="source-chip">已收藏</span> : null}
+          {item.source === 'favorite' ? (
+            <span className="source-chip">已收藏</span>
+          ) : null}
           <button
             aria-label={`将 ${item.title} 加入队列`}
             className="queue-add-button"
@@ -2089,6 +2583,7 @@ function PageIntro({
 }
 
 /** 渲染区块标题和可选动作。 */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function SectionHeading({
   action,
   eyebrow,
@@ -2110,9 +2605,17 @@ function SectionHeading({
 }
 
 /** 渲染统一加载状态。 */
-function LoadingState({label, compact = false}: {label: string; compact?: boolean}): JSX.Element {
+function LoadingState({
+  label,
+  compact = false,
+}: {
+  label: string;
+  compact?: boolean;
+}): JSX.Element {
   return (
-    <div className={compact ? 'state-card compact' : 'state-card'} role="status">
+    <div
+      className={compact ? 'state-card compact' : 'state-card'}
+      role="status">
       <Icon className="spin" name="loader" size={20} />
       <span>{label}</span>
     </div>
@@ -2134,8 +2637,13 @@ function EmptyState({
   secondary?: string;
 }): JSX.Element {
   return (
-    <div className={compact ? 'state-card empty-state compact' : 'state-card empty-state'}>
-      <span className="state-icon"><Icon name={icon} size={21} /></span>
+    <div
+      className={
+        compact ? 'state-card empty-state compact' : 'state-card empty-state'
+      }>
+      <span className="state-icon">
+        <Icon name={icon} size={21} />
+      </span>
       <strong>{message}</strong>
       {secondary ? <span>{secondary}</span> : null}
       {action}
@@ -2154,8 +2662,14 @@ function ErrorState({
   onRetry: () => void;
 }): JSX.Element {
   return (
-    <div className={compact ? 'state-card error-state compact' : 'state-card error-state'} role="alert">
-      <span className="state-icon error"><Icon name="alert" size={21} /></span>
+    <div
+      className={
+        compact ? 'state-card error-state compact' : 'state-card error-state'
+      }
+      role="alert">
+      <span className="state-icon error">
+        <Icon name="alert" size={21} />
+      </span>
       <strong>{message}</strong>
       <button className="text-button" onClick={onRetry} type="button">
         <Icon name="refresh" size={15} />
@@ -2206,19 +2720,31 @@ function Pagination({
 
 /** 渲染受 AudioWorklet 驱动的轻量频谱柱，限制柱数和重绘频率。 */
 const SpectrumVisualizer = memo(function SpectrumVisualizer({
+  isPlaying = false,
   values,
 }: {
+  isPlaying?: boolean;
   values: number[];
 }): JSX.Element {
   const displayValues = values.slice(0, 24);
   return (
-    <div aria-label="实时频谱" className="spectrum-visualizer" role="img">
+    <div
+      aria-label="实时频谱"
+      className={
+        isPlaying ? 'spectrum-visualizer is-playing' : 'spectrum-visualizer'
+      }
+      role="img">
       {(displayValues.length ? displayValues : Array(24).fill(0)).map(
         (value, index) => (
           <span
             className="spectrum-bar"
             key={index}
-            style={{height: `${Math.max(6, Math.round(value * 100))}%`}}
+            style={
+              {
+                '--bar-index': index,
+                height: `${Math.max(6, Math.round(value * 100))}%`,
+              } as CSSProperties
+            }
           />
         ),
       )}
@@ -2239,7 +2765,7 @@ function PlayerPlaceholder({
   onReorder,
   onSeek,
   onSelectTrack,
-  onSleepTimer,
+  onOpenPlayback,
   onVolume,
 }: {
   playback: PlaybackSnapshot;
@@ -2253,14 +2779,13 @@ function PlayerPlaceholder({
   onReorder: (trackIds: string[]) => void;
   onSeek: (position: number) => void;
   onSelectTrack: (trackId: string) => void;
-  onSleepTimer: (seconds: number | null) => void;
+  onOpenPlayback: () => void;
   onVolume: (volume: number) => void;
 }): JSX.Element {
   const isPlaying = playback.state === 'playing';
   const [queueOpen, setQueueOpen] = useState(false);
   const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null);
   const duration = playback.duration > 0 ? playback.duration : 1;
-  const sleepValue = playback.sleepTimerSeconds ? 'active' : '';
 
   /** 将拖拽中的队列项目移动到目标位置。 */
   const handleDrop = (targetId: string): void => {
@@ -2282,7 +2807,11 @@ function PlayerPlaceholder({
   return (
     <footer className="player-placeholder">
       <div className="player-main-row">
-        <div className="player-track">
+        <button
+          aria-label="打开普通播放界面"
+          className="player-track player-track-button"
+          onClick={onOpenPlayback}
+          type="button">
           <PlayerArtworkImage src={playback.artwork} />
           <div className="player-track-copy">
             <strong title={playback.trackTitle ?? '尚未选择歌曲'}>
@@ -2298,15 +2827,30 @@ function PlayerPlaceholder({
               ) : null}
             </div>
           </div>
-        </div>
+        </button>
         <div className="player-controls">
-          <button aria-label="上一首" className="player-step-button" onClick={onPrevious} title="上一首" type="button">
+          <button
+            aria-label="上一首"
+            className="player-step-button"
+            onClick={onPrevious}
+            title="上一首"
+            type="button">
             <Icon name="arrow-left" size={17} />
           </button>
-          <button aria-label={isPlaying ? '暂停' : '播放'} className="player-main-button" onClick={isPlaying ? onPause : onPlay} title={isPlaying ? '暂停' : '播放'} type="button">
+          <button
+            aria-label={isPlaying ? '暂停' : '播放'}
+            className="player-main-button"
+            onClick={isPlaying ? onPause : onPlay}
+            title={isPlaying ? '暂停' : '播放'}
+            type="button">
             <Icon name={isPlaying ? 'pause' : 'play'} size={18} />
           </button>
-          <button aria-label="下一首" className="player-step-button" onClick={onNext} title="下一首" type="button">
+          <button
+            aria-label="下一首"
+            className="player-step-button"
+            onClick={onNext}
+            title="下一首"
+            type="button">
             <Icon name="arrow-right" size={17} />
           </button>
         </div>
@@ -2331,37 +2875,21 @@ function PlayerPlaceholder({
             title="播放队列"
             type="button">
             <Icon name="list" size={15} />
-            <span>队列</span>
             <strong>{playback.queueLength}</strong>
           </button>
           <button
             aria-label="切换播放模式"
             aria-pressed={playback.mode === 'shuffle'}
             className="player-tool-button queue-mode-button"
-            onClick={() => onModeChange(playback.mode === 'shuffle' ? 'sequential' : 'shuffle')}
+            onClick={() =>
+              onModeChange(
+                playback.mode === 'shuffle' ? 'sequential' : 'shuffle',
+              )
+            }
             title={playback.mode === 'shuffle' ? '随机播放' : '顺序播放'}
             type="button">
             <Icon name="shuffle" size={15} />
-            <span>{playback.mode === 'shuffle' ? '随机' : '顺序'}</span>
           </button>
-          <label className="sleep-timer-control">
-            <Icon name="moon" size={15} />
-            <span className="sr-only">睡眠定时器</span>
-            <select
-              aria-label="睡眠定时器"
-              className="sleep-timer-select"
-              onChange={event => {
-                const value = event.target.value;
-                onSleepTimer(value === 'active' ? null : value ? Number(value) : null);
-              }}
-              value={sleepValue}>
-              <option value="">睡眠</option>
-              <option value="900">15 分钟</option>
-              <option value="1800">30 分钟</option>
-              <option value="3600">60 分钟</option>
-              {sleepValue === 'active' ? <option value="active">剩余 {playback.sleepTimerSeconds} 秒</option> : null}
-            </select>
-          </label>
         </div>
       </div>
       <div className="player-progress-row">
@@ -2378,7 +2906,7 @@ function PlayerPlaceholder({
           value={Math.min(playback.position, duration)}
         />
         <span className="player-time">{formatDuration(playback.duration)}</span>
-        <SpectrumVisualizer values={spectrum} />
+        <SpectrumVisualizer isPlaying={isPlaying} values={spectrum} />
       </div>
       {playback.diagnostic ? (
         <div className="player-diagnostic" role="status">
@@ -2387,30 +2915,55 @@ function PlayerPlaceholder({
         </div>
       ) : null}
       {queueOpen ? (
-        <div className="queue-panel" role="dialog">
-          <div className="queue-panel-header">
-            <strong>播放队列</strong>
-            <span>{playback.queueLength} 首</span>
-          </div>
-          {playback.queue.length ? playback.queue.map(item => (
-            <div
-              className={item.id === playback.trackId ? 'queue-item active' : 'queue-item'}
-              draggable
-              key={item.id}
-              onDragEnd={() => setDraggedTrackId(null)}
-              onDragOver={event => event.preventDefault()}
-              onDrop={() => handleDrop(item.id)}
-              onDragStart={() => setDraggedTrackId(item.id)}>
-              <span className="queue-drag-handle">⋮⋮</span>
-              <button className="queue-item-play" onClick={() => onSelectTrack(item.id)} type="button">
-                <strong>{item.title}</strong>
-                <small>{item.artist}</small>
-              </button>
-              <button aria-label="移除队列项目" className="task-dismiss" onClick={() => onRemove(item.id)} type="button">
-                <Icon name="x" size={13} />
-              </button>
+        <div
+          className="queue-panel-backdrop"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) {
+              setQueueOpen(false);
+            }
+          }}>
+          <div className="queue-panel" role="dialog">
+            <div className="queue-panel-header">
+              <strong>播放队列</strong>
+              <span>{playback.queueLength} 首</span>
             </div>
-          )) : <div className="queue-empty">队列为空，点击内容卡片开始播放。</div>}
+            {playback.queue.length ? (
+              playback.queue.map(item => (
+                <div
+                  className={
+                    item.id === playback.trackId
+                      ? 'queue-item active'
+                      : 'queue-item'
+                  }
+                  draggable
+                  key={item.id}
+                  onDragEnd={() => setDraggedTrackId(null)}
+                  onDragOver={event => event.preventDefault()}
+                  onDrop={() => handleDrop(item.id)}
+                  onDragStart={() => setDraggedTrackId(item.id)}>
+                  <span className="queue-drag-handle">⋮⋮</span>
+                  <button
+                    className="queue-item-play"
+                    onClick={() => onSelectTrack(item.id)}
+                    type="button">
+                    <strong>{item.title}</strong>
+                    <small>{item.artist}</small>
+                  </button>
+                  <button
+                    aria-label="移除队列项目"
+                    className="task-dismiss"
+                    onClick={() => onRemove(item.id)}
+                    type="button">
+                    <Icon name="x" size={13} />
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="queue-empty">
+                队列为空，点击内容卡片开始播放。
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
     </footer>
@@ -2426,7 +2979,11 @@ function PlayerArtworkImage({src}: {src: string | null}): JSX.Element {
   }, [src]);
 
   if (!src || failed) {
-    return <div className="player-art"><Icon name="play" size={18} /></div>;
+    return (
+      <div className="player-art">
+        <Icon name="play" size={18} />
+      </div>
+    );
   }
 
   return (
@@ -2460,7 +3017,9 @@ function TaskCenter({
         <span>{notices.length ? `${notices.length} 条` : '暂无'}</span>
       </div>
       <div className="task-item sync-task">
-        <span className="task-item-icon"><Icon name="refresh" size={15} /></span>
+        <span className="task-item-icon">
+          <Icon name="refresh" size={15} />
+        </span>
         <span className="sync-task-copy">
           <strong>{sync.message ?? '收藏同步未启动'}</strong>
           {sync.state === 'running' ? (
@@ -2473,7 +3032,9 @@ function TaskCenter({
           {sync.error ? <small>{sync.error}</small> : null}
         </span>
         {sync.state === 'running' ? (
-          <button className="task-action" onClick={onCancelSync} type="button">取消</button>
+          <button className="task-action" onClick={onCancelSync} type="button">
+            取消
+          </button>
         ) : (
           <button
             className="task-action"
@@ -2483,13 +3044,37 @@ function TaskCenter({
           </button>
         )}
       </div>
-      {notices.length ? notices.slice().reverse().map(notice => (
-        <div className={`task-item ${notice.tone}`} key={notice.id}>
-          <span className="task-item-icon"><Icon name={notice.tone === 'error' ? 'alert' : notice.tone === 'success' ? 'check' : 'sparkles'} size={15} /></span>
-          <span>{notice.message}</span>
-          <button aria-label="移除通知" className="task-dismiss" onClick={() => onDismiss(notice.id)} type="button"><Icon name="x" size={13} /></button>
-        </div>
-      )) : <div className="task-empty">登录、搜索和同步状态会显示在这里。</div>}
+      {notices.length ? (
+        notices
+          .slice()
+          .reverse()
+          .map(notice => (
+            <div className={`task-item ${notice.tone}`} key={notice.id}>
+              <span className="task-item-icon">
+                <Icon
+                  name={
+                    notice.tone === 'error'
+                      ? 'alert'
+                      : notice.tone === 'success'
+                      ? 'check'
+                      : 'sparkles'
+                  }
+                  size={15}
+                />
+              </span>
+              <span>{notice.message}</span>
+              <button
+                aria-label="移除通知"
+                className="task-dismiss"
+                onClick={() => onDismiss(notice.id)}
+                type="button">
+                <Icon name="x" size={13} />
+              </button>
+            </div>
+          ))
+      ) : (
+        <div className="task-empty">登录、搜索和同步状态会显示在这里。</div>
+      )}
     </div>
   );
 }
@@ -2500,7 +3085,16 @@ function NoticeStack({notices}: {notices: Notice[]}): JSX.Element {
     <div aria-live="polite" className="notice-stack">
       {notices.map(notice => (
         <div className={`notice-toast ${notice.tone}`} key={notice.id}>
-          <Icon name={notice.tone === 'error' ? 'alert' : notice.tone === 'success' ? 'check' : 'sparkles'} size={16} />
+          <Icon
+            name={
+              notice.tone === 'error'
+                ? 'alert'
+                : notice.tone === 'success'
+                ? 'check'
+                : 'sparkles'
+            }
+            size={16}
+          />
           <span>{notice.message}</span>
         </div>
       ))}
@@ -2517,9 +3111,15 @@ function Avatar({
   size?: 'small' | 'large';
 }): JSX.Element {
   if (profile?.avatar) {
-    return <img alt="" className={`avatar avatar-${size}`} src={profile.avatar} />;
+    return (
+      <img alt="" className={`avatar avatar-${size}`} src={profile.avatar} />
+    );
   }
-  return <span className={`avatar avatar-${size} avatar-placeholder`}><Icon name="user" size={size === 'large' ? 22 : 16} /></span>;
+  return (
+    <span className={`avatar avatar-${size} avatar-placeholder`}>
+      <Icon name="user" size={size === 'large' ? 22 : 16} />
+    </span>
+  );
 }
 
 /** 只保留属于当前账号的资料，避免登录切换期间显示旧用户。 */
@@ -2534,20 +3134,6 @@ function getActiveProfile(
     return null;
   }
   return profile;
-}
-
-/** 生成右上角账号入口的展示名称，资料请求失败时仍保留已登录状态。 */
-function getAccountLabel(
-  auth: AuthStatus,
-  profile: UserProfile | null,
-): string {
-  if (!auth.loggedIn) {
-    return '登录 Bilibili';
-  }
-  if (profile?.name) {
-    return profile.name;
-  }
-  return auth.uid ? `UID ${auth.uid}` : 'Bilibili 账号';
 }
 
 /** 将秒数格式化为播放器和卡片可读的时长。 */
@@ -2604,7 +3190,9 @@ function formatBytes(value: number): string {
     units.length - 1,
     Math.floor(Math.log(value) / Math.log(1024)),
   );
-  return `${(value / 1024 ** unitIndex).toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  return `${(value / 1024 ** unitIndex).toFixed(unitIndex === 0 ? 0 : 1)} ${
+    units[unitIndex]
+  }`;
 }
 
 /** 将 Unix 秒时间戳格式化为内容卡片日期。 */
@@ -2638,11 +3226,15 @@ function makeRequestId(prefix: string): string {
 }
 
 /** 计算播放器进度百分比，避免无效时长产生布局异常。 */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getProgressPercent(snapshot: PlaybackSnapshot): number {
   if (!snapshot.duration || snapshot.duration <= 0) {
     return 0;
   }
-  return Math.min(100, Math.max(0, (snapshot.position / snapshot.duration) * 100));
+  return Math.min(
+    100,
+    Math.max(0, (snapshot.position / snapshot.duration) * 100),
+  );
 }
 
 /** 将内容卡片转换为跨进程播放队列项目。 */
@@ -2659,17 +3251,44 @@ function toPlaybackQueueItem(video: DesktopVideo): PlaybackQueueItem {
   };
 }
 
+/** 复制并打散收藏夹队列，避免修改调用方持有的数组。 */
+function shuffleQueueItems(items: PlaybackQueueItem[]): PlaybackQueueItem[] {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(Math.random() * (index + 1));
+    [next[index], next[target]] = [next[target], next[index]];
+  }
+  return next;
+}
+
 /** 将首页/发现热门结果标记为可自动续页的热门队列。 */
 function getPopularQueueContext(
   video: DesktopVideo,
 ): PlaybackQueueContext | null {
-  return video.source === 'popular'
-    ? {kind: 'popular', page: 1}
-    : null;
+  return video.source === 'popular' ? {kind: 'popular', page: 1} : null;
 }
 
-/** 返回侧边栏路由的中文标题。 */
-function getRouteTitle(route: Route): string {
-  return NAV_ITEMS.find(item => item.route === route)?.label ?? '设置';
+/** 返回设计稿顶栏使用的路由编号、分组和标题。 */
+function getRouteHeader(route: Route): {eyebrow: string; title: string} {
+  const headers: Record<Route, {eyebrow: string; title: string}> = {
+    discover: {eyebrow: '01 / DISCOVER', title: 'DISCOVER'},
+    search: {eyebrow: '02 / SEARCH', title: 'SEARCH'},
+    library: {eyebrow: '03 / LIBRARY', title: 'LIBRARY'},
+    'folder-detail': {
+      eyebrow: '04 / LIBRARY / FOLDER',
+      title: 'FOLDER DETAIL',
+    },
+    taste: {eyebrow: '05 / MUSIC TASTE', title: 'MUSIC TASTE'},
+    'sound-lab': {eyebrow: '06 / SOUND LAB', title: 'SOUND LAB'},
+    settings: {eyebrow: '07 / SETTINGS', title: 'SETTINGS'},
+    'immersive-windowed': {
+      eyebrow: '08 / IMMERSIVE',
+      title: 'WINDOWED IMMERSIVE',
+    },
+    'immersive-fullscreen': {
+      eyebrow: '09 / IMMERSIVE',
+      title: 'FULLSCREEN IMMERSIVE',
+    },
+  };
+  return headers[route];
 }
-
