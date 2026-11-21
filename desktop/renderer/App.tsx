@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import type {
   ChangeEvent,
+  CSSProperties,
   FormEvent,
   KeyboardEvent,
   ReactNode,
@@ -2728,6 +2729,11 @@ function PlayerPlaceholder({
               min="0"
               onChange={event => onVolume(Number(event.target.value))}
               step="0.01"
+              style={
+                {
+                  '--range-progress': `${Math.round(playback.volume * 100)}%`,
+                } as CSSProperties
+              }
               type="range"
               value={playback.volume}
             />
@@ -2765,6 +2771,13 @@ function PlayerPlaceholder({
           min="0"
           onChange={event => onSeek(Number(event.target.value))}
           step="0.1"
+          style={
+            {
+              '--range-progress': `${Math.round(
+                (Math.min(playback.position, duration) / duration) * 100,
+              )}%`,
+            } as CSSProperties
+          }
           type="range"
           value={Math.min(playback.position, duration)}
         />

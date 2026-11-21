@@ -679,7 +679,10 @@ function SearchEmptyState({
 }): JSX.Element {
   return (
     <div className="prototype-search-empty" role="status">
-      <svg aria-hidden="true" viewBox="0 0 160 96">
+      <svg
+        aria-hidden="true"
+        preserveAspectRatio="xMidYMid meet"
+        viewBox="0 0 160 96">
         <path d="M21 70h118" />
         <path d="M38 58V35l17-12 17 12v23M72 58V29l17-14 17 14v29M106 58V40l17-10 13 10v18" />
         <circle cx="77" cy="70" r="7" />
@@ -1081,6 +1084,7 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
       setTracks([]);
       setDescription('');
       setFolderTitle('');
+      setLoading(false);
       return;
     }
     let disposed = false;
@@ -1704,6 +1708,15 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
             max={track.duration}
             min="0"
             onChange={event => props.onSeek(Number(event.target.value))}
+            style={
+              {
+                '--range-progress': `${Math.round(
+                  (Math.min(props.playback.position, track.duration) /
+                    Math.max(track.duration, 1)) *
+                    100,
+                )}%`,
+              } as CSSProperties
+            }
             type="range"
             value={Math.min(track.duration, props.playback.position)}
           />
