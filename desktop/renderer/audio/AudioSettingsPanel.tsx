@@ -1,6 +1,7 @@
 import type {
   DesktopAudioSettings,
   DesktopPeqBand,
+  DesktopPeqFilterType,
   DesktopSettingsPatch,
 } from '../../shared/types';
 import {
@@ -13,6 +14,19 @@ type AudioSettingsPanelProps = {
   settings: DesktopAudioSettings;
   onUpdate: (patch: DesktopSettingsPatch) => void;
 };
+
+const PEQ_FILTER_OPTIONS: ReadonlyArray<{
+  value: DesktopPeqFilterType;
+  label: string;
+}> = [
+  {value: 'Peak', label: '峰值 · Peak'},
+  {value: 'LowShelf', label: '低频搁架'},
+  {value: 'HighShelf', label: '高频搁架'},
+  {value: 'LowPass', label: '低通'},
+  {value: 'HighPass', label: '高通'},
+  {value: 'Notch', label: '陷波'},
+  {value: 'BandPass', label: '带通'},
+];
 
 /**
  * 桌面端音频设置面板。
@@ -52,14 +66,17 @@ export function AudioSettingsPanel({
           <p className="section-kicker">AUDIO LAB</p>
           <h3>均衡器与频谱</h3>
         </div>
-        <span className={settings.enabled ? 'status-chip active' : 'status-chip'}>
+        <span
+          className={settings.enabled ? 'status-chip active' : 'status-chip'}>
           {settings.enabled ? '处理中' : '直通'}
         </span>
       </div>
       <label className="setting-row">
         <span>
           <strong>启用桌面 DSP</strong>
-          <small>AudioWorklet 在音频线程处理 EQ 和 Limiter，关闭后保持直通。</small>
+          <small>
+            AudioWorklet 在音频线程处理 EQ 和 Limiter，关闭后保持直通。
+          </small>
         </span>
         <input
           aria-label="启用桌面 DSP"
@@ -88,7 +105,8 @@ export function AudioSettingsPanel({
           <select
             aria-label="Graphic EQ 预设"
             onChange={event => {
-              const preset = event.target.value as DesktopAudioSettings['graphicPreset'];
+              const preset = event.target
+                .value as DesktopAudioSettings['graphicPreset'];
               updateAudio({
                 graphicPreset: preset,
                 graphicGains: getPresetGains(preset),
@@ -142,13 +160,32 @@ export function AudioSettingsPanel({
                 <span>PEQ {index + 1}</span>
               </label>
               <label>
+                <span>滤波器类型</span>
+                <select
+                  aria-label={`PEQ ${index + 1} 滤波器类型`}
+                  onChange={event =>
+                    updatePeqBand(index, {
+                      type: event.target.value as DesktopPeqFilterType,
+                    })
+                  }
+                  value={band.type}>
+                  {PEQ_FILTER_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
                 <span>频率</span>
                 <input
                   aria-label={`PEQ ${index + 1} 频率`}
                   max="20000"
                   min="20"
                   onChange={event =>
-                    updatePeqBand(index, {frequency: Number(event.target.value)})
+                    updatePeqBand(index, {
+                      frequency: Number(event.target.value),
+                    })
                   }
                   step="1"
                   type="number"
@@ -222,7 +259,9 @@ export function AudioSettingsPanel({
       <label className="setting-row">
         <span>
           <strong>实时频谱</strong>
-          <small>以 30 Hz 上限发送 128 段 FFT 数据，降低列表滚动时的主线程开销。</small>
+          <small>
+            以 30 Hz 上限发送 128 段 FFT 数据，降低列表滚动时的主线程开销。
+          </small>
         </span>
         <input
           aria-label="启用实时频谱"

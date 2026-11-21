@@ -187,18 +187,90 @@ class Biquad {
     this.y2 = 0;
   }
 
-  setPeaking(frequency, gain, q, rate) {
+  setFilter(type, frequency, gain, q, rate) {
     const safeFrequency = Math.min(Math.max(20, frequency), rate / 2 - 1);
     const angular = 2 * Math.PI * safeFrequency / rate;
-    const alpha = Math.sin(angular) / (2 * Math.max(0.1, q));
-    const amplitude = Math.pow(10, gain / 40);
+    const quality = Math.max(0.1, q);
+    const sine = Math.sin(angular);
     const cosine = Math.cos(angular);
-    const a0 = 1 + alpha / amplitude;
-    this.b0 = (1 + alpha * amplitude) / a0;
-    this.b1 = (-2 * cosine) / a0;
-    this.b2 = (1 - alpha * amplitude) / a0;
-    this.a1 = (-2 * cosine) / a0;
-    this.a2 = (1 - alpha / amplitude) / a0;
+    const alpha = sine / (2 * quality);
+    const amplitude = Math.pow(10, gain / 40);
+    const squareRootAmplitude = Math.sqrt(amplitude);
+    const twoSquareRootAmplitudeAlpha = 2 * squareRootAmplitude * alpha;
+    let b0 = 0;
+    let b1 = 0;
+    let b2 = 0;
+    let a0 = 1;
+    let a1 = 0;
+    let a2 = 0;
+    switch (type) {
+      case 'LowShelf':
+        b0 = amplitude * ((amplitude + 1) - (amplitude - 1) * cosine + twoSquareRootAmplitudeAlpha);
+        b1 = 2 * amplitude * ((amplitude - 1) - (amplitude + 1) * cosine);
+        b2 = amplitude * ((amplitude + 1) - (amplitude - 1) * cosine - twoSquareRootAmplitudeAlpha);
+        a0 = (amplitude + 1) + (amplitude - 1) * cosine + twoSquareRootAmplitudeAlpha;
+        a1 = -2 * ((amplitude - 1) + (amplitude + 1) * cosine);
+        a2 = (amplitude + 1) + (amplitude - 1) * cosine - twoSquareRootAmplitudeAlpha;
+        break;
+      case 'HighShelf':
+        b0 = amplitude * ((amplitude + 1) + (amplitude - 1) * cosine + twoSquareRootAmplitudeAlpha);
+        b1 = -2 * amplitude * ((amplitude - 1) + (amplitude + 1) * cosine);
+        b2 = amplitude * ((amplitude + 1) + (amplitude - 1) * cosine - twoSquareRootAmplitudeAlpha);
+        a0 = (amplitude + 1) - (amplitude - 1) * cosine + twoSquareRootAmplitudeAlpha;
+        a1 = 2 * ((amplitude - 1) - (amplitude + 1) * cosine);
+        a2 = (amplitude + 1) - (amplitude - 1) * cosine - twoSquareRootAmplitudeAlpha;
+        break;
+      case 'LowPass':
+        b0 = (1 - cosine) / 2;
+        b1 = 1 - cosine;
+        b2 = (1 - cosine) / 2;
+        a0 = 1 + alpha;
+        a1 = -2 * cosine;
+        a2 = 1 - alpha;
+        break;
+      case 'HighPass':
+        b0 = (1 + cosine) / 2;
+        b1 = -(1 + cosine);
+        b2 = (1 + cosine) / 2;
+        a0 = 1 + alpha;
+        a1 = -2 * cosine;
+        a2 = 1 - alpha;
+        break;
+      case 'Notch':
+        b0 = 1;
+        b1 = -2 * cosine;
+        b2 = 1;
+        a0 = 1 + alpha;
+        a1 = -2 * cosine;
+        a2 = 1 - alpha;
+        break;
+      case 'BandPass':
+        b0 = alpha;
+        b1 = 0;
+        b2 = -alpha;
+        a0 = 1 + alpha;
+        a1 = -2 * cosine;
+        a2 = 1 - alpha;
+        break;
+      case 'Peak':
+      default:
+        b0 = 1 + alpha * amplitude;
+        b1 = -2 * cosine;
+        b2 = 1 - alpha * amplitude;
+        a0 = 1 + alpha / amplitude;
+        a1 = -2 * cosine;
+        a2 = 1 - alpha / amplitude;
+        break;
+    }
+    this.b0 = b0 / a0;
+    this.b1 = b1 / a0;
+    this.b2 = b2 / a0;
+    this.a1 = a1 / a0;
+    this.a2 = a2 / a0;
+  }
+
+  setPeaking(frequency, gain, q, rate) {
+    this.setFilter('Peak', frequency, gain, q, rate);
   }
 
   process(sample) {
@@ -216,7 +288,7 @@ function defaultSettings() {
     enabled: false,
     mode: 'graphic',
     graphicGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    peqBands: Array.from({length: 8}, () => ({enabled: false, frequency: 1000, gain: 0, q: 1})),
+    peqBands: Array.from({length: 8}, () => ({enabled: false, type: 'Peak', frequency: 1000, gain: 0, q: 1})),
     limiterEnabled: true,
     limiterThreshold: 0.95,
     spectrumEnabled: true,
@@ -300,7 +372,8 @@ class NyamiDspProcessor extends AudioWorkletProcessor {
     this.peqFilters = Array.from({length: this.channelCount}, () =>
       this.settings.peqBands.map(band => {
         const filter = new Biquad();
-        filter.setPeaking(
+        filter.setFilter(
+          band.enabled ? band.type : 'Peak',
           Number(band.frequency || 1000),
           band.enabled ? Number(band.gain || 0) : 0,
           Number(band.q || 1),
@@ -342,6 +415,7 @@ function normalizeSettings(value) {
       const band = bands[index] && typeof bands[index] === 'object' ? bands[index] : {};
       return {
         enabled: band.enabled === true,
+        type: ['Peak', 'LowShelf', 'HighShelf', 'LowPass', 'HighPass', 'Notch', 'BandPass'].includes(band.type) ? band.type : 'Peak',
         frequency: Number(band.frequency || 1000),
         gain: Number(band.gain || 0),
         q: Number(band.q || 1),

@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useRef, useState, memo} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import type {
   ChangeEvent,
   CSSProperties,
@@ -819,6 +819,7 @@ export function App(): JSX.Element {
       void window.nyamiDesktop.playback.skipNext().then(setPlayback);
     },
     onNotice: pushNotice,
+    onModeChange: setPlaybackMode,
     onOpenLogin: () => setLoginOpen(true),
     onPause: () => {
       void window.nyamiDesktop.playback.pause().then(setPlayback);
@@ -833,6 +834,14 @@ export function App(): JSX.Element {
     },
     onRemoveTrack: removePlaybackItem,
     onRouteChange: setRoute,
+    onStartSync: (force = false) => {
+      void window.nyamiDesktop.sync
+        .start({force})
+        .then(setSync)
+        .catch(error => {
+          pushNotice('error', getErrorMessage(error, '收藏同步启动失败'));
+        });
+    },
     onSelectFolder: (folderId: number) => {
       setSelectedFolderId(folderId);
     },
@@ -848,6 +857,7 @@ export function App(): JSX.Element {
     spectrum,
     route,
     selectedFolderId,
+    sync,
   } satisfies Parameters<typeof PrototypePage>[0];
 
   return (
@@ -981,6 +991,18 @@ export function App(): JSX.Element {
                     onClearCache={() => void clearCache()}
                     onExportLogs={() => void exportLogs()}
                     onLogin={() => setLoginOpen(true)}
+                    onStartSync={force => {
+                      void window.nyamiDesktop.sync
+                        .start({force})
+                        .then(setSync)
+                        .catch(error => {
+                          pushNotice(
+                            'error',
+                            getErrorMessage(error, '收藏同步启动失败'),
+                          );
+                        });
+                    }}
+                    sync={sync}
                     onLogout={() => void logout()}
                     onRenew={() => void renewLogin()}
                     onRefreshCache={() => void refreshCacheSummary()}
@@ -998,7 +1020,6 @@ export function App(): JSX.Element {
 
               <PlayerPlaceholder
                 playback={playback}
-                spectrum={spectrum}
                 onModeChange={setPlaybackMode}
                 onNext={() =>
                   void window.nyamiDesktop.playback.skipNext().then(setPlayback)
@@ -1166,7 +1187,6 @@ function Sidebar({
             <span>登录 Bilibili</span>
           </button>
         )}
-        <p className="sidebar-footnote">阶段 5 · 收藏索引</p>
       </div>
     </aside>
   );
@@ -1781,9 +1801,11 @@ function SettingsPage({
   onRenew,
   onRefreshCache,
   onOpenUpdateDownload,
+  onStartSync,
   onUpdate,
   profile,
   settings,
+  sync,
   updateInfo,
 }: {
   auth: AuthStatus;
@@ -1798,11 +1820,13 @@ function SettingsPage({
   onRenew: () => void;
   onRefreshCache: () => void;
   onOpenUpdateDownload: () => void;
+  onStartSync: (force?: boolean) => void;
   onUpdate: (
     patch: Parameters<typeof window.nyamiDesktop.settings.update>[0],
   ) => void;
   profile: UserProfile | null;
   settings: DesktopSettings | null;
+  sync: SyncSnapshot;
   updateInfo: DesktopUpdateInfo;
 }): JSX.Element {
   const [preferences, setPreferences] = useState<DesktopUserPreferences>(() =>
@@ -1854,6 +1878,13 @@ function SettingsPage({
         eyebrow="SETTINGS"
         title="桌面设置"
         description="窗口尺寸和主题会保存到本地设置文件，重新启动后继续使用。"
+      />
+      <AccountSettingsCard
+        auth={auth}
+        onLogin={onLogin}
+        onLogout={onLogout}
+        onRenew={onRenew}
+        profile={profile}
       />
       <section className="settings-card">
         <div className="panel-heading">
@@ -1916,6 +1947,26 @@ function SettingsPage({
             type="checkbox"
           />
         </label>
+        <div className="settings-actions-row settings-index-sync-row">
+          <span>
+            <strong>全局收藏夹索引</strong>
+            <small>
+              {sync.state === 'running'
+                ? sync.message ?? '正在同步收藏夹索引…'
+                : sync.state === 'completed'
+                ? `已同步 ${sync.processedVideos} 个视频`
+                : '先同步全局索引，音乐库和音乐偏好才能读取最新内容。'}
+            </small>
+          </span>
+          <button
+            className="secondary-button"
+            disabled={!auth.loggedIn || sync.state === 'running'}
+            onClick={() => onStartSync(sync.state === 'failed')}
+            type="button">
+            <Icon name="refresh" size={16} />
+            {sync.state === 'running' ? '同步中…' : '立即同步'}
+          </button>
+        </div>
       </section>
       <section className="settings-card">
         <div className="panel-heading">
@@ -2278,63 +2329,78 @@ function SettingsPage({
           </small>
         </div>
       </section>
-      <section className="settings-card account-settings-card">
-        <div className="panel-heading">
-          <div>
-            <p className="section-kicker">ACCOUNT</p>
-            <h3>账号与登录</h3>
-          </div>
+    </div>
+  );
+}
+
+/** 设置页顶部的账号状态卡片，集中提供登录、续期和退出操作。 */
+function AccountSettingsCard({
+  auth,
+  onLogin,
+  onLogout,
+  onRenew,
+  profile,
+}: {
+  auth: AuthStatus;
+  onLogin: () => void;
+  onLogout: () => void;
+  onRenew: () => void;
+  profile: UserProfile | null;
+}): JSX.Element {
+  return (
+    <section className="settings-card account-settings-card">
+      <div className="panel-heading">
+        <div>
+          <p className="section-kicker">ACCOUNT</p>
+          <h3>账号与登录</h3>
         </div>
-        {auth.loggedIn ? (
-          <div className="account-settings-summary">
-            <Avatar profile={profile} size="large" />
-            <div>
-              <strong>{profile?.name ?? 'Bilibili 账号'}</strong>
-              <span>
-                {profile?.uid ?? auth.uid
-                  ? `UID ${profile?.uid ?? auth.uid}`
-                  : '已登录'}
-              </span>
-              <small>
-                {auth.refreshAvailable
-                  ? '支持自动续期'
-                  : '建议重新扫码获取续期凭证'}
-              </small>
-            </div>
-            <div className="account-settings-actions">
-              <button
-                className="secondary-button"
-                onClick={onRenew}
-                type="button">
-                <Icon name="refresh" size={16} />
-                续期登录
-              </button>
-              <button
-                className="danger-button"
-                onClick={onLogout}
-                type="button">
-                <Icon name="log-out" size={16} />
-                退出登录
-              </button>
-            </div>
+      </div>
+      {auth.loggedIn ? (
+        <div className="account-settings-summary">
+          <Avatar profile={profile} size="large" />
+          <div>
+            <strong>{profile?.name ?? 'Bilibili 账号'}</strong>
+            <span>
+              {profile?.uid ?? auth.uid
+                ? `UID ${profile?.uid ?? auth.uid}`
+                : '已登录'}
+            </span>
+            <small>
+              {auth.refreshAvailable
+                ? '支持自动续期'
+                : '建议重新扫码获取续期凭证'}
+            </small>
           </div>
-        ) : (
-          <div className="account-settings-summary logged-out">
-            <div className="avatar avatar-large avatar-placeholder">
-              <Icon name="user" size={22} />
-            </div>
-            <div>
-              <strong>尚未登录</strong>
-              <span>公开内容仍可浏览</span>
-            </div>
-            <button className="primary-button" onClick={onLogin} type="button">
-              <Icon name="log-in" size={16} />
-              去登录
+          <div className="account-settings-actions">
+            <button
+              className="secondary-button"
+              onClick={onRenew}
+              type="button">
+              <Icon name="refresh" size={16} />
+              续期登录
+            </button>
+            <button className="danger-button" onClick={onLogout} type="button">
+              <Icon name="log-out" size={16} />
+              退出登录
             </button>
           </div>
-        )}
-      </section>
-    </div>
+        </div>
+      ) : (
+        <div className="account-settings-summary logged-out">
+          <div className="avatar avatar-large avatar-placeholder">
+            <Icon name="user" size={22} />
+          </div>
+          <div>
+            <strong>尚未登录</strong>
+            <span>公开内容仍可浏览</span>
+          </div>
+          <button className="primary-button" onClick={onLogin} type="button">
+            <Icon name="log-in" size={16} />
+            去登录
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -2718,44 +2784,9 @@ function Pagination({
   );
 }
 
-/** 渲染受 AudioWorklet 驱动的轻量频谱柱，限制柱数和重绘频率。 */
-const SpectrumVisualizer = memo(function SpectrumVisualizer({
-  isPlaying = false,
-  values,
-}: {
-  isPlaying?: boolean;
-  values: number[];
-}): JSX.Element {
-  const displayValues = values.slice(0, 24);
-  return (
-    <div
-      aria-label="实时频谱"
-      className={
-        isPlaying ? 'spectrum-visualizer is-playing' : 'spectrum-visualizer'
-      }
-      role="img">
-      {(displayValues.length ? displayValues : Array(24).fill(0)).map(
-        (value, index) => (
-          <span
-            className="spectrum-bar"
-            key={index}
-            style={
-              {
-                '--bar-index': index,
-                height: `${Math.max(6, Math.round(value * 100))}%`,
-              } as CSSProperties
-            }
-          />
-        ),
-      )}
-    </div>
-  );
-});
-
 /** 渲染底部播放器、进度控制和可拖拽播放队列。 */
 function PlayerPlaceholder({
   playback,
-  spectrum,
   onModeChange,
   onNext,
   onPause,
@@ -2769,7 +2800,6 @@ function PlayerPlaceholder({
   onVolume,
 }: {
   playback: PlaybackSnapshot;
-  spectrum: number[];
   onModeChange: (mode: PlaybackQueueMode) => void;
   onNext: () => void;
   onPause: () => void;
@@ -2906,7 +2936,6 @@ function PlayerPlaceholder({
           value={Math.min(playback.position, duration)}
         />
         <span className="player-time">{formatDuration(playback.duration)}</span>
-        <SpectrumVisualizer isPlaying={isPlaying} values={spectrum} />
       </div>
       {playback.diagnostic ? (
         <div className="player-diagnostic" role="status">

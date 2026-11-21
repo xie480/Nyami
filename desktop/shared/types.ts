@@ -337,11 +337,7 @@ export type SyncState =
   | 'failed'
   | 'cancelled';
 
-export type SyncPhase =
-  | 'idle'
-  | 'catalog'
-  | 'favorites'
-  | 'completed';
+export type SyncPhase = 'idle' | 'catalog' | 'favorites' | 'completed';
 
 export type SyncSnapshot = {
   state: SyncState;
@@ -387,8 +383,18 @@ export type DesktopGraphicPreset =
   | 'vaporwave'
   | 'custom';
 
+export type DesktopPeqFilterType =
+  | 'Peak'
+  | 'LowShelf'
+  | 'HighShelf'
+  | 'LowPass'
+  | 'HighPass'
+  | 'Notch'
+  | 'BandPass';
+
 export type DesktopPeqBand = {
   enabled: boolean;
+  type: DesktopPeqFilterType;
   frequency: number;
   gain: number;
   q: number;
@@ -504,6 +510,14 @@ export type ContentRequestBase = {
 export type SearchContentRequest = ContentRequestBase & {
   keyword: string;
   page: number;
+  /** B 站搜索排序值；筛选变化时由 Renderer 重新请求。 */
+  order?: 'totalrank' | 'click' | 'pubdate' | 'danmaku' | 'stow';
+  /** B 站时长筛选值，0 表示不限。 */
+  duration?: 0 | 1 | 2 | 3 | 4;
+  startDate?: number;
+  endDate?: number;
+  minDuration?: number;
+  maxDuration?: number;
 };
 
 export type DiscoverContentRequest = ContentRequestBase & {
@@ -579,9 +593,7 @@ export type NyamiDesktopApi = {
     closeWebLogin: () => Promise<void>;
     logout: () => Promise<void>;
     onQrStatus: (listener: (event: QrStatusEvent) => void) => () => void;
-    onWebViewState: (
-      listener: (event: AuthWebViewState) => void,
-    ) => () => void;
+    onWebViewState: (listener: (event: AuthWebViewState) => void) => () => void;
   };
   probes: {
     inspectAudio: (request: AudioProbeRequest) => Promise<AudioProbeResult>;
@@ -592,9 +604,15 @@ export type NyamiDesktopApi = {
   playback: {
     getState: () => Promise<PlaybackSnapshot>;
     loadQueue: (request: PlaybackQueueRequest) => Promise<PlaybackSnapshot>;
-    addToQueue: (request: PlaybackQueueItemRequest) => Promise<PlaybackSnapshot>;
-    removeFromQueue: (request: PlaybackRemoveRequest) => Promise<PlaybackSnapshot>;
-    reorderQueue: (request: PlaybackReorderRequest) => Promise<PlaybackSnapshot>;
+    addToQueue: (
+      request: PlaybackQueueItemRequest,
+    ) => Promise<PlaybackSnapshot>;
+    removeFromQueue: (
+      request: PlaybackRemoveRequest,
+    ) => Promise<PlaybackSnapshot>;
+    reorderQueue: (
+      request: PlaybackReorderRequest,
+    ) => Promise<PlaybackSnapshot>;
     setMode: (request: PlaybackModeRequest) => Promise<PlaybackSnapshot>;
     setSleepTimer: (
       request: PlaybackSleepTimerRequest,
@@ -607,8 +625,12 @@ export type NyamiDesktopApi = {
     skipNext: () => Promise<PlaybackSnapshot>;
     skipPrevious: () => Promise<PlaybackSnapshot>;
     setVolume: (request: PlaybackVolumeRequest) => Promise<PlaybackSnapshot>;
-    onStateChanged: (listener: (event: PlaybackStateEvent) => void) => () => void;
-    onSourceChanged: (listener: (event: PlaybackSourceEvent) => void) => () => void;
+    onStateChanged: (
+      listener: (event: PlaybackStateEvent) => void,
+    ) => () => void;
+    onSourceChanged: (
+      listener: (event: PlaybackSourceEvent) => void,
+    ) => () => void;
     onCommand: (listener: (event: PlaybackCommandEvent) => void) => () => void;
   };
   sync: {

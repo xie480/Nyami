@@ -5,16 +5,7 @@ import type {
 
 /** 桌面端 Graphic EQ 的标准频段，和 Android 端保持同一组中心频率。 */
 export const GRAPHIC_BAND_FREQUENCIES = [
-  31,
-  62,
-  125,
-  250,
-  500,
-  1000,
-  2000,
-  4000,
-  8000,
-  16000,
+  31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000,
 ] as const;
 
 /**
@@ -78,14 +69,14 @@ export const DEFAULT_DESKTOP_AUDIO_SETTINGS: DesktopAudioSettings = {
   graphicPreset: 'flat',
   graphicGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   peqBands: [
-    {enabled: false, frequency: 31, gain: 0, q: 1},
-    {enabled: false, frequency: 62, gain: 0, q: 1},
-    {enabled: false, frequency: 125, gain: 0, q: 1},
-    {enabled: false, frequency: 250, gain: 0, q: 1},
-    {enabled: false, frequency: 500, gain: 0, q: 1},
-    {enabled: false, frequency: 1000, gain: 0, q: 1},
-    {enabled: false, frequency: 2000, gain: 0, q: 1},
-    {enabled: false, frequency: 4000, gain: 0, q: 1},
+    {enabled: false, type: 'Peak', frequency: 31, gain: 0, q: 1},
+    {enabled: false, type: 'Peak', frequency: 62, gain: 0, q: 1},
+    {enabled: false, type: 'Peak', frequency: 125, gain: 0, q: 1},
+    {enabled: false, type: 'Peak', frequency: 250, gain: 0, q: 1},
+    {enabled: false, type: 'Peak', frequency: 500, gain: 0, q: 1},
+    {enabled: false, type: 'Peak', frequency: 1000, gain: 0, q: 1},
+    {enabled: false, type: 'Peak', frequency: 2000, gain: 0, q: 1},
+    {enabled: false, type: 'Peak', frequency: 4000, gain: 0, q: 1},
   ],
   limiterEnabled: true,
   limiterThreshold: 0.95,
@@ -95,5 +86,7 @@ export const DEFAULT_DESKTOP_AUDIO_SETTINGS: DesktopAudioSettings = {
 /** 根据预设 ID 返回独立的 Graphic EQ 增益数组。 */
 export function getPresetGains(id: DesktopGraphicPreset): number[] {
   const preset = DESKTOP_GRAPHIC_PRESETS.find(item => item.id === id);
-  return preset ? [...preset.gains] : [...DEFAULT_DESKTOP_AUDIO_SETTINGS.graphicGains];
+  return preset
+    ? [...preset.gains]
+    : [...DEFAULT_DESKTOP_AUDIO_SETTINGS.graphicGains];
 }
