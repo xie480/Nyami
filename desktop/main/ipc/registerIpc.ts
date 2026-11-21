@@ -259,6 +259,7 @@ export function registerIpcHandlers(
     return dependencies.libraryRuntime.getSourceSummaries(
       request.uid,
       request.sourceKeys,
+      request.requestId,
     );
   });
   register(IPC_CHANNELS.content.getFavoriteIndex, (_event, request) => {
@@ -266,6 +267,7 @@ export function registerIpcHandlers(
     return dependencies.libraryRuntime.getFavoriteIndex(
       request.uid,
       request.sourceKeys,
+      request.requestId,
     );
   });
   register(IPC_CHANNELS.content.getFavoriteSourceVideos, (_event, request) => {
@@ -274,6 +276,7 @@ export function registerIpcHandlers(
       request.uid,
       request.sourceKey,
       request.page,
+      request.requestId,
     );
   });
   register(IPC_CHANNELS.content.refreshFavoriteSources, (_event, request) => {
@@ -281,6 +284,7 @@ export function registerIpcHandlers(
     return dependencies.libraryRuntime.refreshSources(
       request.uid,
       request.sourceKeys ?? [],
+      request.requestId,
     );
   });
   register(IPC_CHANNELS.content.getFavoriteVideos, (_event, request) => {

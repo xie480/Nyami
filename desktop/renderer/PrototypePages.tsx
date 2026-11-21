@@ -770,12 +770,16 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
     }
     let disposed = false;
     const uid = props.auth.uid;
-    const requestId = makeRequestId('favorite-sources');
+    const sourcesRequestId = makeRequestId('favorite-sources');
+    const indexRequestId = makeRequestId('favorite-index');
     setLoading(true);
     void Promise.all([
-      window.nyamiDesktop.content.getFavoriteSources({requestId, uid}),
+      window.nyamiDesktop.content.getFavoriteSources({
+        requestId: sourcesRequestId,
+        uid,
+      }),
       window.nyamiDesktop.content.getFavoriteIndex({
-        requestId: makeRequestId('favorite-index'),
+        requestId: indexRequestId,
         uid,
       }),
     ])
@@ -829,7 +833,8 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
       });
     return () => {
       disposed = true;
-      void window.nyamiDesktop.content.cancel({requestId});
+      void window.nyamiDesktop.content.cancel({requestId: sourcesRequestId});
+      void window.nyamiDesktop.content.cancel({requestId: indexRequestId});
     };
   }, [props.auth.loggedIn, props.auth.uid, props.onNotice]);
 
@@ -1088,26 +1093,41 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
       return;
     }
     let disposed = false;
-    const requestId = makeRequestId(`source-detail-${sourceKey}`);
+    const summaryRequestId = makeRequestId(`source-summary-${sourceKey}`);
+    const videosRequestId = makeRequestId(`source-videos-${sourceKey}`);
     setLoading(true);
+    const loadSourceVideos = async (): Promise<DesktopVideo[]> => {
+      const items: DesktopVideo[] = [];
+      let page = 1;
+      while (page <= 1000) {
+        const next = await window.nyamiDesktop.content.getFavoriteSourceVideos({
+          requestId: videosRequestId,
+          uid: props.auth.uid as string,
+          sourceKey,
+          page,
+        });
+        items.push(...next.items);
+        if (!next.hasMore || !next.items.length) {
+          break;
+        }
+        page += 1;
+      }
+      return dedupeVideos(items);
+    };
     void Promise.all([
       window.nyamiDesktop.content.getFavoriteSources({
-        requestId: makeRequestId(`source-summary-${sourceKey}`),
+        requestId: summaryRequestId,
         uid: props.auth.uid,
         sourceKeys: [sourceKey],
       }),
-      window.nyamiDesktop.content.getFavoriteIndex({
-        requestId: makeRequestId(`source-index-${sourceKey}`),
-        uid: props.auth.uid,
-        sourceKeys: [sourceKey],
-      }),
+      loadSourceVideos(),
     ])
-      .then(([summaries, nextIndex]) => {
+      .then(([summaries, nextTracks]) => {
         if (disposed) {
           return;
         }
         const summary = summaries[0];
-        setTracks(dedupeVideos(nextIndex));
+        setTracks(nextTracks);
         setDescription(summary?.description ?? '');
         setFolderTitle(summary?.title ?? '');
         setSourceKind(summary?.kind ?? 'owned');
@@ -1128,6 +1148,8 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
       });
     return () => {
       disposed = true;
+      void window.nyamiDesktop.content.cancel({requestId: summaryRequestId});
+      void window.nyamiDesktop.content.cancel({requestId: videosRequestId});
     };
   }, [onNotice, props.auth.loggedIn, props.auth.uid, sourceKey]);
 

@@ -105,46 +105,56 @@ export class DesktopLibraryRuntime {
   async getSourceSummaries(
     uid: string,
     sourceKeys?: readonly string[],
+    requestId?: string,
   ): Promise<FavoriteSourceSummary[]> {
-    return this.withRequest(`sources:${uid}`, async signal => {
-      await this.assertCurrentAccount(uid);
-      this.repository.switchAccount(uid);
-      const remoteSources = await this.buildSourceCatalog(uid, signal);
-      const localSources = new Map(
-        this.repository.getSourceSummaries(uid).map(source => [
-          source.sourceKey,
-          source,
-        ]),
-      );
-      const requested = new Set(
-        (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
-      );
-      return remoteSources
-        .filter(source => !requested.size || requested.has(source.sourceKey))
-        .map(source => ({
-          ...source,
-          syncStatus: localSources.get(source.sourceKey)?.syncStatus ?? 'idle',
-          lastSyncedAt: localSources.get(source.sourceKey)?.lastSyncedAt ?? null,
-        }));
-    });
+    return this.withRequest(
+      requestId ?? `sources:${uid}`,
+      async signal => {
+        await this.assertCurrentAccount(uid);
+        this.repository.switchAccount(uid);
+        const remoteSources = await this.buildSourceCatalog(uid, signal);
+        const localSources = new Map(
+          this.repository.getSourceSummaries(uid).map(source => [
+            source.sourceKey,
+            source,
+          ]),
+        );
+        const requested = new Set(
+          (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
+        );
+        return remoteSources
+          .filter(source => !requested.size || requested.has(source.sourceKey))
+          .map(source => ({
+            ...source,
+            syncStatus: localSources.get(source.sourceKey)?.syncStatus ?? 'idle',
+            lastSyncedAt: localSources.get(source.sourceKey)?.lastSyncedAt ?? null,
+          }));
+      },
+    );
   }
 
   /** 读取当前账号的全局去重索引，并按导入来源过滤。 */
   async getFavoriteIndex(
     uid: string,
     sourceKeys?: readonly string[],
+    requestId?: string,
   ): Promise<DesktopVideo[]> {
-    await this.assertCurrentAccount(uid);
-    this.repository.switchAccount(uid);
-    const visible = new Set(
-      (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
+    return this.withRequest(
+      requestId ?? `favorite-index:${uid}`,
+      async () => {
+        await this.assertCurrentAccount(uid);
+        this.repository.switchAccount(uid);
+        const visible = new Set(
+          (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
+        );
+        return (await this.repository.getGlobalIndex(uid))
+          .map(video => toFavoriteDesktopVideo(video))
+          .filter(video =>
+            visible.size === 0 ||
+            (video.sourceKeys ?? []).some(sourceKey => visible.has(sourceKey)),
+          );
+      },
     );
-    return (await this.repository.getGlobalIndex(uid))
-      .map(video => toFavoriteDesktopVideo(video))
-      .filter(video =>
-        visible.size === 0 ||
-        (video.sourceKeys ?? []).some(sourceKey => visible.has(sourceKey)),
-      );
   }
 
   /** 读取单个来源的本地索引分页。 */
@@ -152,41 +162,52 @@ export class DesktopLibraryRuntime {
     uid: string,
     sourceKey: string,
     page: number,
+    requestId?: string,
   ): Promise<DesktopPage<DesktopVideo>> {
-    return this.withRequest(`source-videos:${uid}:${sourceKey}:${page}`, async () => {
-      await this.assertCurrentAccount(uid);
-      this.repository.switchAccount(uid);
-      const result = this.repository.getSourceVideos(
-        uid,
-        sourceKey,
-        page,
-        FAVORITE_PAGE_SIZE,
-      );
-      return {
-        items: result.items.map(video => toFavoriteDesktopVideo(video)),
-        page,
-        hasMore: page * FAVORITE_PAGE_SIZE < result.total,
-        total: result.total,
-      };
-    });
+    return this.withRequest(
+      requestId ?? `source-videos:${uid}:${sourceKey}:${page}`,
+      async () => {
+        await this.assertCurrentAccount(uid);
+        this.repository.switchAccount(uid);
+        const result = this.repository.getSourceVideos(
+          uid,
+          sourceKey,
+          page,
+          FAVORITE_PAGE_SIZE,
+        );
+        return {
+          items: result.items.map(video => toFavoriteDesktopVideo(video)),
+          page,
+          hasMore: page * FAVORITE_PAGE_SIZE < result.total,
+          total: result.total,
+        };
+      },
+    );
   }
 
   /** 强制刷新指定来源并返回刷新后的同步状态。 */
   async refreshSources(
     uid: string,
     sourceKeys: readonly string[],
+    requestId?: string,
   ): Promise<FavoriteSourceSummary[]> {
-    const normalizedKeys = Array.from(
-      new Set(sourceKeys.map(value => value.trim()).filter(Boolean)),
+    return this.withRequest(
+      requestId ?? `refresh-sources:${uid}`,
+      async signal => {
+        const normalizedKeys = Array.from(
+          new Set(sourceKeys.map(value => value.trim()).filter(Boolean)),
+        );
+        if (!normalizedKeys.length) {
+          return this.getSourceSummaries(uid);
+        }
+        await this.synchronize(uid, {
+          force: true,
+          signal,
+          sourceKeys: normalizedKeys,
+        });
+        return this.getSourceSummaries(uid, normalizedKeys);
+      },
     );
-    if (!normalizedKeys.length) {
-      return this.getSourceSummaries(uid);
-    }
-    await this.synchronize(uid, {
-      force: true,
-      sourceKeys: normalizedKeys,
-    });
-    return this.getSourceSummaries(uid, normalizedKeys);
   }
 
   /** 判断账号是否已经成功建立过本地收藏索引。 */
@@ -446,9 +467,12 @@ export class DesktopLibraryRuntime {
 
 /** 将本地收藏视频转换为安全的桌面内容卡片。 */
 function toFavoriteDesktopVideo(video: FavoriteVideo): DesktopVideo {
-  const sourceKeys = video.sourceKeys?.length
-    ? video.sourceKeys
-    : (video.folderIds ?? []).map(folderId => `ownedFavorite:${folderId}`);
+  const sourceKeys = Array.from(
+    new Set([
+      ...(video.sourceKeys ?? []),
+      ...(video.folderIds ?? []).map(folderId => `ownedFavorite:${folderId}`),
+    ]),
+  );
   return {
     aid: video.aid,
     bvid: video.bvid,

@@ -379,6 +379,12 @@ function toDesktopVideo(
 function toFavoriteDesktopVideo(
   video: ReturnType<typeof trimFavoriteVideo>,
 ): DesktopVideo {
+  const sourceKeys = Array.from(
+    new Set([
+      ...(video.sourceKeys ?? []),
+      ...(video.folderIds ?? []).map(folderId => `ownedFavorite:${folderId}`),
+    ]),
+  );
   return {
     aid: video.aid,
     bvid: video.bvid,
@@ -391,6 +397,7 @@ function toFavoriteDesktopVideo(
     tags: [],
     page: video.page,
     favTime: video.favTime,
+    sourceKeys,
     source: 'favorite',
   };
 }
