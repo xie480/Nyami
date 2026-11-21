@@ -1,5 +1,7 @@
 import {
   trimFavoriteVideo,
+  type BiliCollectedPlaylist,
+  type BiliSeasonArchive,
   type BiliApi,
   type FavoriteSyncProgress,
   type FavoriteSyncTarget,
@@ -14,21 +16,25 @@ import {DesktopLibraryRepository} from '../storage/desktopLibraryRepository';
 import type {
   DesktopPage,
   DesktopVideo,
+  FavoriteSourceKind,
+  FavoriteSourceSummary,
   FavoriteSearchContentRequest,
 } from '../../shared/types';
+import {getFavoriteSourceKey} from '../../shared/libraryFilters';
 
 const FAVORITE_PAGE_SIZE = 20;
 
 type LibrarySyncOptions = {
   force?: boolean;
   signal?: AbortSignal;
+  sourceKeys?: string[];
   onPhase?: (phase: 'catalog' | 'favorites', total: number) => void;
   onFavoriteProgress?: (progress: FavoriteSyncProgress) => void;
 };
 
 /**
  * 桌面端轻量收藏索引运行时。
- * 该类只同步当前账号的自有收藏夹，并把本地搜索交给 SQLite 索引。
+ * 该类同步当前账号可访问的收藏来源，并把本地索引读取交给 SQLite。
  */
 export class DesktopLibraryRuntime {
   private readonly pendingRequests = new Map<string, AbortController>();
@@ -47,7 +53,7 @@ export class DesktopLibraryRuntime {
     private readonly logger: AppLogger,
   ) {}
 
-  /** 同步当前账号的自有收藏夹，建立轻量本地收藏索引。 */
+  /** 同步当前账号的收藏来源，建立轻量本地收藏索引。 */
   async synchronize(
     uid: string,
     options: LibrarySyncOptions = {},
@@ -55,7 +61,11 @@ export class DesktopLibraryRuntime {
     await this.assertCurrentAccount(uid);
     this.repository.switchAccount(uid);
     options.onPhase?.('catalog', 0);
-    const targets = await this.buildSyncTargets(uid, options.signal);
+    const targets = await this.buildSyncTargets(
+      uid,
+      options.signal,
+      options.sourceKeys,
+    );
     options.onPhase?.('favorites', targets.length);
     const task = new FavoriteSyncTask(
       this.repository,
@@ -89,6 +99,94 @@ export class DesktopLibraryRuntime {
     await this.assertCurrentAccount(uid);
     this.repository.switchAccount(uid);
     return this.repository.getGlobalIndex(uid);
+  }
+
+  /** 读取远端来源目录并合并本地同步状态。 */
+  async getSourceSummaries(
+    uid: string,
+    sourceKeys?: readonly string[],
+  ): Promise<FavoriteSourceSummary[]> {
+    return this.withRequest(`sources:${uid}`, async signal => {
+      await this.assertCurrentAccount(uid);
+      this.repository.switchAccount(uid);
+      const remoteSources = await this.buildSourceCatalog(uid, signal);
+      const localSources = new Map(
+        this.repository.getSourceSummaries(uid).map(source => [
+          source.sourceKey,
+          source,
+        ]),
+      );
+      const requested = new Set(
+        (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
+      );
+      return remoteSources
+        .filter(source => !requested.size || requested.has(source.sourceKey))
+        .map(source => ({
+          ...source,
+          syncStatus: localSources.get(source.sourceKey)?.syncStatus ?? 'idle',
+          lastSyncedAt: localSources.get(source.sourceKey)?.lastSyncedAt ?? null,
+        }));
+    });
+  }
+
+  /** 读取当前账号的全局去重索引，并按导入来源过滤。 */
+  async getFavoriteIndex(
+    uid: string,
+    sourceKeys?: readonly string[],
+  ): Promise<DesktopVideo[]> {
+    await this.assertCurrentAccount(uid);
+    this.repository.switchAccount(uid);
+    const visible = new Set(
+      (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
+    );
+    return (await this.repository.getGlobalIndex(uid))
+      .map(video => toFavoriteDesktopVideo(video))
+      .filter(video =>
+        visible.size === 0 ||
+        (video.sourceKeys ?? []).some(sourceKey => visible.has(sourceKey)),
+      );
+  }
+
+  /** 读取单个来源的本地索引分页。 */
+  async getSourceVideos(
+    uid: string,
+    sourceKey: string,
+    page: number,
+  ): Promise<DesktopPage<DesktopVideo>> {
+    return this.withRequest(`source-videos:${uid}:${sourceKey}:${page}`, async () => {
+      await this.assertCurrentAccount(uid);
+      this.repository.switchAccount(uid);
+      const result = this.repository.getSourceVideos(
+        uid,
+        sourceKey,
+        page,
+        FAVORITE_PAGE_SIZE,
+      );
+      return {
+        items: result.items.map(video => toFavoriteDesktopVideo(video)),
+        page,
+        hasMore: page * FAVORITE_PAGE_SIZE < result.total,
+        total: result.total,
+      };
+    });
+  }
+
+  /** 强制刷新指定来源并返回刷新后的同步状态。 */
+  async refreshSources(
+    uid: string,
+    sourceKeys: readonly string[],
+  ): Promise<FavoriteSourceSummary[]> {
+    const normalizedKeys = Array.from(
+      new Set(sourceKeys.map(value => value.trim()).filter(Boolean)),
+    );
+    if (!normalizedKeys.length) {
+      return this.getSourceSummaries(uid);
+    }
+    await this.synchronize(uid, {
+      force: true,
+      sourceKeys: normalizedKeys,
+    });
+    return this.getSourceSummaries(uid, normalizedKeys);
   }
 
   /** 判断账号是否已经成功建立过本地收藏索引。 */
@@ -132,6 +230,7 @@ export class DesktopLibraryRuntime {
   private async buildSyncTargets(
     uid: string,
     signal?: AbortSignal,
+    sourceKeys?: readonly string[],
   ): Promise<FavoriteSyncTarget[]> {
     const folderResponse = await this.api.getFavoriteFolders(
       uid,
@@ -139,7 +238,7 @@ export class DesktopLibraryRuntime {
       undefined,
       'index',
     );
-    return (folderResponse.list ?? [])
+    const ownedTargets = (folderResponse.list ?? [])
       .filter(folder => folder.id > 0)
       .map(folder => ({
         playlistId: `ownedFavorite:${folder.id}`,
@@ -168,6 +267,148 @@ export class DesktopLibraryRuntime {
           };
         },
       }));
+    const importedTargets = await this.buildImportedSyncTargets(uid, signal);
+    const allTargets = [...ownedTargets, ...importedTargets];
+    const requested = new Set(
+      (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
+    );
+    return requested.size
+      ? allTargets.filter(target => requested.has(target.playlistId))
+      : allTargets;
+  }
+
+  /** 将外部收藏夹和合集转换为共享收藏同步目标。 */
+  private async buildImportedSyncTargets(
+    uid: string,
+    signal?: AbortSignal,
+  ): Promise<FavoriteSyncTarget[]> {
+    const sources = await this.loadImportedCatalog(uid, signal);
+    return sources.map(source => ({
+      playlistId: source.sourceKey,
+      title: source.title,
+      remoteVideoCount: source.mediaCount,
+      kind: source.kind,
+      ownerMid: source.ownerMid,
+      ownerName: source.ownerName,
+      cover: source.cover,
+      description: source.description,
+      fetchPage: async (page: number, pageSignal?: AbortSignal) => {
+        if (source.kind === 'collectedFavorite') {
+          const response = await this.api.getFavoriteVideos(
+            source.remoteId,
+            page,
+            FAVORITE_PAGE_SIZE,
+            pageSignal,
+            'index',
+          );
+          const medias = response.medias ?? [];
+          return {
+            list: medias
+              .filter(media => media.attr === 0)
+              .map(media => ({
+                ...trimFavoriteVideo(media),
+                sourceKeys: [source.sourceKey],
+              })),
+            hasMore:
+              response.has_more === true || medias.length === FAVORITE_PAGE_SIZE,
+            rawCount: medias.length,
+            description: response.info?.intro?.trim() ?? source.description,
+          };
+        }
+        const response = await this.api.getSeasonArchives(
+          source.ownerMid,
+          source.remoteId,
+          page,
+          FAVORITE_PAGE_SIZE,
+          pageSignal,
+          'index',
+        );
+        const archives = response.archives ?? [];
+        const pageSize = response.page?.page_size ?? FAVORITE_PAGE_SIZE;
+        return {
+          list: archives
+            .map(archive => toSeasonFavoriteVideo(archive, source.sourceKey))
+            .filter((video): video is FavoriteVideo => video !== null),
+          hasMore:
+            response.page?.total !== undefined
+              ? page * pageSize < response.page.total
+              : archives.length === FAVORITE_PAGE_SIZE,
+          rawCount: archives.length,
+          description:
+            response.meta?.description?.trim() ??
+            response.meta?.intro?.trim() ??
+            source.description,
+        };
+      },
+    }));
+  }
+
+  /** 读取并规范化远端外部收藏来源目录。 */
+  private async loadImportedCatalog(
+    uid: string,
+    signal?: AbortSignal,
+  ): Promise<FavoriteSourceSummary[]> {
+    const items: BiliCollectedPlaylist[] = [];
+    let page = 1;
+    let expectedCount = 0;
+    while (!signal?.aborted) {
+      const response = await this.api.getCollectedPlaylists(
+        uid,
+        page,
+        50,
+        signal,
+        'index',
+      );
+      const nextItems = response.list ?? [];
+      expectedCount = response.count ?? expectedCount;
+      items.push(...nextItems);
+      if (
+        !nextItems.length ||
+        (expectedCount > 0 && items.length >= expectedCount) ||
+        nextItems.length < 50
+      ) {
+        break;
+      }
+      page += 1;
+    }
+    const deduplicated = new Map<string, FavoriteSourceSummary>();
+    for (const item of items) {
+      const source = normalizeImportedSource(item, uid);
+      if (!source) {
+        continue;
+      }
+      deduplicated.set(source.sourceKey, source);
+    }
+    return Array.from(deduplicated.values());
+  }
+
+  /** 读取自有收藏夹和外部来源，作为音乐库目录的远端快照。 */
+  private async buildSourceCatalog(
+    uid: string,
+    signal?: AbortSignal,
+  ): Promise<FavoriteSourceSummary[]> {
+    const folderResponse = await this.api.getFavoriteFolders(
+      uid,
+      signal,
+      undefined,
+      'index',
+    );
+    const owned = (folderResponse.list ?? [])
+      .filter(folder => folder.id > 0)
+      .map(folder => ({
+        sourceKey: `ownedFavorite:${folder.id}`,
+        kind: 'owned' as const,
+        remoteId: folder.id,
+        ownerMid: Number(folder.mid ?? uid),
+        ownerName: '',
+        title: folder.title,
+        cover: '',
+        mediaCount: Math.max(0, folder.media_count),
+        description: '',
+        syncStatus: 'idle' as const,
+        lastSyncedAt: null,
+      }));
+    return [...owned, ...(await this.loadImportedCatalog(uid, signal))];
   }
 
   /** 校验调用方仍持有目标账号，避免账号切换期间写错本地数据。 */
@@ -205,6 +446,9 @@ export class DesktopLibraryRuntime {
 
 /** 将本地收藏视频转换为安全的桌面内容卡片。 */
 function toFavoriteDesktopVideo(video: FavoriteVideo): DesktopVideo {
+  const sourceKeys = video.sourceKeys?.length
+    ? video.sourceKeys
+    : (video.folderIds ?? []).map(folderId => `ownedFavorite:${folderId}`);
   return {
     aid: video.aid,
     bvid: video.bvid,
@@ -217,7 +461,66 @@ function toFavoriteDesktopVideo(video: FavoriteVideo): DesktopVideo {
     tags: [],
     page: video.page,
     favTime: video.favTime,
+    sourceKeys,
     source: 'favorite',
+  };
+}
+
+/** 将 B 站外部收藏目录规范化为桌面来源摘要。 */
+function normalizeImportedSource(
+  item: BiliCollectedPlaylist,
+  uid: string,
+): FavoriteSourceSummary | null {
+  const ownerMid = Number(item.upper?.mid ?? item.mid ?? 0);
+  const isSeason =
+    (item.fid != null && Number(item.fid) === 0) ||
+    item.season_id != null ||
+    item.type_name === '合集';
+  const remoteId = Number(isSeason ? item.season_id ?? item.id : item.id);
+  if (!ownerMid || !remoteId || ownerMid === Number(uid)) {
+    return null;
+  }
+  const kind: FavoriteSourceKind = isSeason
+    ? 'subscribedSeason'
+    : 'collectedFavorite';
+  return {
+    sourceKey: getFavoriteSourceKey(kind, ownerMid, remoteId),
+    kind,
+    remoteId,
+    ownerMid,
+    ownerName: item.upper?.name ?? '',
+    title: item.title ?? item.name ?? '未命名列表',
+    cover: normalizeBiliAssetUrl(item.cover ?? ''),
+    mediaCount: Math.max(0, Number(item.media_count ?? item.total ?? 0)),
+    description: (item.intro ?? item.description ?? '').trim(),
+    syncStatus: 'idle',
+    lastSyncedAt: null,
+  };
+}
+
+/** 将合集归档条目转换为共享收藏视频。 */
+function toSeasonFavoriteVideo(
+  archive: BiliSeasonArchive,
+  sourceKey: string,
+): FavoriteVideo | null {
+  if (!archive.bvid) {
+    return null;
+  }
+  return {
+    bvid: archive.bvid,
+    aid: archive.aid,
+    title: archive.title,
+    cover: normalizeBiliAssetUrl(archive.pic ?? archive.cover ?? ''),
+    duration: archive.duration ?? 0,
+    page: 1,
+    pubtime: archive.pubdate ?? archive.ctime ?? 0,
+    favTime: 0,
+    upper: {
+      mid: archive.owner?.mid ?? archive.upper?.mid ?? 0,
+      name: archive.owner?.name ?? archive.upper?.name ?? '',
+    },
+    attr: 0,
+    sourceKeys: [sourceKey],
   };
 }
 

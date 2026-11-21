@@ -2661,6 +2661,308 @@
   text-transform: uppercase;
 }
 
+/* 搜索标签筛选和加载状态采用同一组 NYAMI 交互语言。 */
+.prototype-app .prototype-tag-filter-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.prototype-app .prototype-tag-filter-editor input {
+  width: 170px;
+  min-height: 32px;
+  border: 1px solid var(--prototype-line);
+  background: var(--prototype-paper);
+  color: var(--prototype-ink);
+  padding: 6px 9px;
+  outline: 0;
+}
+
+.prototype-app .prototype-tag-filter-editor input:focus {
+  border-color: var(--prototype-accent);
+  box-shadow: 0 0 0 3px rgba(200, 76, 49, 0.11);
+}
+
+.prototype-app .prototype-tag-filter-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.prototype-app .prototype-search-loading {
+  display: grid;
+  min-height: 286px;
+  justify-items: center;
+  align-content: center;
+  gap: 9px;
+  border: 1px dashed var(--prototype-line);
+  background:
+    radial-gradient(circle at 50% 42%, rgba(200, 76, 49, 0.1), transparent 32%),
+    var(--prototype-paper);
+  color: var(--prototype-muted);
+  text-align: center;
+}
+
+.prototype-app .prototype-search-loading strong {
+  color: var(--prototype-ink);
+  font-family: var(--prototype-serif);
+  font-size: 19px;
+  font-weight: 400;
+}
+
+.prototype-app .prototype-search-loading small {
+  font-family: var(--prototype-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.prototype-app .prototype-search-loading-orbit {
+  position: relative;
+  width: 94px;
+  height: 94px;
+  border: 1px solid rgba(200, 76, 49, 0.35);
+  border-radius: 50%;
+  transform: rotate(-18deg);
+  animation: nyami-search-orbit 2.8s linear infinite;
+}
+
+.prototype-app .prototype-search-loading-orbit::before,
+.prototype-app .prototype-search-loading-orbit::after {
+  position: absolute;
+  inset: 15px;
+  border: 1px solid rgba(200, 76, 49, 0.2);
+  border-radius: 50%;
+  content: '';
+}
+
+.prototype-app .prototype-search-loading-orbit::after {
+  inset: 31px;
+  border-color: rgba(200, 76, 49, 0.48);
+}
+
+.prototype-app .prototype-search-loading-orbit > span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--prototype-accent);
+  box-shadow: 0 0 0 4px rgba(200, 76, 49, 0.12);
+  transform: rotate(calc(var(--orbit-index) * 90deg)) translateY(-42px);
+  transform-origin: 0 0;
+  animation: nyami-search-pulse 1.2s ease-in-out infinite;
+  animation-delay: calc(var(--orbit-index) * -180ms);
+}
+
+.prototype-app .prototype-search-loading-orbit > span:nth-child(1) {
+  --orbit-index: 0;
+}
+
+.prototype-app .prototype-search-loading-orbit > span:nth-child(2) {
+  --orbit-index: 1;
+}
+
+.prototype-app .prototype-search-loading-orbit > span:nth-child(3) {
+  --orbit-index: 2;
+}
+
+.prototype-app .prototype-search-loading-orbit > span:nth-child(4) {
+  --orbit-index: 3;
+}
+
+@keyframes nyami-search-orbit {
+  to {
+    transform: rotate(342deg);
+  }
+}
+
+@keyframes nyami-search-pulse {
+  0%,
+  100% {
+    opacity: 0.38;
+    scale: 0.75;
+  }
+  50% {
+    opacity: 1;
+    scale: 1.18;
+  }
+}
+
+.prototype-app .prototype-nyami-loader {
+  display: grid;
+  min-height: 180px;
+  justify-items: center;
+  align-content: center;
+  gap: 8px;
+}
+
+.prototype-app .prototype-nyami-loader strong {
+  color: var(--prototype-ink-2);
+  font-family: var(--prototype-serif);
+  font-size: 17px;
+  font-weight: 400;
+}
+
+.prototype-app .prototype-nyami-loader small {
+  color: var(--prototype-muted);
+  font-family: var(--prototype-mono);
+  font-size: 10px;
+}
+
+.prototype-app .prototype-loader-orbit {
+  position: relative;
+  display: block;
+  width: 48px;
+  height: 48px;
+  border: 1px solid rgba(200, 76, 49, 0.32);
+  border-radius: 50%;
+  animation: nyami-loader-spin 1.8s linear infinite;
+}
+
+.prototype-app .prototype-loader-orbit::before {
+  position: absolute;
+  inset: 8px;
+  border: 1px solid rgba(200, 76, 49, 0.24);
+  border-radius: 50%;
+  content: '';
+}
+
+.prototype-app .prototype-loader-orbit > span {
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--prototype-accent);
+  transform: translateX(-50%);
+}
+
+.prototype-app .prototype-loader-orbit > span:nth-child(2) {
+  top: 50%;
+  right: -3px;
+  left: auto;
+  transform: translateY(-50%);
+}
+
+.prototype-app .prototype-loader-orbit > span:nth-child(3) {
+  top: auto;
+  right: auto;
+  bottom: -3px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.prototype-app .prototype-track-row {
+  cursor: pointer;
+}
+
+.prototype-app .prototype-track-row:focus-visible {
+  outline: 2px solid var(--prototype-accent);
+  outline-offset: -2px;
+}
+
+.prototype-app .prototype-track-play-indicator {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--prototype-ink-2);
+}
+
+.prototype-app .prototype-track-row:hover .prototype-track-play-indicator,
+.prototype-app .prototype-track-row:focus-visible .prototype-track-play-indicator {
+  border-color: var(--prototype-accent);
+  background: var(--prototype-accent-soft);
+  color: var(--prototype-accent);
+}
+
+.prototype-app .prototype-immersive-heading > div:first-child {
+  min-height: 16px;
+}
+
+.prototype-app .prototype-immersive-detail {
+  max-width: min(820px, 48vw);
+}
+
+.prototype-app .prototype-immersive-title-nav {
+  display: block;
+}
+
+.prototype-app .prototype-immersive-title-nav h1 {
+  max-width: 100%;
+}
+
+.prototype-app .prototype-floating-player > button:focus-visible,
+.prototype-app .prototype-floating-sleep:focus-within,
+.prototype-app .prototype-floating-sleep select:focus-visible,
+.prototype-app .prototype-floating-track input:focus-visible {
+  outline: 2px solid #fffaf4;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(200, 76, 49, 0.45);
+}
+
+.prototype-app ::selection {
+  background: var(--prototype-accent);
+  color: #fffefb;
+}
+
+.prototype-app select {
+  appearance: none;
+  border: 1px solid var(--prototype-line);
+  border-radius: 0;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--prototype-accent) 50%)
+      calc(100% - 13px) 50% / 5px 5px no-repeat,
+    linear-gradient(135deg, var(--prototype-accent) 50%, transparent 50%)
+      calc(100% - 9px) 50% / 5px 5px no-repeat,
+    var(--prototype-surface);
+  color: inherit;
+  padding: 6px 28px 6px 9px;
+}
+
+.prototype-app input[type='range'] {
+  height: 6px;
+  appearance: none;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--prototype-accent) 0%,
+    var(--prototype-accent) 46%,
+    var(--prototype-line) 46%,
+    var(--prototype-line) 100%
+  );
+  cursor: pointer;
+}
+
+.prototype-app input[type='range']::-webkit-slider-thumb {
+  width: 15px;
+  height: 15px;
+  appearance: none;
+  border: 2px solid var(--prototype-surface);
+  border-radius: 50%;
+  background: var(--prototype-accent);
+  box-shadow: 0 2px 8px rgba(200, 76, 49, 0.28);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.prototype-app input[type='range']:hover::-webkit-slider-thumb,
+.prototype-app input[type='range']:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 5px rgba(200, 76, 49, 0.16);
+  transform: scale(1.08);
+}
+
+.prototype-app input[type='range']::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--prototype-surface);
+  border-radius: 50%;
+  background: var(--prototype-accent);
+}
+
 .prototype-app .prototype-view-toggle {
   display: inline-grid;
   width: 46px;
@@ -2674,6 +2976,29 @@
 .prototype-app .prototype-view-toggle:hover {
   border-color: var(--prototype-accent);
   color: var(--prototype-accent);
+}
+
+.prototype-app .account-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 236px;
+}
+
+.prototype-app .account-settings-actions button {
+  min-width: 108px;
+  justify-content: center;
+}
+
+.prototype-app .account-settings-summary {
+  align-items: center;
+}
+
+.prototype-app .dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .prototype-app .prototype-peq-grid {

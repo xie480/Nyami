@@ -9,6 +9,10 @@ import type {
   FavoriteSyncPageResult,
 } from '../../../packages/core/src/favorites/contracts';
 import type {AppLogger} from '../logging/appLogger';
+import type {
+  FavoriteSourceKind,
+  FavoriteSourceSummary,
+} from '../../shared/types';
 import {SqliteDatabase, type SqliteValue} from './sqliteDatabase';
 
 type PlaylistMetaInput = {
@@ -362,7 +366,7 @@ export class DesktopLibraryRepository implements FavoriteRepository {
         AND playlist_meta.playlist_id = video_meta.playlist_id
        WHERE video_meta.uid = ?
          AND video_meta.is_deleted = 0
-         AND playlist_meta.kind = 'owned'
+         AND playlist_meta.kind IN ('owned', 'collectedFavorite', 'subscribedSeason')
        ORDER BY video_meta.fav_time DESC, video_meta.updated_at DESC`,
       [normalizedUid],
     );
@@ -386,6 +390,79 @@ export class DesktopLibraryRepository implements FavoriteRepository {
       }
     }
     return Array.from(merged.values());
+  }
+
+  /** 读取当前账号本地收藏来源的元数据和同步状态。 */
+  getSourceSummaries(
+    uid = this.requireUid(),
+    sourceKeys?: readonly string[],
+  ): FavoriteSourceSummary[] {
+    const normalizedUid = normalizeUid(uid);
+    if (!normalizedUid) {
+      return [];
+    }
+    const normalizedKeys = Array.from(
+      new Set((sourceKeys ?? []).map(value => value.trim()).filter(Boolean)),
+    );
+    const filter = normalizedKeys.length
+      ? ` AND playlist_id IN (${normalizedKeys.map(() => '?').join(', ')})`
+      : '';
+    const rows = this.database.all<PlaylistRow>(
+      `SELECT * FROM playlist_meta
+       WHERE uid = ?${filter}
+       ORDER BY updated_at DESC, title COLLATE NOCASE ASC`,
+      [normalizedUid, ...normalizedKeys],
+    );
+    return rows.map(row => ({
+      sourceKey: row.playlist_id,
+      kind: normalizeSourceKind(row.kind),
+      remoteId: parseRemoteId(row.playlist_id),
+      ownerMid: row.owner_mid,
+      ownerName: row.owner_name,
+      title: row.title,
+      cover: row.cover,
+      mediaCount: row.remote_video_count,
+      description: row.description,
+      syncStatus: normalizeSyncStatus(row.sync_status),
+      lastSyncedAt:
+        normalizeSyncStatus(row.sync_status) === 'success'
+          ? row.updated_at
+          : null,
+    }));
+  }
+
+  /** 按来源分页读取本地已同步视频，供收藏夹详情页使用。 */
+  getSourceVideos(
+    uid: string,
+    sourceKey: string,
+    page = 1,
+    pageSize = 20,
+  ): {items: FavoriteVideo[]; total: number} {
+    const normalizedUid = normalizeUid(uid);
+    const normalizedSourceKey = sourceKey.trim();
+    const normalizedPage = Math.max(1, Math.floor(page));
+    const normalizedPageSize = Math.max(1, Math.min(100, Math.floor(pageSize)));
+    if (!normalizedUid || !normalizedSourceKey) {
+      return {items: [], total: 0};
+    }
+    const rows = this.database.all<VideoRow & {kind: string}>(
+      `SELECT video_meta.*, playlist_meta.kind
+       FROM video_meta
+       INNER JOIN playlist_meta
+         ON playlist_meta.uid = video_meta.uid
+        AND playlist_meta.playlist_id = video_meta.playlist_id
+       WHERE video_meta.uid = ?
+         AND video_meta.playlist_id = ?
+         AND video_meta.is_deleted = 0
+       ORDER BY video_meta.fav_time DESC, video_meta.updated_at DESC`,
+      [normalizedUid, normalizedSourceKey],
+    );
+    const items = rows.map(row => rowToFavoriteVideo(row));
+    const offset = (normalizedPage - 1) * normalizedPageSize;
+    return {
+      items: items.slice(offset, offset + normalizedPageSize),
+      total: items.length,
+    };
   }
 
   /** 在本地收藏关系中搜索标题、UP 主或收藏夹名称。 */
@@ -570,6 +647,21 @@ function inferPlaylistKind(
     return 'collectedFavorite';
   }
   return 'owned';
+}
+
+/** 将数据库来源类型转换为桌面端允许的来源类型。 */
+function normalizeSourceKind(value: string): FavoriteSourceKind {
+  if (value === 'collectedFavorite' || value === 'subscribedSeason') {
+    return value;
+  }
+  return 'owned';
+}
+
+/** 从稳定来源键中恢复远端数字 ID。 */
+function parseRemoteId(sourceKey: string): number {
+  const parts = sourceKey.split(':');
+  const value = Number(parts[parts.length - 1]);
+  return Number.isSafeInteger(value) && value > 0 ? value : 0;
 }
 
 /** 从自有收藏夹来源键恢复数字 folderId。 */

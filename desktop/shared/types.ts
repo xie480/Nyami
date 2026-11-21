@@ -47,6 +47,10 @@ export const IPC_CHANNELS = {
     getDiscover: 'content:get-discover',
     search: 'content:search',
     getFavoriteFolders: 'content:get-favorite-folders',
+    getFavoriteSources: 'content:get-favorite-sources',
+    getFavoriteIndex: 'content:get-favorite-index',
+    getFavoriteSourceVideos: 'content:get-favorite-source-videos',
+    refreshFavoriteSources: 'content:refresh-favorite-sources',
     getFavoriteVideos: 'content:get-favorite-videos',
     searchFavorites: 'content:search-favorites',
     cancel: 'content:cancel',
@@ -198,11 +202,21 @@ export type PlaybackSnapshot = {
 
 export type PlaybackQueueMode = 'sequential' | 'shuffle';
 
-/** 队列可恢复的热门来源上下文，页码用于播放到末尾时请求下一页。 */
-export type PlaybackQueueContext = {
-  kind: 'popular';
-  page: number;
-};
+/** 播放队列的来源上下文，用于保持收藏夹、搜索和热门列表的来源边界。 */
+export type PlaybackQueueContext =
+  | {
+      kind: 'popular';
+      page: number;
+    }
+  | {
+      kind: 'favorite';
+      sourceKey: string;
+    }
+  | {
+      kind: 'search';
+      keyword: string;
+      page: number;
+    };
 
 /** Renderer 可见的队列项，不包含签名后的 CDN 地址。 */
 export type PlaybackQueueItem = {
@@ -528,6 +542,22 @@ export type FavoriteFolderContentRequest = ContentRequestBase & {
   uid: string;
 };
 
+export type FavoriteSourceRequest = ContentRequestBase & {
+  uid: string;
+  sourceKeys?: string[];
+};
+
+export type FavoriteIndexRequest = ContentRequestBase & {
+  uid: string;
+  sourceKeys?: string[];
+};
+
+export type FavoriteSourceVideoRequest = ContentRequestBase & {
+  uid: string;
+  sourceKey: string;
+  page: number;
+};
+
 export type FavoriteVideoContentRequest = ContentRequestBase & {
   uid: string;
   mediaId: number;
@@ -553,6 +583,7 @@ export type DesktopVideo = {
   tags: string[];
   page?: number;
   favTime?: number;
+  sourceKeys?: string[];
   source?: 'search' | 'popular' | 'favorite';
 };
 
@@ -569,6 +600,32 @@ export type FavoriteFolderSummary = {
   fid: number;
   title: string;
   mediaCount: number;
+};
+
+export type FavoriteSourceKind =
+  | 'owned'
+  | 'collectedFavorite'
+  | 'subscribedSeason';
+
+export type FavoriteSourceSyncStatus =
+  | 'idle'
+  | 'syncing'
+  | 'success'
+  | 'failed'
+  | 'running';
+
+export type FavoriteSourceSummary = {
+  sourceKey: string;
+  kind: FavoriteSourceKind;
+  remoteId: number;
+  ownerMid: number;
+  ownerName: string;
+  title: string;
+  cover: string;
+  mediaCount: number;
+  description: string;
+  syncStatus: FavoriteSourceSyncStatus;
+  lastSyncedAt: number | null;
 };
 
 export type HomeSnapshot = {
@@ -650,6 +707,18 @@ export type NyamiDesktopApi = {
     getFavoriteFolders: (
       request: FavoriteFolderContentRequest,
     ) => Promise<FavoriteFolderSummary[]>;
+    getFavoriteSources: (
+      request: FavoriteSourceRequest,
+    ) => Promise<FavoriteSourceSummary[]>;
+    getFavoriteIndex: (
+      request: FavoriteIndexRequest,
+    ) => Promise<DesktopVideo[]>;
+    getFavoriteSourceVideos: (
+      request: FavoriteSourceVideoRequest,
+    ) => Promise<DesktopPage<DesktopVideo>>;
+    refreshFavoriteSources: (
+      request: FavoriteSourceRequest,
+    ) => Promise<FavoriteSourceSummary[]>;
     getFavoriteVideos: (
       request: FavoriteVideoContentRequest,
     ) => Promise<DesktopPage<DesktopVideo>>;

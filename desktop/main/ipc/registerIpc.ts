@@ -9,7 +9,10 @@ import {
   type DiscoverContentRequest,
   type DesktopWindowState,
   type FavoriteFolderContentRequest,
+  type FavoriteIndexRequest,
   type FavoriteSearchContentRequest,
+  type FavoriteSourceRequest,
+  type FavoriteSourceVideoRequest,
   type FavoriteVideoContentRequest,
   type PlaybackAudioEvent,
   type PlaybackQueueContext,
@@ -251,6 +254,35 @@ export function registerIpcHandlers(
     assertFavoriteFolderContentRequest(request);
     return dependencies.contentRuntime.getFavoriteFolders(request);
   });
+  register(IPC_CHANNELS.content.getFavoriteSources, (_event, request) => {
+    assertFavoriteSourceRequest(request);
+    return dependencies.libraryRuntime.getSourceSummaries(
+      request.uid,
+      request.sourceKeys,
+    );
+  });
+  register(IPC_CHANNELS.content.getFavoriteIndex, (_event, request) => {
+    assertFavoriteSourceRequest(request);
+    return dependencies.libraryRuntime.getFavoriteIndex(
+      request.uid,
+      request.sourceKeys,
+    );
+  });
+  register(IPC_CHANNELS.content.getFavoriteSourceVideos, (_event, request) => {
+    assertFavoriteSourceVideoRequest(request);
+    return dependencies.libraryRuntime.getSourceVideos(
+      request.uid,
+      request.sourceKey,
+      request.page,
+    );
+  });
+  register(IPC_CHANNELS.content.refreshFavoriteSources, (_event, request) => {
+    assertFavoriteSourceRequest(request);
+    return dependencies.libraryRuntime.refreshSources(
+      request.uid,
+      request.sourceKeys ?? [],
+    );
+  });
   register(IPC_CHANNELS.content.getFavoriteVideos, (_event, request) => {
     assertFavoriteVideoContentRequest(request);
     return dependencies.contentRuntime.getFavoriteVideos(request);
@@ -489,6 +521,52 @@ function assertFavoriteFolderContentRequest(
   }
 }
 
+/** 校验导入来源和本地索引请求。 */
+function assertFavoriteSourceRequest(
+  value: unknown,
+): asserts value is FavoriteSourceRequest | FavoriteIndexRequest {
+  assertContentRequestBase(value);
+  const request = value as ContentRequestBase & {
+    uid?: unknown;
+    sourceKeys?: unknown;
+  };
+  if (!isBoundedString(request.uid, 64) || !request.uid.trim()) {
+    throw new Error('收藏账号 UID 无效');
+  }
+  if (request.sourceKeys !== undefined) {
+    if (
+      !Array.isArray(request.sourceKeys) ||
+      request.sourceKeys.length > 500 ||
+      request.sourceKeys.some(
+        sourceKey => !isBoundedString(sourceKey, 160) || !sourceKey.trim(),
+      )
+    ) {
+      throw new Error('收藏来源参数无效');
+    }
+  }
+}
+
+/** 校验导入来源视频分页请求。 */
+function assertFavoriteSourceVideoRequest(
+  value: unknown,
+): asserts value is FavoriteSourceVideoRequest {
+  assertContentRequestBase(value);
+  const request = value as ContentRequestBase & {
+    uid?: unknown;
+    sourceKey?: unknown;
+    page?: unknown;
+  };
+  if (!isBoundedString(request.uid, 64) || !request.uid.trim()) {
+    throw new Error('收藏账号 UID 无效');
+  }
+  if (!isBoundedString(request.sourceKey, 160) || !request.sourceKey.trim()) {
+    throw new Error('收藏来源参数无效');
+  }
+  if (!isPositiveInteger(request.page) || request.page > 1000) {
+    throw new Error('收藏视频页码无效');
+  }
+}
+
 /** 校验收藏夹视频请求。 */
 function assertFavoriteVideoContentRequest(
   value: unknown,
@@ -620,18 +698,37 @@ function assertPlaybackQueueItemRequest(
   }
 }
 
-/** 校验热门续页上下文，避免主进程接受任意游标。 */
+/** 校验播放来源上下文，避免主进程接受任意游标或来源键。 */
 function assertPlaybackQueueContext(
   value: unknown,
 ): asserts value is PlaybackQueueContext {
-  if (
-    !isRecord(value) ||
-    value.kind !== 'popular' ||
-    !isPositiveInteger(value.page) ||
-    value.page > 1000
-  ) {
-    throw new Error('热门续页上下文无效');
+  if (!isRecord(value) || typeof value.kind !== 'string') {
+    throw new Error('播放来源上下文无效');
   }
+  if (value.kind === 'popular') {
+    if (!isPositiveInteger(value.page) || value.page > 1000) {
+      throw new Error('热门续页上下文无效');
+    }
+    return;
+  }
+  if (value.kind === 'favorite') {
+    if (!isBoundedString(value.sourceKey, 160) || !value.sourceKey.trim()) {
+      throw new Error('收藏来源上下文无效');
+    }
+    return;
+  }
+  if (value.kind === 'search') {
+    if (
+      !isBoundedString(value.keyword, 128) ||
+      !value.keyword.trim() ||
+      !isPositiveInteger(value.page) ||
+      value.page > 1000
+    ) {
+      throw new Error('搜索来源上下文无效');
+    }
+    return;
+  }
+  throw new Error('播放来源上下文无效');
 }
 
 /** 校验单个播放队列项目。 */

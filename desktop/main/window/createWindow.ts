@@ -142,6 +142,9 @@ export function createMainWindow(
       context: PlaybackQueueContext,
       signal: AbortSignal,
     ) => {
+      if (context.kind !== 'popular') {
+        throw new Error('当前播放来源不支持热门列表续页');
+      }
       const page = await contentRuntime.getDiscover({
         requestId: `playback-popular-${randomUUID()}`,
         page: context.page + 1,

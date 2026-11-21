@@ -61,7 +61,6 @@ const NAV_ITEMS: Array<{
 }> = [
   {route: 'library', label: '音乐库', icon: 'folder'},
   {route: 'search', label: '搜索', icon: 'search'},
-  {route: 'sound-lab', label: '声音实验室', icon: 'sparkles'},
   {route: 'settings', label: '设置', icon: 'settings'},
 ];
 
@@ -129,6 +128,7 @@ const EMPTY_UPDATE: DesktopUpdateInfo = {
 export function App(): JSX.Element {
   const [route, setRoute] = useState<Route>('library');
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
+  const [selectedSourceKey, setSelectedSourceKey] = useState<string | null>(null);
   const [auth, setAuth] = useState<AuthStatus>({
     loggedIn: false,
     uid: null,
@@ -350,20 +350,28 @@ export function App(): JSX.Element {
 
   /** 将多个真实视频一次性载入播放器，支持收藏夹全局随机播放。 */
   const playVideos = useCallback(
-    (videos: DesktopVideo[], shuffle: boolean): void => {
+    (
+      videos: DesktopVideo[],
+      shuffle: boolean,
+      context: PlaybackQueueContext | null = null,
+      startIndex = 0,
+    ): void => {
       const items = videos.map(toPlaybackQueueItem);
       if (!items.length) {
-        pushNotice('info', '当前收藏夹没有可播放内容');
+        pushNotice('info', '当前列表没有可播放内容');
         return;
       }
       const queue = shuffle ? shuffleQueueItems(items) : items;
+      const safeStartIndex = shuffle
+        ? 0
+        : Math.min(Math.max(0, startIndex), queue.length - 1);
       void window.nyamiDesktop.playback
         .loadQueue({
           items: queue,
-          startIndex: 0,
+          startIndex: safeStartIndex,
           autoplay: true,
           expandParts: false,
-          context: null,
+          context,
         })
         .then(snapshot => {
           setPlayback(snapshot);
@@ -832,6 +840,10 @@ export function App(): JSX.Element {
     onRouteChange: setRoute,
     onSelectFolder: (folderId: number) => {
       setSelectedFolderId(folderId);
+      setSelectedSourceKey(`ownedFavorite:${folderId}`);
+    },
+    onSelectSource: (sourceKey: string) => {
+      setSelectedSourceKey(sourceKey);
     },
     onSeek: seekPlayback,
     onSleepTimer: setPlaybackSleepTimer,
@@ -845,6 +857,7 @@ export function App(): JSX.Element {
     spectrum,
     route,
     selectedFolderId,
+    selectedSourceKey,
   } satisfies Parameters<typeof PrototypePage>[0];
 
   return (
@@ -1819,7 +1832,6 @@ function SettingsPage({
   const [preferences, setPreferences] = useState<DesktopUserPreferences>(() =>
     loadDesktopUserPreferences(),
   );
-  const [blacklistInput, setBlacklistInput] = useState('');
 
   /** 更新 Android 端同步到桌面的偏好并立即持久化。 */
   const updatePreference = useCallback(
@@ -1832,32 +1844,6 @@ function SettingsPage({
     },
     [],
   );
-
-  /** 将文本输入转换为正整数，避免推荐时长写入非法值。 */
-  const updateDurationLimit = (value: string): void => {
-    const parsed = Number(value);
-    if (value.trim() && Number.isFinite(parsed) && parsed > 0) {
-      updatePreference({
-        recommendationDurationLimitMinutes: Math.floor(parsed),
-      });
-    }
-  };
-
-  /** 将黑名单输入按 Android 端支持的分隔符拆分并去重。 */
-  const addBlacklistTags = (value: string): void => {
-    const tags = value
-      .split(/[\n,，、;；\t]+/)
-      .map(item => item.trim())
-      .filter(Boolean);
-    if (!tags.length) {
-      return;
-    }
-    updatePreference({
-      recommendationTagBlacklist: Array.from(
-        new Set([...preferences.recommendationTagBlacklist, ...tags]),
-      ),
-    });
-  };
 
   return (
     <div className="page-stack settings-page">
@@ -1972,145 +1958,6 @@ function SettingsPage({
             onChange={event =>
               updatePreference({
                 autoRefreshFavoritesOnLaunch: event.target.checked,
-              })
-            }
-            type="checkbox"
-          />
-        </label>
-        <label className="setting-row">
-          <span>
-            <strong>自动刷新首页推荐</strong>
-            <small>
-              {preferences.homeRefreshMode === 'automatic'
-                ? `每 ${preferences.homeRefreshIntervalHours} 小时自动检查`
-                : '手动模式 · 通过首页刷新按钮更新'}
-            </small>
-          </span>
-          <input
-            checked={preferences.homeRefreshMode === 'automatic'}
-            onChange={event =>
-              updatePreference({
-                homeRefreshMode: event.target.checked ? 'automatic' : 'manual',
-              })
-            }
-            type="checkbox"
-          />
-        </label>
-        {preferences.homeRefreshMode === 'automatic' ? (
-          <label className="setting-row setting-row-select">
-            <span>
-              <strong>自动刷新间隔</strong>
-              <small>控制首页推荐的检查频率。</small>
-            </span>
-            <select
-              aria-label="首页自动刷新间隔"
-              onChange={event =>
-                updatePreference({
-                  homeRefreshIntervalHours: Number(event.target.value),
-                })
-              }
-              value={preferences.homeRefreshIntervalHours}>
-              <option value="6">6 小时</option>
-              <option value="12">12 小时</option>
-              <option value="24">24 小时</option>
-            </select>
-          </label>
-        ) : null}
-      </section>
-      <section className="settings-card">
-        <div className="panel-heading">
-          <div>
-            <p className="section-kicker">RECOMMENDATION</p>
-            <h3>推荐偏好</h3>
-          </div>
-        </div>
-        <label className="setting-row">
-          <span>
-            <strong>推荐视频时长筛选</strong>
-            <small>开启后，首页个性化推荐只保留限定时长内的视频。</small>
-          </span>
-          <input
-            checked={preferences.recommendationDurationFilterEnabled}
-            onChange={event =>
-              updatePreference({
-                recommendationDurationFilterEnabled: event.target.checked,
-              })
-            }
-            type="checkbox"
-          />
-        </label>
-        <label className="setting-row setting-row-input">
-          <span>
-            <strong>最长时长（分钟）</strong>
-            <small>只填写最大时长，留空时不限制。</small>
-          </span>
-          <input
-            aria-label="推荐视频最长时长"
-            disabled={!preferences.recommendationDurationFilterEnabled}
-            min="1"
-            onChange={event => updateDurationLimit(event.target.value)}
-            type="number"
-            value={preferences.recommendationDurationLimitMinutes}
-          />
-        </label>
-        <div className="setting-row setting-row-tags">
-          <span>
-            <strong>推荐关键词屏蔽</strong>
-            <small>使用换行或逗号分隔，匹配标签后不再进入推荐。</small>
-          </span>
-          <div className="setting-tags-control">
-            <input
-              aria-label="添加推荐屏蔽标签"
-              onChange={event => setBlacklistInput(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  addBlacklistTags(blacklistInput);
-                  setBlacklistInput('');
-                }
-              }}
-              placeholder="例如：搬运"
-              value={blacklistInput}
-            />
-            <button
-              className="text-button"
-              onClick={() => {
-                addBlacklistTags(blacklistInput);
-                setBlacklistInput('');
-              }}
-              type="button">
-              添加
-            </button>
-            <div className="setting-tags-list">
-              {preferences.recommendationTagBlacklist.map(tag => (
-                <button
-                  aria-label={`移除屏蔽标签 ${tag}`}
-                  key={tag}
-                  onClick={() =>
-                    updatePreference({
-                      recommendationTagBlacklist:
-                        preferences.recommendationTagBlacklist.filter(
-                          item => item !== tag,
-                        ),
-                    })
-                  }
-                  type="button">
-                  {tag} ×
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <label className="setting-row">
-          <span>
-            <strong>个性化播放缓存</strong>
-            <small>按当前偏好缓存推荐内容，减少重复加载。</small>
-          </span>
-          <input
-            checked={preferences.cachePersonalizedRecommendations}
-            onChange={event =>
-              updatePreference({
-                cachePersonalizedRecommendations: event.target.checked,
               })
             }
             type="checkbox"
@@ -2892,7 +2739,6 @@ function PlayerPlaceholder({
             title="播放队列"
             type="button">
             <Icon name="list" size={15} />
-            <strong>{playback.queueLength}</strong>
           </button>
           <button
             aria-label="切换播放模式"
@@ -3293,10 +3139,9 @@ function getRouteHeader(route: Route): {eyebrow: string; title: string} {
       eyebrow: '01 / LIBRARY / FOLDER',
       title: 'FOLDER DETAIL',
     },
-    'sound-lab': {eyebrow: '03 / SOUND LAB', title: 'SOUND LAB'},
-    settings: {eyebrow: '04 / SETTINGS', title: 'SETTINGS'},
+    settings: {eyebrow: '03 / SETTINGS', title: 'SETTINGS'},
     'immersive-windowed': {
-      eyebrow: '05 / IMMERSIVE',
+      eyebrow: '04 / IMMERSIVE',
       title: 'WINDOWED IMMERSIVE',
     },
   };

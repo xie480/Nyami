@@ -10,7 +10,10 @@ import type {
   DesktopWindowState,
   DiscoverContentRequest,
   FavoriteFolderContentRequest,
+  FavoriteIndexRequest,
   FavoriteSearchContentRequest,
+  FavoriteSourceRequest,
+  FavoriteSourceVideoRequest,
   FavoriteVideoContentRequest,
   LogExportResult,
   NyamiDesktopApi,
@@ -143,6 +146,14 @@ const api: NyamiDesktopApi = {
       ipcRenderer.invoke(CHANNELS.content.search, request),
     getFavoriteFolders: (request: FavoriteFolderContentRequest) =>
       ipcRenderer.invoke(CHANNELS.content.getFavoriteFolders, request),
+    getFavoriteSources: (request: FavoriteSourceRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.getFavoriteSources, request),
+    getFavoriteIndex: (request: FavoriteIndexRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.getFavoriteIndex, request),
+    getFavoriteSourceVideos: (request: FavoriteSourceVideoRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.getFavoriteSourceVideos, request),
+    refreshFavoriteSources: (request: FavoriteSourceRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.refreshFavoriteSources, request),
     getFavoriteVideos: (request: FavoriteVideoContentRequest) =>
       ipcRenderer.invoke(CHANNELS.content.getFavoriteVideos, request),
     searchFavorites: (request: FavoriteSearchContentRequest) =>

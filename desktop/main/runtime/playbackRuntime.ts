@@ -771,7 +771,7 @@ export class PlaybackRuntime {
       queueLength: queueSnapshot.queue.length,
       queueIndex,
       mode: queueSnapshot.mode,
-      queueContext: isPopularContext(queueSnapshot.context)
+      queueContext: isQueueContext(queueSnapshot.context)
         ? queueSnapshot.context
         : null,
       sleepTimerSeconds,
@@ -950,7 +950,7 @@ export class PlaybackRuntime {
       queue: snapshot.queue,
       currentTrackId: snapshot.currentBvid,
       mode: snapshot.mode,
-      context: isPopularContext(snapshot.context)
+      context: isQueueContext(snapshot.context)
         ? snapshot.context
         : null,
     };
@@ -1003,13 +1003,39 @@ function normalizeQueueItems(items: PlaybackQueueItem[]): PlaybackQueueItem[] {
 /** 判断队列上下文是否为受支持的热门续页游标。 */
 function isPopularContext(
   value: unknown,
-): value is PlaybackQueueContext {
+): value is Extract<PlaybackQueueContext, {kind: 'popular'}> {
   return (
     Boolean(value) &&
     typeof value === 'object' &&
     (value as {kind?: unknown}).kind === 'popular' &&
     Number.isSafeInteger((value as {page?: unknown}).page) &&
     Number((value as {page: number}).page) >= 1
+  );
+}
+
+/** 校验可持久化的播放来源上下文，保留收藏夹和搜索队列的来源边界。 */
+function isQueueContext(value: unknown): value is PlaybackQueueContext {
+  if (isPopularContext(value)) {
+    return true;
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const candidate = value as {
+    kind?: unknown;
+    sourceKey?: unknown;
+    keyword?: unknown;
+    page?: unknown;
+  };
+  if (candidate.kind === 'favorite') {
+    return typeof candidate.sourceKey === 'string' && candidate.sourceKey.length > 0;
+  }
+  return (
+    candidate.kind === 'search' &&
+    typeof candidate.keyword === 'string' &&
+    candidate.keyword.length > 0 &&
+    Number.isSafeInteger(candidate.page) &&
+    Number(candidate.page) >= 1
   );
 }
 

@@ -9,11 +9,17 @@ import type {
   DesktopSettings,
   DesktopSettingsPatch,
   DesktopVideo,
-  FavoriteFolderSummary,
+  FavoriteSourceSummary,
   PlaybackSnapshot,
   PlaybackQueueMode,
+  PlaybackQueueContext,
   UserProfile,
 } from '../shared/types';
+import {
+  filterVisibleFavoriteIndex,
+  filterVisibleFavoriteSources,
+  getSyncStatusLabel,
+} from '../shared/libraryFilters';
 import {
   DEFAULT_DESKTOP_AUDIO_SETTINGS,
   DESKTOP_GRAPHIC_PRESETS,
@@ -31,11 +37,22 @@ export type PrototypeRoute =
   | 'search'
   | 'library'
   | 'folder-detail'
-  | 'sound-lab'
   | 'settings'
   | 'immersive-windowed';
 
 type PrototypeNoticeTone = 'info' | 'success' | 'error';
+
+type SearchTagMode = 'and' | 'or';
+
+type SearchTagListMode = 'whitelist' | 'blacklist';
+
+type SearchTagFilterState = {
+  tags: string[];
+  mode: SearchTagMode;
+  listMode: SearchTagListMode;
+};
+
+const SEARCH_TAG_FILTER_STORAGE_KEY = 'nyami-search-tag-filter-v1';
 
 type PrototypePageProps = {
   route: PrototypeRoute;
@@ -47,9 +64,15 @@ type PrototypePageProps = {
   settings: DesktopSettings | null;
   onRouteChange: (route: PrototypeRoute) => void;
   onSelectFolder: (folderId: number) => void;
+  onSelectSource: (sourceKey: string) => void;
   onSleepTimer: (seconds: number | null) => void;
   onPlayVideo: (video: DesktopVideo) => void;
-  onPlayVideos: (videos: DesktopVideo[], shuffle: boolean) => void;
+  onPlayVideos: (
+    videos: DesktopVideo[],
+    shuffle: boolean,
+    context?: PlaybackQueueContext | null,
+    startIndex?: number,
+  ) => void;
   onAddVideo: (video: DesktopVideo) => void;
   onNotice: (tone: PrototypeNoticeTone, message: string) => void;
   onUpdateSettings: (patch: DesktopSettingsPatch) => void;
@@ -64,6 +87,7 @@ type PrototypePageProps = {
   onSelectTrack: (trackId: string) => void;
   onRemoveTrack: (trackId: string) => void;
   selectedFolderId: number | null;
+  selectedSourceKey: string | null;
 };
 
 type PrototypeTrack = {
@@ -171,8 +195,6 @@ export function PrototypePage(props: PrototypePageProps): JSX.Element {
       return <DesignLibraryPage {...props} />;
     case 'folder-detail':
       return <FolderDetailPage {...props} />;
-    case 'sound-lab':
-      return <SoundLabPage {...props} />;
     case 'settings':
       return <div className="prototype-empty-page" />;
     case 'immersive-windowed':
@@ -195,6 +217,12 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
   const [maxDuration, setMaxDuration] = useState('');
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [showMoreFilters, setShowMoreFilters] = useState(false);
+  const [tagInput, setTagInput] = useState('');
+  const [tagFilter, setTagFilter] = useState<SearchTagFilterState>({
+    tags: [],
+    mode: 'and',
+    listMode: 'whitelist',
+  });
   const [result, setResult] = useState<DesktopPage<DesktopVideo> | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -202,6 +230,43 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
   const requestIdRef = useRef<string | null>(null);
   const loadingRef = useRef(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SEARCH_TAG_FILTER_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw) as Partial<SearchTagFilterState>;
+      setTagFilter({
+        tags: Array.isArray(parsed.tags)
+          ? Array.from(
+              new Set(
+                parsed.tags.filter(
+                  (value): value is string =>
+                    typeof value === 'string' && value.trim().length > 0,
+                ),
+              ),
+            )
+          : [],
+        mode: parsed.mode === 'or' ? 'or' : 'and',
+        listMode: parsed.listMode === 'blacklist' ? 'blacklist' : 'whitelist',
+      });
+    } catch {
+      // 本地筛选偏好损坏时使用默认条件，不阻断搜索页面。
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SEARCH_TAG_FILTER_STORAGE_KEY,
+        JSON.stringify(tagFilter),
+      );
+    } catch {
+      // 本地存储不可用时保留当前会话筛选条件。
+    }
+  }, [tagFilter]);
 
   const cancelActiveRequest = useCallback((): void => {
     const requestId = requestIdRef.current;
@@ -349,6 +414,20 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
     setActiveQuery(query.trim());
   };
 
+  const addSearchTag = (): void => {
+    const tag = tagInput.trim();
+    if (!tag) {
+      return;
+    }
+    setTagFilter(current => ({
+      ...current,
+      tags: current.tags.includes(tag) ? current.tags : [...current.tags, tag],
+    }));
+    setTagInput('');
+  };
+
+  const filteredItems = filterSearchVideos(result?.items ?? [], tagFilter);
+
   const sortOptions = [
     '综合排序',
     '最多播放',
@@ -469,6 +548,77 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
             />
           </label>
         </FilterRow>
+        <FilterRow label="标签">
+          <div className="prototype-tag-filter-editor">
+            <input
+              aria-label="添加搜索标签"
+              onChange={event => setTagInput(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addSearchTag();
+                }
+              }}
+              placeholder="输入标签后回车"
+              value={tagInput}
+            />
+            <button
+              className="prototype-filter-chip"
+              onClick={addSearchTag}
+              type="button">
+              添加
+            </button>
+          </div>
+          <div className="prototype-mode-switch" role="group" aria-label="标签匹配模式">
+            <button
+              className={tagFilter.mode === 'and' ? 'is-active' : ''}
+              onClick={() => setTagFilter(current => ({...current, mode: 'and'}))}
+              type="button">
+              And
+            </button>
+            <button
+              className={tagFilter.mode === 'or' ? 'is-active' : ''}
+              onClick={() => setTagFilter(current => ({...current, mode: 'or'}))}
+              type="button">
+              Or
+            </button>
+          </div>
+          <div className="prototype-mode-switch" role="group" aria-label="标签名单模式">
+            <button
+              className={tagFilter.listMode === 'whitelist' ? 'is-active' : ''}
+              onClick={() =>
+                setTagFilter(current => ({...current, listMode: 'whitelist'}))
+              }
+              type="button">
+              白名单
+            </button>
+            <button
+              className={tagFilter.listMode === 'blacklist' ? 'is-active' : ''}
+              onClick={() =>
+                setTagFilter(current => ({...current, listMode: 'blacklist'}))
+              }
+              type="button">
+              黑名单
+            </button>
+          </div>
+          <div className="prototype-tag-filter-chips">
+            {tagFilter.tags.map(tag => (
+              <button
+                aria-label={`移除标签 ${tag}`}
+                className="prototype-filter-chip is-selected"
+                key={tag}
+                onClick={() =>
+                  setTagFilter(current => ({
+                    ...current,
+                    tags: current.tags.filter(value => value !== tag),
+                  }))
+                }
+                type="button">
+                {tag} ×
+              </button>
+            ))}
+          </div>
+        </FilterRow>
       </section>
       {requestError ? (
         <div className="prototype-error" role="alert">
@@ -481,11 +631,22 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
             ? 'prototype-result-grid is-list'
             : 'prototype-result-grid'
         }>
-        {(result?.items ?? []).map((video, index) => (
+        {filteredItems.map((video, index) => (
           <TrackCard
             index={index + 1}
             key={video.bvid}
-            onPlay={() => props.onPlayVideo(video)}
+            onPlay={() =>
+              props.onPlayVideos(
+                filteredItems,
+                false,
+                {
+                  kind: 'search',
+                  keyword: activeQuery,
+                  page: result?.page ?? 1,
+                },
+                index,
+              )
+            }
             onQueue={() => props.onAddVideo(video)}
             track={video}
           />
@@ -495,17 +656,14 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
       {loadingMore ? (
         <div className="prototype-inline-loading" role="status">
           <span className="prototype-spinner" />
-          正在加载更多…
+          正在加载更多
         </div>
       ) : null}
-      {!result?.items.length && !loading ? (
+      {!filteredItems.length && !loading ? (
         <SearchEmptyState hasQuery={Boolean(activeQuery)} query={activeQuery} />
       ) : null}
       {loading && !result?.items.length ? (
-        <div className="prototype-inline-loading" role="status">
-          <span className="prototype-spinner" />
-          正在搜索…
-        </div>
+        <SearchLoadingState />
       ) : null}
     </div>
   );
@@ -530,11 +688,46 @@ function SearchEmptyState({
       <strong>{hasQuery ? `没有找到“${query}”` : '让声音先从一个关键词开始'}</strong>
       <span>
         {hasQuery
-          ? '换个关键词，或放宽筛选条件试试。'
-          : '输入歌名、UP 主或专辑名，开始探索 Bilibili。'}
+          ? '换个关键词，或放宽筛选条件试试'
+          : '输入歌名、UP 主或专辑名，开始探索 Bilibili'}
       </span>
     </div>
   );
+}
+
+/** 搜索请求等待期间展示居中的 NYAMI 轨道动画。 */
+function SearchLoadingState(): JSX.Element {
+  return (
+    <div className="prototype-search-loading" role="status">
+      <div className="prototype-search-loading-orbit" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+      <strong>正在寻找声音</strong>
+      <small>正在整理 Bilibili 搜索结果</small>
+    </div>
+  );
+}
+
+/** 根据白名单或黑名单标签过滤搜索结果。 */
+function filterSearchVideos(
+  videos: DesktopVideo[],
+  filter: SearchTagFilterState,
+): DesktopVideo[] {
+  const tags = filter.tags.map(tag => tag.trim().toLocaleLowerCase());
+  if (!tags.length) {
+    return videos;
+  }
+  return videos.filter(video => {
+    const videoTags = video.tags.map(tag => tag.trim().toLocaleLowerCase());
+    const matched =
+      filter.mode === 'and'
+        ? tags.every(tag => videoTags.includes(tag))
+        : tags.some(tag => videoTags.includes(tag));
+    return filter.listMode === 'blacklist' ? !matched : matched;
+  });
 }
 
 /** 渲染与 B 站一致的三行筛选控制。 */
@@ -555,93 +748,98 @@ function FilterRow({
 
 /** 音乐库页读取真实收藏夹，并提供导入范围与全局随机播放。 */
 function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
-  const [folders, setFolders] = useState<FavoriteFolderSummary[]>([]);
-  const [folderCovers, setFolderCovers] = useState<Record<number, string>>({});
-  const [folderVideos, setFolderVideos] = useState<
-    Record<number, DesktopVideo[]>
-  >({});
-  const [importedIds, setImportedIds] = useState<number[]>([]);
+  const [sources, setSources] = useState<FavoriteSourceSummary[]>([]);
+  const [visibleSourceKeys, setVisibleSourceKeys] = useState<string[]>([]);
+  const [allFavoriteIndex, setAllFavoriteIndex] = useState<DesktopVideo[]>([]);
+  const [favoriteIndex, setFavoriteIndex] = useState<DesktopVideo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     if (!props.auth.loggedIn || !props.auth.uid) {
-      setFolders([]);
-      setFolderCovers({});
-      setFolderVideos({});
-      setImportedIds([]);
+      setSources([]);
+      setVisibleSourceKeys([]);
+      setAllFavoriteIndex([]);
+      setFavoriteIndex([]);
+      setLoading(false);
       return;
     }
-    const requestId = makeRequestId('favorite-folders');
+    let disposed = false;
+    const uid = props.auth.uid;
+    const requestId = makeRequestId('favorite-sources');
     setLoading(true);
-    void window.nyamiDesktop.content
-      .getFavoriteFolders({requestId, uid: props.auth.uid})
-      .then(async nextFolders => {
-        const entries = await Promise.all(
-          nextFolders.map(async folder => {
-            try {
-              const page = await window.nyamiDesktop.content.getFavoriteVideos({
-                mediaId: folder.id,
-                page: 1,
-                requestId: makeRequestId(`favorite-videos-${folder.id}`),
-                uid: props.auth.uid as string,
-              });
-              return [folder.id, page.items] as const;
-            } catch {
-              return [folder.id, []] as const;
-            }
-          }),
-        );
-        const videosByFolder = Object.fromEntries(entries) as Record<
-          number,
-          DesktopVideo[]
-        >;
-        const covers = Object.fromEntries(
-          entries.map(([folderId, videos]) => {
-            const latest = [...videos].sort(
-              (left, right) => (right.favTime ?? 0) - (left.favTime ?? 0),
-            )[0];
-            return [folderId, latest?.cover || coverSummerUrl];
-          }),
-        ) as Record<number, string>;
-        setFolders(nextFolders);
-        setFolderVideos(videosByFolder);
-        setFolderCovers(covers);
-        const storageKey = `nyami-imported-folders-${props.auth.uid}`;
-        let stored: number[] = [];
-        try {
-          stored = JSON.parse(
-            window.localStorage.getItem(storageKey) ?? '[]',
-          ) as number[];
-        } catch {
-          stored = [];
+    void Promise.all([
+      window.nyamiDesktop.content.getFavoriteSources({requestId, uid}),
+      window.nyamiDesktop.content.getFavoriteIndex({
+        requestId: makeRequestId('favorite-index'),
+        uid,
+      }),
+    ])
+      .then(([nextSources, nextIndex]) => {
+        if (disposed) {
+          return;
         }
-        setImportedIds(
-          stored.length
-            ? stored.filter(id => nextFolders.some(folder => folder.id === id))
-            : nextFolders.map(folder => folder.id),
+        const storageKey = `nyami-imported-sources-${uid}`;
+        const storedRaw = window.localStorage.getItem(storageKey);
+        let stored: string[] = [];
+        if (storedRaw !== null) {
+          try {
+            const parsed: unknown = JSON.parse(storedRaw);
+            stored = Array.isArray(parsed)
+              ? parsed.filter(
+                  (value): value is string => typeof value === 'string',
+                )
+              : [];
+          } catch {
+            stored = [];
+          }
+        }
+        const nextVisibleKeys = storedRaw === null
+          ? nextSources.map(source => source.sourceKey)
+          : stored.filter(sourceKey =>
+              nextSources.some(source => source.sourceKey === sourceKey),
+            );
+        setSources(nextSources);
+        setVisibleSourceKeys(nextVisibleKeys);
+        setAllFavoriteIndex(nextIndex);
+        setFavoriteIndex(
+          filterVisibleFavoriteIndex(nextIndex, nextVisibleKeys),
         );
       })
-      .catch(() => {
-        setFolders([]);
-        setFolderCovers({});
-        setFolderVideos({});
+      .catch(error => {
+        if (!disposed) {
+          props.onNotice(
+            'error',
+            error instanceof Error ? error.message : '收藏索引读取失败',
+          );
+          setSources([]);
+          setVisibleSourceKeys([]);
+          setAllFavoriteIndex([]);
+          setFavoriteIndex([]);
+        }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!disposed) {
+          setLoading(false);
+        }
+      });
     return () => {
+      disposed = true;
       void window.nyamiDesktop.content.cancel({requestId});
     };
-  }, [props.auth.loggedIn, props.auth.uid]);
+  }, [props.auth.loggedIn, props.auth.uid, props.onNotice]);
 
-  const toggleImportedFolder = (folderId: number): void => {
-    const next = importedIds.includes(folderId)
-      ? importedIds.filter(id => id !== folderId)
-      : [...importedIds, folderId];
-    setImportedIds(next);
+  const toggleImportedSource = (sourceKey: string): void => {
+    const next = visibleSourceKeys.includes(sourceKey)
+      ? visibleSourceKeys.filter(value => value !== sourceKey)
+      : [...visibleSourceKeys, sourceKey];
+    setVisibleSourceKeys(next);
+    setFavoriteIndex(filterVisibleFavoriteIndex(allFavoriteIndex, next));
     if (props.auth.uid) {
       try {
         window.localStorage.setItem(
-          `nyami-imported-folders-${props.auth.uid}`,
+          `nyami-imported-sources-${props.auth.uid}`,
           JSON.stringify(next),
         );
       } catch {
@@ -650,21 +848,68 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
     }
   };
 
-  const recentTracks = shuffleVideos(
-    dedupeVideos(Object.values(folderVideos).flat()),
-  )
+  const refreshImportedSources = async (): Promise<void> => {
+    if (!props.auth.uid || refreshing || !visibleSourceKeys.length) {
+      return;
+    }
+    setRefreshing(true);
+    const requestId = makeRequestId('refresh-favorite-sources');
+    try {
+      const nextSources = await window.nyamiDesktop.content.refreshFavoriteSources({
+        requestId,
+        uid: props.auth.uid,
+        sourceKeys: visibleSourceKeys,
+      });
+      const nextIndex = await window.nyamiDesktop.content.getFavoriteIndex({
+        requestId: makeRequestId('favorite-index-refresh'),
+        uid: props.auth.uid,
+        sourceKeys: visibleSourceKeys,
+      });
+      setSources(current => {
+        const refreshed = new Map(
+          nextSources.map(source => [source.sourceKey, source]),
+        );
+        return current.map(source => refreshed.get(source.sourceKey) ?? source);
+      });
+      setAllFavoriteIndex(current => {
+        const refreshed = new Map(nextIndex.map(video => [video.bvid, video]));
+        return current.map(video => refreshed.get(video.bvid) ?? video);
+      });
+      setFavoriteIndex(nextIndex);
+      props.onNotice('success', '导入收藏夹已刷新');
+    } catch (error) {
+      props.onNotice(
+        'error',
+        error instanceof Error ? error.message : '导入收藏夹刷新失败',
+      );
+    } finally {
+      setRefreshing(false);
+      void window.nyamiDesktop.content.cancel({requestId});
+    }
+  };
+
+  const importedTracks = dedupeVideos(favoriteIndex);
+  const recentTracks = importedTracks
     .sort((left, right) => (right.favTime ?? 0) - (left.favTime ?? 0))
     .slice(0, 8);
-  const importedTracks = dedupeVideos(
-    importedIds.flatMap(id => folderVideos[id] ?? []),
+  const syncNote = loading
+    ? 'SYNCING / BILIBILI'
+    : sources.some(source =>
+        source.syncStatus === 'syncing' || source.syncStatus === 'running',
+      )
+    ? 'SYNCING / BILIBILI'
+    : sources.some(source => source.syncStatus === 'success')
+    ? 'SYNCED / LOCAL ARCHIVE'
+    : 'NOT SYNCED / LOCAL ARCHIVE';
+  const folderCards = filterVisibleFavoriteSources(sources, visibleSourceKeys).map(
+    source => ({
+      sourceKey: source.sourceKey,
+      title: source.title,
+      subtitle: `${source.kind === 'owned' ? 'Bilibili 收藏夹' : '导入来源'} · ${getSyncStatusLabel(source.syncStatus)}`,
+      count: source.mediaCount,
+      cover: source.cover || coverSummerUrl,
+    }),
   );
-  const folderCards = folders.map(folder => ({
-    id: folder.id,
-    title: folder.title,
-    subtitle: 'Bilibili 收藏夹 · 已同步',
-    count: folder.mediaCount,
-    cover: folderCovers[folder.id] || coverSummerUrl,
-  }));
 
   return (
     <div className="prototype-content">
@@ -674,16 +919,26 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
             <div className="prototype-library-actions">
               <button
                 className="prototype-button prototype-button-quiet"
-                disabled={!folders.length}
+                disabled={!sources.length}
                 onClick={() => setImportOpen(true)}
                 type="button">
                 <Icon name="folder" size={15} />
                 导入收藏夹
               </button>
               <button
+                aria-label="刷新导入收藏夹"
+                className="prototype-button prototype-button-quiet prototype-refresh-button"
+                disabled={refreshing || !visibleSourceKeys.length}
+                onClick={() => void refreshImportedSources()}
+                title="刷新导入收藏夹"
+                type="button">
+                <Icon className={refreshing ? 'spin' : undefined} name="refresh" size={15} />
+                {refreshing ? '刷新中' : '刷新'}
+              </button>
+              <button
                 className="prototype-button prototype-button-primary"
                 disabled={!importedTracks.length}
-                onClick={() => props.onPlayVideos(importedTracks, true)}
+                onClick={() => props.onPlayVideos(importedTracks, true, null, 0)}
                 type="button">
                 <Icon name="shuffle" size={15} />
                 全局随机播放
@@ -691,29 +946,32 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
             </div>
           }
           title="你的收藏与合辑"
-          note={loading ? 'SYNCING / BILIBILI' : 'SYNCED / LOCAL ARCHIVE'}
+          note={syncNote}
         />
         {loading && !folderCards.length ? (
-          <div className="prototype-loading-panel" role="status">
-            <span className="prototype-spinner" />
-            正在读取你的收藏夹…
+          <div className="prototype-loading-panel prototype-nyami-loader" role="status">
+            <span className="prototype-loader-orbit" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            <strong>正在读取收藏夹</strong>
+            <small>索引状态会在读取完成后更新</small>
           </div>
         ) : null}
         {!loading && !folderCards.length ? (
           <div className="prototype-empty-state">
-            {props.auth.loggedIn ? '还没有读取到收藏夹。' : '登录 Bilibili 后即可读取收藏夹。'}
+            {props.auth.loggedIn ? '还没有导入收藏夹' : '登录 Bilibili 后即可读取收藏夹'}
           </div>
         ) : null}
         <div className="prototype-card-grid">
           {folderCards.map(folder => (
             <button
               className="prototype-card prototype-folder-card"
-              key={`${folder.id}-${folder.title}`}
+              key={folder.sourceKey}
               onClick={() => {
-                if (Number.isFinite(folder.id)) {
-                  props.onSelectFolder(folder.id);
-                  props.onRouteChange('folder-detail');
-                }
+                props.onSelectSource(folder.sourceKey);
+                props.onRouteChange('folder-detail');
               }}
               type="button">
               <div className="prototype-cover">
@@ -757,16 +1015,18 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
               </button>
             </div>
             <div className="prototype-import-grid">
-              {folders.map(folder => (
-                <label className="prototype-import-option" key={folder.id}>
+              {sources.map(source => (
+                <label className="prototype-import-option" key={source.sourceKey}>
                   <input
-                    checked={importedIds.includes(folder.id)}
-                    onChange={() => toggleImportedFolder(folder.id)}
+                    checked={visibleSourceKeys.includes(source.sourceKey)}
+                    onChange={() => toggleImportedSource(source.sourceKey)}
                     type="checkbox"
                   />
                   <span>
-                    <strong>{folder.title}</strong>
-                    <small>{folder.mediaCount.toLocaleString()} 首 · 已同步</small>
+                    <strong>{source.title}</strong>
+                    <small>
+                      {source.mediaCount.toLocaleString()} 首 · {getSyncStatusLabel(source.syncStatus)}
+                    </small>
                   </span>
                 </label>
               ))}
@@ -784,7 +1044,9 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
         <SectionHeading title="最近添加" note="LAST 30 DAYS" />
         <TrackList
           items={recentTracks}
-          onPlay={props.onPlayVideo}
+          onPlay={(_video, index) =>
+            props.onPlayVideos(recentTracks, false, null, index)
+          }
           currentTrackId={props.playback.trackId}
         />
       </section>
@@ -806,47 +1068,45 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
   const [tracks, setTracks] = useState<DesktopVideo[]>([]);
   const [description, setDescription] = useState('');
   const [folderTitle, setFolderTitle] = useState('');
+  const [sourceKind, setSourceKind] = useState<FavoriteSourceSummary['kind']>('owned');
   const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [page, setPage] = useState(1);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const folder = props.selectedFolderId;
+  const sourceKey =
+    props.selectedSourceKey ??
+    (props.selectedFolderId !== null
+      ? `ownedFavorite:${props.selectedFolderId}`
+      : null);
 
   useEffect(() => {
-    if (!folder || !props.auth.loggedIn || !props.auth.uid) {
+    if (!sourceKey || !props.auth.loggedIn || !props.auth.uid) {
       setTracks([]);
       setDescription('');
       setFolderTitle('');
-      setHasMore(false);
       return;
     }
     let disposed = false;
-    const requestId = makeRequestId(`folder-detail-${folder}`);
+    const requestId = makeRequestId(`source-detail-${sourceKey}`);
     setLoading(true);
-    setPage(1);
     void Promise.all([
-      window.nyamiDesktop.content.getFavoriteVideos({
-        mediaId: folder,
-        page: 1,
-        requestId,
+      window.nyamiDesktop.content.getFavoriteSources({
+        requestId: makeRequestId(`source-summary-${sourceKey}`),
         uid: props.auth.uid,
+        sourceKeys: [sourceKey],
       }),
-      window.nyamiDesktop.content.getFavoriteFolders({
-        requestId: makeRequestId(`folder-summary-${folder}`),
+      window.nyamiDesktop.content.getFavoriteIndex({
+        requestId: makeRequestId(`source-index-${sourceKey}`),
         uid: props.auth.uid,
+        sourceKeys: [sourceKey],
       }),
     ])
-      .then(([nextPage, summaries]) => {
+      .then(([summaries, nextIndex]) => {
         if (disposed) {
           return;
         }
-        setTracks(nextPage.items);
-        setDescription(nextPage.description ?? '');
-        setHasMore(nextPage.hasMore);
-        setFolderTitle(
-          summaries.find(summary => summary.id === folder)?.title ?? '',
-        );
+        const summary = summaries[0];
+        setTracks(dedupeVideos(nextIndex));
+        setDescription(summary?.description ?? '');
+        setFolderTitle(summary?.title ?? '');
+        setSourceKind(summary?.kind ?? 'owned');
       })
       .catch(error => {
         if (disposed || isAbortError(error)) {
@@ -865,53 +1125,21 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
     return () => {
       disposed = true;
     };
-  }, [folder, props.auth.loggedIn, props.auth.uid, onNotice]);
-
-  useEffect(() => {
-    const node = sentinelRef.current;
-    if (!node || !folder || !props.auth.uid || !hasMore) {
-      return;
-    }
-    const observer = new IntersectionObserver(entries => {
-      if (!entries[0]?.isIntersecting || loadingMore) {
-        return;
-      }
-      const nextPage = page + 1;
-      setLoadingMore(true);
-      void window.nyamiDesktop.content
-        .getFavoriteVideos({
-          mediaId: folder,
-          page: nextPage,
-          requestId: makeRequestId(`folder-detail-${folder}`),
-          uid: props.auth.uid as string,
-        })
-        .then(next => {
-          setTracks(current => {
-            const existing = new Set(current.map(item => item.bvid));
-            return [
-              ...current,
-              ...next.items.filter(item => !existing.has(item.bvid)),
-            ];
-          });
-          setPage(nextPage);
-          setHasMore(next.hasMore);
-        })
-        .catch(error => {
-          if (!isAbortError(error)) {
-            onNotice(
-              'error',
-              error instanceof Error ? error.message : '收藏夹加载失败',
-            );
-          }
-        })
-        .finally(() => setLoadingMore(false));
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [folder, hasMore, loadingMore, onNotice, page, props.auth.uid]);
+  }, [onNotice, props.auth.loggedIn, props.auth.uid, sourceKey]);
 
   const cover = tracks[0]?.cover || coverSummerUrl;
   const totalDuration = tracks.reduce((sum, track) => sum + track.duration, 0);
+  const playSource = (shuffle: boolean, startIndex = 0): void => {
+    if (!sourceKey) {
+      return;
+    }
+    props.onPlayVideos(
+      tracks,
+      shuffle,
+      {kind: 'favorite', sourceKey},
+      startIndex,
+    );
+  };
   return (
     <div className="prototype-content">
       <section className="prototype-detail-head">
@@ -919,21 +1147,23 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
           <img alt="收藏夹封面" src={cover} />
         </div>
         <div className="prototype-detail-copy">
-          <div className="prototype-meta">COLLECTION / PUBLIC</div>
-          <h2>{folderTitle || (folder ? `收藏夹 ${folder}` : '选择收藏夹')}</h2>
-          <p>{description || '这里展示当前收藏夹中真实同步的视频内容。'}</p>
+          <div className="prototype-meta">
+            {sourceKind === 'owned' ? 'COLLECTION / OWNED' : 'COLLECTION / IMPORTED'}
+          </div>
+          <h2>{folderTitle || '选择收藏夹'}</h2>
+          <p>{description || '这里展示当前收藏夹中已同步的视频内容'}</p>
           <div className="prototype-actions">
             <button
               className="prototype-button prototype-button-primary"
               disabled={!tracks.length}
-              onClick={() => props.onPlayVideos(tracks, false)}
+              onClick={() => playSource(false)}
               type="button">
               播放全部
             </button>
             <button
               className="prototype-button prototype-button-quiet"
               disabled={!tracks.length}
-              onClick={() => props.onPlayVideos(tracks, true)}
+              onClick={() => playSource(true)}
               type="button">
               随机播放
             </button>
@@ -960,21 +1190,24 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
       </section>
       <TrackList
         items={tracks}
-        onPlay={props.onPlayVideo}
+        onPlay={(video, index) => {
+          const startIndex = tracks.findIndex(item => item.bvid === video.bvid);
+          playSource(false, startIndex >= 0 ? startIndex : index);
+        }}
         currentTrackId={props.playback.trackId}
       />
-      <div className="prototype-search-sentinel" ref={sentinelRef} />
-      {loadingMore ? (
-        <div className="prototype-inline-loading">正在加载更多…</div>
-      ) : null}
       {loading ? (
-        <div className="prototype-loading-panel" role="status">
-          <span className="prototype-spinner" />
-          正在读取收藏夹内容…
+        <div className="prototype-loading-panel prototype-nyami-loader" role="status">
+          <span className="prototype-loader-orbit" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+          <strong>正在读取收藏夹内容</strong>
         </div>
       ) : null}
       {!loading && !tracks.length ? (
-        <div className="prototype-empty-state">没有读取到该收藏夹的视频。</div>
+        <div className="prototype-empty-state">没有读取到该收藏夹的视频</div>
       ) : null}
     </div>
   );
@@ -1414,8 +1647,6 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
       <header className="prototype-immersive-heading">
         <div>
           <span className="prototype-meta">NYAMI / WINDOWED IMMERSIVE</span>
-          <strong>{track.author}</strong>
-          <span>{track.title}</span>
         </div>
         <div className="prototype-immersive-heading-actions">
           <button aria-label="返回音乐库" onClick={exitImmersive} type="button">
@@ -1436,31 +1667,15 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
           <div className="prototype-immersive-art-frame">
             <img alt={`${track.title}封面`} src={track.cover} />
           </div>
-          <span className="prototype-art-caption">
-            {formatYear(track.pubtime)} / NYAMI ARCHIVE
-          </span>
         </section>
         <section className="prototype-immersive-detail">
           <span className="prototype-meta">
             NOW PLAYING / {track.tags[0] ?? 'ARCHIVE'}
           </span>
           <div className="prototype-immersive-title-nav">
-            <button
-              aria-label="上一首"
-              onClick={props.onPrevious}
-              type="button">
-              <Icon name="arrow-left" size={17} />
-            </button>
             <h1 title={track.title}>{track.title}</h1>
-            <button aria-label="下一首" onClick={props.onNext} type="button">
-              <Icon name="arrow-right" size={17} />
-            </button>
           </div>
           <p>{track.author} · NYAMI ARCHIVE</p>
-          <div className="prototype-immersive-detail-meta">
-            <span>{formatDuration(props.playback.position)}</span>
-            <span>{formatDuration(track.duration)}</span>
-          </div>
         </section>
       </main>
       <div className="prototype-floating-player">
@@ -1720,7 +1935,7 @@ function TrackList({
 }: {
   currentTrackId: string | null;
   items: DesktopVideo[];
-  onPlay: (video: DesktopVideo) => void;
+  onPlay: (video: DesktopVideo, index: number) => void;
 }): JSX.Element {
   return (
     <div className="prototype-track-list">
@@ -1731,7 +1946,16 @@ function TrackList({
               ? 'prototype-track-row is-current'
               : 'prototype-track-row'
           }
-          key={track.bvid}>
+          key={track.bvid}
+          onClick={() => onPlay(track, index)}
+          onKeyDown={event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onPlay(track, index);
+            }
+          }}
+          role="button"
+          tabIndex={0}>
           <span>{String(index + 1).padStart(2, '0')}</span>
           <div>
             <strong>{track.title}</strong>
@@ -1741,12 +1965,11 @@ function TrackList({
           </div>
           <span>{track.tags[0] ?? 'Archive'}</span>
           <span>{formatDuration(track.duration)}</span>
-          <button
-            aria-label={`播放 ${track.title}`}
-            onClick={() => onPlay(track)}
-            type="button">
+          <span
+            aria-hidden="true"
+            className="prototype-track-play-indicator">
             <Icon name="play" size={14} />
-          </button>
+          </span>
         </div>
       ))}
     </div>
