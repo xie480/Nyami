@@ -4,6 +4,7 @@ export type IconName =
   | 'alert'
   | 'arrow-left'
   | 'arrow-right'
+  | 'bell'
   | 'check'
   | 'chevron-down'
   | 'chevron-left'
@@ -11,6 +12,7 @@ export type IconName =
   | 'compass'
   | 'download'
   | 'folder'
+  | 'fullscreen'
   | 'heart'
   | 'home'
   | 'loader'
@@ -49,6 +51,12 @@ const paths: Record<IconName, JSX.Element> = {
   ),
   'arrow-left': <path d="m15 18-6-6 6-6" />,
   'arrow-right': <path d="m9 18 6-6-6-6" />,
+  bell: (
+    <>
+      <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+      <path d="M10 21h4" />
+    </>
+  ),
   check: <path d="m5 12 4 4L19 6" />,
   'chevron-down': <path d="m6 9 6 6 6-6" />,
   'chevron-left': <path d="m15 18-6-6 6-6" />,
@@ -72,7 +80,21 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M3 10h18" />
     </>
   ),
-  heart: <path d="M20.8 8.8c0 5.2-8.8 10-8.8 10s-8.8-4.8-8.8-10A4.7 4.7 0 0 1 12 6.2a4.7 4.7 0 0 1 8.8 2.6Z" />,
+  fullscreen: (
+    <>
+      <path d="M8 3H3v5" />
+      <path d="M3 3l6 6" />
+      <path d="M16 3h5v5" />
+      <path d="m21 3-6 6" />
+      <path d="M8 21H3v-5" />
+      <path d="m3 21 6-6" />
+      <path d="M16 21h5v-5" />
+      <path d="m21 21-6-6" />
+    </>
+  ),
+  heart: (
+    <path d="M20.8 8.8c0 5.2-8.8 10-8.8 10s-8.8-4.8-8.8-10A4.7 4.7 0 0 1 12 6.2a4.7 4.7 0 0 1 8.8 2.6Z" />
+  ),
   home: (
     <>
       <path d="m3 10 9-7 9 7" />
@@ -80,7 +102,9 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M9.5 20v-6h5v6" />
     </>
   ),
-  loader: <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />,
+  loader: (
+    <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+  ),
   'log-in': (
     <>
       <path d="M14 4h5v16h-5" />
@@ -209,4 +233,3 @@ export function Icon({name, size = 18, ...props}: IconProps): JSX.Element {
     </svg>
   );
 }
-
