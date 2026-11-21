@@ -42,16 +42,15 @@ export class AudioCacheStore {
 
   private readonly pending = new Map<string, Promise<AudioCacheEntry>>();
 
+  private indexWriteQueue: Promise<void> = Promise.resolve();
+
   private readonly ready: Promise<void>;
 
   constructor(
     private readonly directories: AppDirectories,
     private readonly logger: AppLogger,
   ) {
-    this.indexPath = path.join(
-      directories.audioCache,
-      AUDIO_CACHE_INDEX,
-    );
+    this.indexPath = path.join(directories.audioCache, AUDIO_CACHE_INDEX);
     this.ready = this.initialize();
   }
 
@@ -60,7 +59,9 @@ export class AudioCacheStore {
     const cid = Number.isSafeInteger(request.track.cid)
       ? String(request.track.cid)
       : 'default';
-    return `${encodeURIComponent(request.track.bvid)}-${encodeURIComponent(cid)}-${encodeURIComponent(request.quality)}`;
+    return `${encodeURIComponent(request.track.bvid)}-${encodeURIComponent(
+      cid,
+    )}-${encodeURIComponent(request.quality)}`;
   }
 
   /** 返回缓存文件的自定义协议地址。 */
@@ -159,13 +160,10 @@ export class AudioCacheStore {
       entries
         .filter(entry => entry.name !== AUDIO_CACHE_INDEX)
         .map(entry =>
-          fs.rm(
-            path.join(this.directories.audioCache, entry.name),
-            {
-              recursive: true,
-              force: true,
-            },
-          ),
+          fs.rm(path.join(this.directories.audioCache, entry.name), {
+            recursive: true,
+            force: true,
+          }),
         ),
     );
     await this.writeIndex({});
@@ -206,13 +204,10 @@ export class AudioCacheStore {
       entries
         .filter(entry => entry.name.startsWith('.nyami-audio-'))
         .map(entry =>
-          fs.rm(
-            path.join(this.directories.audioCache, entry.name),
-            {
-              force: true,
-              recursive: true,
-            },
-          ),
+          fs.rm(path.join(this.directories.audioCache, entry.name), {
+            force: true,
+            recursive: true,
+          }),
         ),
     );
   }
@@ -239,16 +234,13 @@ export class AudioCacheStore {
         `.nyami-audio-${randomUUID()}.tmp`,
       );
       try {
-        const response = await net.fetch(
-          url,
-          {
-            headers: {
-              Referer: BILIBILI_REFERER,
-              'User-Agent': DESKTOP_USER_AGENT,
-            },
-            signal,
+        const response = await net.fetch(url, {
+          headers: {
+            Referer: BILIBILI_REFERER,
+            'User-Agent': DESKTOP_USER_AGENT,
           },
-        );
+          signal,
+        });
         if (!response.ok || !response.body) {
           throw new Error(`音频下载响应异常：${response.status}`);
         }
@@ -311,15 +303,20 @@ export class AudioCacheStore {
 
   /** 使用临时文件替换索引，避免中断时留下半个 JSON。 */
   private async writeIndex(index: AudioCacheIndex): Promise<void> {
+    const operation = this.indexWriteQueue.then(() =>
+      this.writeIndexFile(index),
+    );
+    this.indexWriteQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
+  /** 串行写入索引，降低 Windows 文件句柄竞争导致的替换失败。 */
+  private async writeIndexFile(index: AudioCacheIndex): Promise<void> {
     await fs.mkdir(this.directories.audioCache, {recursive: true});
     const temporaryPath = `${this.indexPath}.${randomUUID()}.tmp`;
     try {
-      await fs.writeFile(
-        temporaryPath,
-        JSON.stringify(index),
-        'utf8',
-      );
-      await fs.rename(temporaryPath, this.indexPath);
+      await fs.writeFile(temporaryPath, JSON.stringify(index), 'utf8');
+      await replaceFileWithRetry(temporaryPath, this.indexPath, this.logger);
     } finally {
       await fs.rm(temporaryPath, {force: true});
     }
@@ -337,4 +334,56 @@ export class AudioCacheStore {
       return false;
     }
   }
+}
+
+/**
+ * 在 Windows 文件仍被短暂占用时重试替换，并为最终兜底保留可读索引。
+ * @param source 临时索引路径
+ * @param destination 正式索引路径
+ * @param logger 脱敏日志器
+ */
+async function replaceFileWithRetry(
+  source: string,
+  destination: string,
+  logger: AppLogger,
+): Promise<void> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await fs.rename(source, destination);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableRenameError(error)) {
+        throw error;
+      }
+      await delay(20 * (attempt + 1));
+    }
+  }
+
+  try {
+    await fs.copyFile(source, destination);
+    logger.warn('audio.cache-index-non-atomic-replace', {
+      destination,
+    });
+    return;
+  } catch (error) {
+    throw lastError ?? error;
+  }
+}
+
+/** 判断是否属于可以等待后重试的 Windows 文件占用错误。 */
+function isRetryableRenameError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+}
+
+/** 等待文件句柄释放，避免忙等占用主进程事件循环。 */
+function delay(milliseconds: number): Promise<void> {
+  return new Promise(resolve => {
+    setTimeout(resolve, milliseconds);
+  });
 }

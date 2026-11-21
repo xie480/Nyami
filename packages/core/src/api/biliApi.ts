@@ -53,7 +53,9 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
     Object.entries(values)
       .map(
         ([key, value]) =>
-          `${encodeURIComponent(key)}=${encodeURIComponent(String(value)).replace(/%20/g, '+')}`,
+          `${encodeURIComponent(key)}=${encodeURIComponent(
+            String(value),
+          ).replace(/%20/g, '+')}`,
       )
       .join('&');
 
@@ -118,6 +120,10 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
       page = 1,
       signal?: AbortSignal,
       tids = 0,
+      options: {
+        order?: 'totalrank' | 'click' | 'pubdate' | 'danmaku' | 'stow';
+        duration?: 0 | 1 | 2 | 3 | 4;
+      } = {},
     ) {
       const normalizedKeyword = keyword.trim();
       if (!normalizedKeyword) {
@@ -132,8 +138,8 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
       const signedQuery = await dependencies.wbi.sign({
         search_type: 'video',
         keyword: normalizedKeyword,
-        order: 'totalrank',
-        duration: 0,
+        order: options.order ?? 'totalrank',
+        duration: options.duration ?? 0,
         tids,
         page,
       });
@@ -145,11 +151,7 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
     },
 
     /** 获取 B 站热门视频，供桌面首页和发现页展示公开内容。 */
-    getPopularVideos(
-      page = 1,
-      pageSize = 20,
-      signal?: AbortSignal,
-    ) {
+    getPopularVideos(page = 1, pageSize = 20, signal?: AbortSignal) {
       if (!Number.isInteger(page) || page < 1) {
         return Promise.reject(new Error('热门视频页码无效'));
       }
@@ -172,12 +174,16 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
       if (!normalizedBvid) {
         throw new Error('bvid 不能为空');
       }
-      const tags = await get<BiliVideoTag[]>(VIDEO_TAGS_ENDPOINT, {
-        params: {bvid: normalizedBvid},
-        signal,
-        silent: true,
-        rateLimitPriority: 'background',
-      }, 1);
+      const tags = await get<BiliVideoTag[]>(
+        VIDEO_TAGS_ENDPOINT,
+        {
+          params: {bvid: normalizedBvid},
+          signal,
+          silent: true,
+          rateLimitPriority: 'background',
+        },
+        1,
+      );
       if (!Array.isArray(tags)) {
         throw new Error('B 站视频 tag 响应格式无效');
       }
@@ -269,15 +275,12 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
       if (!upMid) {
         return Promise.reject(new Error('upMid 不能为空'));
       }
-      return get<BiliCollectedPlaylistList>(
-        '/x/v3/fav/folder/collected/list',
-        {
-          params: {up_mid: upMid, pn, ps, platform: 'web'},
-          signal,
-          silent: true,
-          rateLimitPriority,
-        },
-      );
+      return get<BiliCollectedPlaylistList>('/x/v3/fav/folder/collected/list', {
+        params: {up_mid: upMid, pn, ps, platform: 'web'},
+        signal,
+        silent: true,
+        rateLimitPriority,
+      });
     },
 
     /** 分页获取收藏夹视频。 */
@@ -345,11 +348,7 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
     },
 
     /** 获取 DASH 音频播放地址。 */
-    async getPlayUrl(
-      bvid: string,
-      cid: number,
-      signal?: AbortSignal,
-    ) {
+    async getPlayUrl(bvid: string, cid: number, signal?: AbortSignal) {
       if (!bvid || cid == null) {
         throw new Error('bvid 和 cid 不能为空');
       }
@@ -360,10 +359,7 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
         fnver: 0,
         fourk: 1,
       });
-      return get<BiliPlayUrlData>(
-        `/x/player/wbi/playurl?${query}`,
-        {signal},
-      );
+      return get<BiliPlayUrlData>(`/x/player/wbi/playurl?${query}`, {signal});
     },
 
     /** 获取登录用户的脱敏资料。 */

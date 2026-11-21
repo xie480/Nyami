@@ -28,10 +28,7 @@ import type {
   UserProfile,
 } from '../../shared/types';
 import {CredentialStore} from '../auth/credentialStore';
-import {
-  DESKTOP_INDEX_RATE_BURST,
-  DESKTOP_INDEX_RATE_LIMIT,
-} from '../constants';
+import {DESKTOP_INDEX_RATE_BURST, DESKTOP_INDEX_RATE_LIMIT} from '../constants';
 import {AppLogger} from '../logging/appLogger';
 import {normalizeBiliAssetUrl} from '../security/urlPolicy';
 
@@ -149,7 +146,7 @@ export class BiliContentRuntime {
   /** 加载首页首屏公开内容。 */
   async getHome(request: ContentRequestBase): Promise<HomeSnapshot> {
     return this.withRequest(request.requestId, 'home', async signal => {
-      const response = await this.api.getPopularVideos(1, 16, signal);
+      const response = await this.api.getPopularVideos(1, 24, signal);
       const videos = (response.list ?? [])
         .filter(item => item.aid > 0 && Boolean(item.bvid))
         .map(trimPopularVideo)
@@ -166,7 +163,11 @@ export class BiliContentRuntime {
     request: DiscoverContentRequest,
   ): Promise<DesktopPage<DesktopVideo>> {
     return this.withRequest(request.requestId, 'discover', async signal => {
-      const response = await this.api.getPopularVideos(request.page, 20, signal);
+      const response = await this.api.getPopularVideos(
+        request.page,
+        20,
+        signal,
+      );
       const items = (response.list ?? [])
         .filter(item => item.aid > 0 && Boolean(item.bvid))
         .map(trimPopularVideo)
@@ -189,14 +190,46 @@ export class BiliContentRuntime {
         request.keyword,
         request.page,
         signal,
+        0,
+        {
+          order: request.order,
+          duration: request.duration,
+        },
       );
       const items = (response.result ?? [])
         .filter(item => item.aid > 0 && Boolean(item.bvid))
         .map(trimSearchVideo)
         .map(video => toDesktopVideo(video, 'search'));
+      const filteredItems = items.filter(video => {
+        if (
+          request.startDate !== undefined &&
+          video.pubtime < request.startDate
+        ) {
+          return false;
+        }
+        if (
+          request.endDate !== undefined &&
+          video.pubtime > request.endDate
+        ) {
+          return false;
+        }
+        if (
+          request.minDuration !== undefined &&
+          video.duration < request.minDuration
+        ) {
+          return false;
+        }
+        if (
+          request.maxDuration !== undefined &&
+          video.duration > request.maxDuration
+        ) {
+          return false;
+        }
+        return true;
+      });
       const totalPages = response.numPages ?? request.page;
       return {
-        items,
+        items: filteredItems,
         page: request.page,
         hasMore: request.page < totalPages,
         total: response.numResults ?? null,
@@ -208,45 +241,53 @@ export class BiliContentRuntime {
   async getFavoriteFolders(
     request: FavoriteFolderContentRequest,
   ): Promise<FavoriteFolderSummary[]> {
-    return this.withRequest(request.requestId, 'favorite-folders', async signal => {
-      await this.assertCurrentAccount(request.uid);
-      const response = await this.api.getFavoriteFolders(request.uid, signal);
-      return (response.list ?? []).map(folder => {
-        const normalized = trimFolder(folder);
-        return {
-          id: normalized.id,
-          fid: normalized.fid,
-          title: normalized.title,
-          mediaCount: normalized.mediaCount,
-        };
-      });
-    });
+    return this.withRequest(
+      request.requestId,
+      'favorite-folders',
+      async signal => {
+        await this.assertCurrentAccount(request.uid);
+        const response = await this.api.getFavoriteFolders(request.uid, signal);
+        return (response.list ?? []).map(folder => {
+          const normalized = trimFolder(folder);
+          return {
+            id: normalized.id,
+            fid: normalized.fid,
+            title: normalized.title,
+            mediaCount: normalized.mediaCount,
+          };
+        });
+      },
+    );
   }
 
   /** 加载当前账号收藏夹的视频分页。 */
   async getFavoriteVideos(
     request: FavoriteVideoContentRequest,
   ): Promise<DesktopPage<DesktopVideo>> {
-    return this.withRequest(request.requestId, 'favorite-videos', async signal => {
-      await this.assertCurrentAccount(request.uid);
-      const response = await this.api.getFavoriteVideos(
-        request.mediaId,
-        request.page,
-        20,
-        signal,
-      );
-      const items = (response.medias ?? [])
-        .filter(video => video.attr === 0 && Boolean(video.bvid))
-        .map(trimFavoriteVideo)
-        .map(video => toFavoriteDesktopVideo(video));
-      return {
-        items,
-        page: request.page,
-        hasMore: response.has_more === true,
-        total: response.info?.media_count ?? null,
-        description: response.info?.intro?.trim() || undefined,
-      };
-    });
+    return this.withRequest(
+      request.requestId,
+      'favorite-videos',
+      async signal => {
+        await this.assertCurrentAccount(request.uid);
+        const response = await this.api.getFavoriteVideos(
+          request.mediaId,
+          request.page,
+          20,
+          signal,
+        );
+        const items = (response.medias ?? [])
+          .filter(video => video.attr === 0 && Boolean(video.bvid))
+          .map(trimFavoriteVideo)
+          .map(video => toFavoriteDesktopVideo(video));
+        return {
+          items,
+          page: request.page,
+          hasMore: response.has_more === true,
+          total: response.info?.media_count ?? null,
+          description: response.info?.intro?.trim() || undefined,
+        };
+      },
+    );
   }
 
   /** 取消一个仍在主进程运行的内容请求。 */
@@ -268,11 +309,18 @@ export class BiliContentRuntime {
     try {
       return await work(controller.signal);
     } catch (error) {
-      this.logger.warn('content.request-failed', {
-        feature,
-        requestId,
-        error,
-      });
+      if (isAbortError(error)) {
+        this.logger.debug('content.request-cancelled', {
+          feature,
+          requestId,
+        });
+      } else {
+        this.logger.warn('content.request-failed', {
+          feature,
+          requestId,
+          error,
+        });
+      }
       throw error;
     } finally {
       if (this.pendingRequests.get(requestId) === controller) {
@@ -288,6 +336,14 @@ export class BiliContentRuntime {
       throw new Error('B 站账号已变化，请刷新登录状态后重试');
     }
   }
+}
+
+/** 判断内容请求是否因为页面切换或筛选变化而主动取消。 */
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === 'AbortError' || error.message.includes('请求已取消'))
+  );
 }
 
 /** 从 B 站图片地址中提取 WBI 文件名密钥。 */
@@ -320,7 +376,9 @@ function toDesktopVideo(
 }
 
 /** 将收藏视频模型转换为跨进程安全模型。 */
-function toFavoriteDesktopVideo(video: ReturnType<typeof trimFavoriteVideo>): DesktopVideo {
+function toFavoriteDesktopVideo(
+  video: ReturnType<typeof trimFavoriteVideo>,
+): DesktopVideo {
   return {
     aid: video.aid,
     bvid: video.bvid,
@@ -336,4 +394,3 @@ function toFavoriteDesktopVideo(video: ReturnType<typeof trimFavoriteVideo>): De
     source: 'favorite',
   };
 }
-

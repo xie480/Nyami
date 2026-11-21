@@ -1,9 +1,4 @@
-import {
-  BrowserWindow,
-  dialog,
-  IpcMainInvokeEvent,
-  ipcMain,
-} from 'electron';
+import {BrowserWindow, dialog, IpcMainInvokeEvent, ipcMain} from 'electron';
 import {
   IPC_CHANNELS,
   type AudioProbeRequest,
@@ -89,10 +84,14 @@ export function registerIpcHandlers(
       try {
         return await handler(event, ...args);
       } catch (error) {
-        dependencies.logger.error('ipc.handler-failed', {
-          channel,
-          error,
-        });
+        if (isAbortError(error)) {
+          dependencies.logger.debug('ipc.handler-cancelled', {channel});
+        } else {
+          dependencies.logger.error('ipc.handler-failed', {
+            channel,
+            error,
+          });
+        }
         throw error;
       }
     });
@@ -110,23 +109,25 @@ export function registerIpcHandlers(
   };
   window.on('maximize', handleWindowStateChange);
   window.on('unmaximize', handleWindowStateChange);
-  const disposePlaybackEvents = dependencies.playbackRuntime.subscribe(event => {
-    if (event.type === 'state') {
-      send(IPC_CHANNELS.playback.stateChanged, {
-        snapshot: event.snapshot,
+  const disposePlaybackEvents = dependencies.playbackRuntime.subscribe(
+    event => {
+      if (event.type === 'state') {
+        send(IPC_CHANNELS.playback.stateChanged, {
+          snapshot: event.snapshot,
+        });
+        return;
+      }
+      if (event.type === 'source') {
+        send(IPC_CHANNELS.playback.sourceChanged, {
+          source: event.source,
+        });
+        return;
+      }
+      send(IPC_CHANNELS.playback.command, {
+        command: event.command,
       });
-      return;
-    }
-    if (event.type === 'source') {
-      send(IPC_CHANNELS.playback.sourceChanged, {
-        source: event.source,
-      });
-      return;
-    }
-    send(IPC_CHANNELS.playback.command, {
-      command: event.command,
-    });
-  });
+    },
+  );
   const disposeSyncEvents = dependencies.syncRuntime.subscribe(snapshot => {
     send(IPC_CHANNELS.sync.stateChanged, {snapshot});
   });
@@ -353,6 +354,14 @@ export function registerIpcHandlers(
   };
 }
 
+/** 将用户主动取消的请求从错误日志中剔除。 */
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === 'AbortError' || error.message.includes('请求已取消'))
+  );
+}
+
 /** 读取 Renderer 自绘窗口边框所需的当前窗口状态。 */
 function getWindowState(window: BrowserWindow): DesktopWindowState {
   return {
@@ -380,17 +389,16 @@ function assertRendererSender(
  * @param value 未知 IPC 参数
  * @returns 类型收窄后的请求
  */
-function assertAudioProbeRequest(value: unknown): asserts value is AudioProbeRequest {
+function assertAudioProbeRequest(
+  value: unknown,
+): asserts value is AudioProbeRequest {
   if (!isRecord(value)) {
     throw new Error('音频探测参数格式无效');
   }
   if (!isBoundedString(value.url, 4096)) {
     throw new Error('音频探测 URL 无效');
   }
-  if (
-    value.retryUrl !== undefined &&
-    !isBoundedString(value.retryUrl, 4096)
-  ) {
+  if (value.retryUrl !== undefined && !isBoundedString(value.retryUrl, 4096)) {
     throw new Error('音频重试 URL 无效');
   }
 }
@@ -412,6 +420,12 @@ function assertSearchContentRequest(
   const request = value as ContentRequestBase & {
     keyword?: unknown;
     page?: unknown;
+    order?: unknown;
+    duration?: unknown;
+    startDate?: unknown;
+    endDate?: unknown;
+    minDuration?: unknown;
+    maxDuration?: unknown;
   };
   if (!isBoundedString(request.keyword, 128) || !request.keyword.trim()) {
     throw new Error('搜索关键词无效');
@@ -419,6 +433,38 @@ function assertSearchContentRequest(
   if (!isPositiveInteger(request.page) || request.page > 1000) {
     throw new Error('搜索页码无效');
   }
+  if (
+    request.order !== undefined &&
+    !['totalrank', 'click', 'pubdate', 'danmaku', 'stow'].includes(
+      String(request.order),
+    )
+  ) {
+    throw new Error('搜索排序参数无效');
+  }
+  if (
+    request.duration !== undefined &&
+    (typeof request.duration !== 'number' ||
+      !Number.isInteger(request.duration) ||
+      request.duration < 0 ||
+      request.duration > 4)
+  ) {
+    throw new Error('搜索时长参数无效');
+  }
+  [
+    ['startDate', request.startDate],
+    ['endDate', request.endDate],
+    ['minDuration', request.minDuration],
+    ['maxDuration', request.maxDuration],
+  ].forEach(([name, candidate]) => {
+    if (
+      candidate !== undefined &&
+      (typeof candidate !== 'number' ||
+        !Number.isFinite(candidate) ||
+        candidate < 0)
+    ) {
+      throw new Error(`搜索${name}参数无效`);
+    }
+  });
 }
 
 /** 校验发现页请求。 */
@@ -642,7 +688,10 @@ function assertPlaybackReorderRequest(
   if (!isRecord(value) || !Array.isArray(value.trackIds)) {
     throw new Error('播放队列排序参数无效');
   }
-  if (value.trackIds.length > 500 || value.trackIds.some(id => !isBoundedString(id, 512))) {
+  if (
+    value.trackIds.length > 500 ||
+    value.trackIds.some(id => !isBoundedString(id, 512))
+  ) {
     throw new Error('播放队列排序项目无效');
   }
 }
@@ -771,10 +820,16 @@ function assertSettingsPatch(
   ) {
     throw new Error('设置主题无效');
   }
-  if (value.closeToTray !== undefined && typeof value.closeToTray !== 'boolean') {
+  if (
+    value.closeToTray !== undefined &&
+    typeof value.closeToTray !== 'boolean'
+  ) {
     throw new Error('closeToTray 必须是布尔值');
   }
-  if (value.autoSyncIndex !== undefined && typeof value.autoSyncIndex !== 'boolean') {
+  if (
+    value.autoSyncIndex !== undefined &&
+    typeof value.autoSyncIndex !== 'boolean'
+  ) {
     throw new Error('autoSyncIndex 必须是布尔值');
   }
   if (value.window !== undefined) {
@@ -863,10 +918,7 @@ function assertAudioSettingsPatch(
     }
   }
   if (value.peqBands !== undefined) {
-    if (
-      !Array.isArray(value.peqBands) ||
-      value.peqBands.length !== 8
-    ) {
+    if (!Array.isArray(value.peqBands) || value.peqBands.length !== 8) {
       throw new Error('PEQ 参数数量无效');
     }
     value.peqBands.forEach(assertPeqBand);
@@ -887,12 +939,26 @@ function assertPeqBand(value: unknown): asserts value is DesktopPeqBand {
   if (!isRecord(value)) {
     throw new Error('PEQ 滤波器格式无效');
   }
-  const allowedKeys = new Set(['enabled', 'frequency', 'gain', 'q']);
+  const allowedKeys = new Set(['enabled', 'type', 'frequency', 'gain', 'q']);
   if (Object.keys(value).some(key => !allowedKeys.has(key))) {
     throw new Error('PEQ 滤波器包含不支持的字段');
   }
   if (typeof value.enabled !== 'boolean') {
     throw new Error('PEQ 开关参数无效');
+  }
+  if (
+    typeof value.type !== 'string' ||
+    ![
+      'Peak',
+      'LowShelf',
+      'HighShelf',
+      'LowPass',
+      'HighPass',
+      'Notch',
+      'BandPass',
+    ].includes(value.type)
+  ) {
+    throw new Error('PEQ 滤波器类型无效');
   }
   if (
     typeof value.frequency !== 'number' ||

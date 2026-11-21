@@ -5,6 +5,7 @@ import type {
   DesktopEqMode,
   DesktopGraphicPreset,
   DesktopPeqBand,
+  DesktopPeqFilterType,
   DesktopSettings,
   DesktopSettingsPatch,
   DesktopTheme,
@@ -44,28 +45,27 @@ const GRAPHIC_PRESETS: readonly DesktopGraphicPreset[] = [
 
 const EQ_MODES: readonly DesktopEqMode[] = ['graphic', 'parametric'];
 
-const DEFAULT_GRAPHIC_GAINS = [
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
+const PEQ_FILTER_TYPES: readonly DesktopPeqFilterType[] = [
+  'Peak',
+  'LowShelf',
+  'HighShelf',
+  'LowPass',
+  'HighPass',
+  'Notch',
+  'BandPass',
 ];
 
+const DEFAULT_GRAPHIC_GAINS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
 const DEFAULT_PEQ_BANDS: DesktopPeqBand[] = [
-  {enabled: false, frequency: 31, gain: 0, q: 1},
-  {enabled: false, frequency: 62, gain: 0, q: 1},
-  {enabled: false, frequency: 125, gain: 0, q: 1},
-  {enabled: false, frequency: 250, gain: 0, q: 1},
-  {enabled: false, frequency: 500, gain: 0, q: 1},
-  {enabled: false, frequency: 1000, gain: 0, q: 1},
-  {enabled: false, frequency: 2000, gain: 0, q: 1},
-  {enabled: false, frequency: 4000, gain: 0, q: 1},
+  {enabled: false, type: 'Peak', frequency: 31, gain: 0, q: 1},
+  {enabled: false, type: 'Peak', frequency: 62, gain: 0, q: 1},
+  {enabled: false, type: 'Peak', frequency: 125, gain: 0, q: 1},
+  {enabled: false, type: 'Peak', frequency: 250, gain: 0, q: 1},
+  {enabled: false, type: 'Peak', frequency: 500, gain: 0, q: 1},
+  {enabled: false, type: 'Peak', frequency: 1000, gain: 0, q: 1},
+  {enabled: false, type: 'Peak', frequency: 2000, gain: 0, q: 1},
+  {enabled: false, type: 'Peak', frequency: 4000, gain: 0, q: 1},
 ];
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
@@ -91,12 +91,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   },
 };
 
-const THEMES: readonly DesktopTheme[] = [
-  'system',
-  'light',
-  'dark',
-  'glass',
-];
+const THEMES: readonly DesktopTheme[] = ['system', 'light', 'dark', 'glass'];
 
 /**
  * 桌面设置文件存储。
@@ -212,7 +207,9 @@ export function normalizeSettings(value: unknown): DesktopSettings {
   const defaultWindow = DEFAULT_DESKTOP_SETTINGS.window;
   return {
     version: SETTINGS_VERSION,
-    theme: isTheme(record.theme) ? record.theme : DEFAULT_DESKTOP_SETTINGS.theme,
+    theme: isTheme(record.theme)
+      ? record.theme
+      : DEFAULT_DESKTOP_SETTINGS.theme,
     closeToTray:
       typeof record.closeToTray === 'boolean'
         ? record.closeToTray
@@ -320,9 +317,8 @@ function normalizePeqBands(value: unknown): DesktopPeqBand[] {
     const fallback = DEFAULT_PEQ_BANDS[index] ?? DEFAULT_PEQ_BANDS[0];
     return {
       enabled:
-        typeof source.enabled === 'boolean'
-          ? source.enabled
-          : fallback.enabled,
+        typeof source.enabled === 'boolean' ? source.enabled : fallback.enabled,
+      type: isPeqFilterType(source.type) ? source.type : fallback.type,
       frequency: normalizeNumber(
         source.frequency,
         fallback.frequency,
@@ -338,6 +334,14 @@ function normalizePeqBands(value: unknown): DesktopPeqBand[] {
       q: normalizeNumber(source.q, fallback.q, MIN_PEQ_Q, MAX_PEQ_Q),
     };
   });
+}
+
+/** 判断 PEQ 滤波器类型是否来自 Android 端支持集合。 */
+function isPeqFilterType(value: unknown): value is DesktopPeqFilterType {
+  return (
+    typeof value === 'string' &&
+    PEQ_FILTER_TYPES.includes(value as DesktopPeqFilterType)
+  );
 }
 
 /** 复制 PEQ 数组，避免设置快照被 Renderer 修改。 */
