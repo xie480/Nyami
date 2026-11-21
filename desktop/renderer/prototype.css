@@ -1145,6 +1145,50 @@
   transform: rotate(-18deg);
 }
 
+.prototype-orbit-spectrum {
+  position: absolute;
+  z-index: 1;
+  width: min(50vw, 660px);
+  height: min(50vw, 660px);
+  pointer-events: none;
+}
+
+.prototype-orbit-spectrum > span {
+  position: absolute;
+  inset: 0;
+  transform: rotate(var(--orbit-angle));
+}
+
+.prototype-orbit-spectrum > span::after {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 2px;
+  height: var(--orbit-height);
+  border-radius: 999px;
+  background: rgba(200, 76, 49, 0.48);
+  box-shadow: 0 0 7px rgba(200, 76, 49, 0.18);
+  content: '';
+  transform: translateX(-50%);
+  transform-origin: 50% 100%;
+}
+
+.prototype-orbit-spectrum.is-playing > span::after {
+  animation: nyami-orbit-pulse 900ms ease-in-out infinite alternate;
+  animation-delay: calc(var(--orbit-index) * -28ms);
+}
+
+@keyframes nyami-orbit-pulse {
+  from {
+    opacity: 0.55;
+    transform: translateX(-50%) scaleY(0.72);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scaleY(1.06);
+  }
+}
+
 .prototype-immersive-art-frame {
   position: relative;
   width: min(42vw, 548px);

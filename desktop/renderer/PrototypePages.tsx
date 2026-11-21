@@ -1601,6 +1601,10 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
       <main className="prototype-immersive-main">
         <section className="prototype-immersive-art-stage">
           <div className="prototype-ambient-orbit" />
+          <ImmersiveOrbitSpectrum
+            isPlaying={props.playback.state === 'playing'}
+            values={props.spectrum}
+          />
           <div className="prototype-immersive-art-frame">
             <img alt={`${track.title}封面`} src={track.cover} />
           </div>
@@ -1765,6 +1769,42 @@ function ImmersiveSpectrum({
             {
               height: `${Math.max(6, Math.round(value * 100))}%`,
               '--bar-index': index,
+            } as CSSProperties
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+/** 在沉浸式封面外围绘制随播放状态变化的环形频谱。 */
+function ImmersiveOrbitSpectrum({
+  isPlaying,
+  values,
+}: {
+  isPlaying: boolean;
+  values: number[];
+}): JSX.Element {
+  const displayValues = values.length
+    ? values.slice(0, 32)
+    : Array(32).fill(0.16);
+  return (
+    <div
+      aria-label="封面环形实时频谱"
+      className={
+        isPlaying
+          ? 'prototype-orbit-spectrum is-playing'
+          : 'prototype-orbit-spectrum'
+      }
+      role="img">
+      {displayValues.map((value, index) => (
+        <span
+          key={index}
+          style={
+            {
+              '--orbit-angle': `${(360 / displayValues.length) * index}deg`,
+              '--orbit-height': `${Math.max(8, Math.round(value * 30))}%`,
+              '--orbit-index': index,
             } as CSSProperties
           }
         />
