@@ -547,6 +547,8 @@ export type FavoriteFolderContentRequest = ContentRequestBase & {
 export type FavoriteSourceRequest = ContentRequestBase & {
   uid: string;
   sourceKeys?: string[];
+  /** 只读取本地已持久化的来源元数据，不访问 Bilibili。 */
+  localOnly?: boolean;
 };
 
 export type FavoriteIndexRequest = ContentRequestBase & {
@@ -558,6 +560,8 @@ export type FavoriteSourceVideoRequest = ContentRequestBase & {
   uid: string;
   sourceKey: string;
   page: number;
+  /** 只读取本地已持久化的视频，不回退请求 Bilibili。 */
+  localOnly?: boolean;
 };
 
 export type FavoriteVideoContentRequest = ContentRequestBase & {

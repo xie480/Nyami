@@ -923,6 +923,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
   const syncActive = refreshing || props.sync.state === 'running';
 
   const persistVisibleSourceKeys = (next: string[]): void => {
@@ -941,6 +942,37 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
   };
 
   useEffect(() => {
+    if (!importOpen || !props.auth.loggedIn || !props.auth.uid) {
+      return;
+    }
+    const requestId = makeRequestId('favorite-source-import');
+    setImportLoading(true);
+    void window.nyamiDesktop.content
+      .getFavoriteSources({
+        requestId,
+        uid: props.auth.uid,
+      })
+      .then(nextSources => {
+        setSources(nextSources);
+      })
+      .catch(error => {
+        if (!isAbortError(error)) {
+          props.onNotice(
+            'info',
+            error instanceof Error ? error.message : '收藏夹目录读取失败',
+          );
+        }
+      })
+      .finally(() => {
+        setImportLoading(false);
+        void window.nyamiDesktop.content.cancel({requestId});
+      });
+    return () => {
+      void window.nyamiDesktop.content.cancel({requestId});
+    };
+  }, [importOpen, props.auth.loggedIn, props.auth.uid, props.onNotice]);
+
+  useEffect(() => {
     if (!props.auth.loggedIn || !props.auth.uid) {
       setSources([]);
       setVisibleSourceKeys([]);
@@ -955,11 +987,23 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
     const indexRequestId = makeRequestId('favorite-index');
     let coverRequestId: string | null = null;
     setLoading(true);
-    void Promise.all([
-      window.nyamiDesktop.content.getFavoriteSources({
+    const loadSources = async (): Promise<FavoriteSourceSummary[]> => {
+      const indexedSources =
+        await window.nyamiDesktop.content.getFavoriteSources({
+          requestId: sourcesRequestId,
+          uid,
+          localOnly: true,
+        });
+      if (indexedSources.length) {
+        return indexedSources;
+      }
+      return window.nyamiDesktop.content.getFavoriteSources({
         requestId: sourcesRequestId,
         uid,
-      }),
+      });
+    };
+    void Promise.all([
+      loadSources(),
       window.nyamiDesktop.content.getFavoriteIndex({
         requestId: indexRequestId,
         uid,
@@ -1014,6 +1058,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
               requestId: coverRequestId,
               uid,
               sourceKeys: coverKeys,
+              localOnly: true,
             })
             .then(hydratedSources => {
               if (disposed) {
@@ -1156,7 +1201,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
             <div className="prototype-library-actions">
               <button
                 className="prototype-button prototype-button-quiet"
-                disabled={!sources.length}
+                disabled={!props.auth.loggedIn || importLoading}
                 onClick={() => setImportOpen(true)}
                 type="button">
                 <Icon name="folder" size={15} />
@@ -1267,6 +1312,11 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
               </div>
             </div>
             <div className="prototype-import-grid">
+              {importLoading ? (
+                <div className="prototype-empty-state">
+                  正在读取收藏夹目录
+                </div>
+              ) : null}
               {sources.map(source => (
                 <label className="prototype-import-option" key={source.sourceKey}>
                   <input
@@ -1358,6 +1408,7 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
           uid: props.auth.uid as string,
           sourceKey,
           page,
+          localOnly: true,
         });
         items.push(...next.items);
         if (!next.hasMore || !next.items.length) {
@@ -1371,6 +1422,7 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
       requestId: summaryRequestId,
       uid: props.auth.uid,
       sourceKeys: [sourceKey],
+      localOnly: true,
     });
     const videosPromise = loadSourceVideos();
     void Promise.allSettled([summaryPromise, videosPromise])

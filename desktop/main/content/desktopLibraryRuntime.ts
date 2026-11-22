@@ -129,11 +129,12 @@ export class DesktopLibraryRuntime {
     return this.repository.getGlobalIndex(uid);
   }
 
-  /** 读取远端来源目录并合并本地同步状态。 */
+  /** 读取收藏来源摘要；本地读取模式只返回 SQLite 中已持久化的索引。 */
   async getSourceSummaries(
     uid: string,
     sourceKeys?: readonly string[],
     requestId?: string,
+    localOnly = false,
   ): Promise<FavoriteSourceSummary[]> {
     return this.withRequest(
       requestId ?? `sources:${uid}`,
@@ -149,6 +150,11 @@ export class DesktopLibraryRuntime {
         const requested = new Set(
           (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
         );
+        if (localOnly) {
+          return Array.from(localSources.values()).filter(
+            source => !requested.size || requested.has(source.sourceKey),
+          );
+        }
         let remoteSources: FavoriteSourceSummary[];
         try {
           remoteSources = await this.buildSourceCatalog(
@@ -220,12 +226,13 @@ export class DesktopLibraryRuntime {
     );
   }
 
-  /** 读取单个来源的本地索引分页。 */
+  /** 读取单个来源的本地索引分页，并按需允许未同步来源远端兜底。 */
   async getSourceVideos(
     uid: string,
     sourceKey: string,
     page: number,
     requestId?: string,
+    localOnly = false,
   ): Promise<DesktopPage<DesktopVideo>> {
     return this.withRequest(
       requestId ?? `source-videos:${uid}:${sourceKey}:${page}`,
@@ -241,7 +248,11 @@ export class DesktopLibraryRuntime {
         const localSource = this.repository
           .getSourceSummaries(uid, [sourceKey])
           .find(source => source.sourceKey === sourceKey);
-        if (result.total === 0 && localSource?.syncStatus !== 'success') {
+        if (
+          !localOnly &&
+          result.total === 0 &&
+          localSource?.syncStatus !== 'success'
+        ) {
           return this.fetchRemoteSourceVideos(
             sourceKey,
             page,

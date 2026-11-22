@@ -110,6 +110,73 @@ describe('DesktopLibraryRuntime 来源目录读取', () => {
     );
   });
 
+  it('本地读取模式展示索引来源时不会访问远端目录', async () => {
+    const fixture = createRuntimeFixture();
+    fixture.repository.getSourceSummaries.mockReturnValue([
+      {
+        sourceKey: 'ownedFavorite:7',
+        kind: 'owned',
+        remoteId: 7,
+        ownerMid: 1,
+        ownerName: '',
+        title: '本地收藏夹',
+        cover: '',
+        mediaCount: 2,
+        description: '本地简介',
+        syncStatus: 'success',
+        lastSyncedAt: 1,
+      },
+    ]);
+
+    const sources = await fixture.runtime.getSourceSummaries(
+      '1',
+      undefined,
+      undefined,
+      true,
+    );
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.title).toBe('本地收藏夹');
+    expect(fixture.api.getFavoriteFolders).not.toHaveBeenCalled();
+    expect(fixture.api.getCollectedPlaylists).not.toHaveBeenCalled();
+  });
+
+  it('本地读取模式加载收藏夹内容时不会回退远端分页', async () => {
+    const fixture = createRuntimeFixture();
+    fixture.repository.getSourceSummaries.mockReturnValue([
+      {
+        sourceKey: 'ownedFavorite:7',
+        kind: 'owned',
+        remoteId: 7,
+        ownerMid: 1,
+        ownerName: '',
+        title: '本地收藏夹',
+        cover: '',
+        mediaCount: 0,
+        description: '',
+        syncStatus: 'idle',
+        lastSyncedAt: null,
+      },
+    ]);
+
+    const result = await fixture.runtime.getSourceVideos(
+      '1',
+      'ownedFavorite:7',
+      1,
+      undefined,
+      true,
+    );
+
+    expect(result).toEqual({
+      items: [],
+      page: 1,
+      hasMore: false,
+      total: 0,
+    });
+    expect(fixture.api.getFavoriteVideos).not.toHaveBeenCalled();
+    expect(fixture.api.getSeasonArchives).not.toHaveBeenCalled();
+  });
+
   it('读取单个来源时才补齐缺失封面', async () => {
     const fixture = createRuntimeFixture();
     fixture.api.getCollectedPlaylists.mockResolvedValue({

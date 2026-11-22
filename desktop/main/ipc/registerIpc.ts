@@ -264,6 +264,7 @@ export function registerIpcHandlers(
       request.uid,
       request.sourceKeys,
       request.requestId,
+      'localOnly' in request && request.localOnly === true,
     );
   });
   register(IPC_CHANNELS.content.getFavoriteIndex, (_event, request) => {
@@ -281,6 +282,7 @@ export function registerIpcHandlers(
       request.sourceKey,
       request.page,
       request.requestId,
+      request.localOnly === true,
     );
   });
   register(IPC_CHANNELS.content.refreshFavoriteSources, (_event, request) => {
@@ -585,6 +587,7 @@ function assertFavoriteSourceRequest(
   const request = value as ContentRequestBase & {
     uid?: unknown;
     sourceKeys?: unknown;
+    localOnly?: unknown;
   };
   if (!isBoundedString(request.uid, 64) || !request.uid.trim()) {
     throw new Error('收藏账号 UID 无效');
@@ -600,6 +603,9 @@ function assertFavoriteSourceRequest(
       throw new Error('收藏来源参数无效');
     }
   }
+  if (request.localOnly !== undefined && typeof request.localOnly !== 'boolean') {
+    throw new Error('收藏来源读取模式无效');
+  }
 }
 
 /** 校验导入来源视频分页请求。 */
@@ -611,6 +617,7 @@ function assertFavoriteSourceVideoRequest(
     uid?: unknown;
     sourceKey?: unknown;
     page?: unknown;
+    localOnly?: unknown;
   };
   if (!isBoundedString(request.uid, 64) || !request.uid.trim()) {
     throw new Error('收藏账号 UID 无效');
@@ -620,6 +627,9 @@ function assertFavoriteSourceVideoRequest(
   }
   if (!isPositiveInteger(request.page) || request.page > 1000) {
     throw new Error('收藏视频页码无效');
+  }
+  if (request.localOnly !== undefined && typeof request.localOnly !== 'boolean') {
+    throw new Error('收藏来源读取模式无效');
   }
 }
 
