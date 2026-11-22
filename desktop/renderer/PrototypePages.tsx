@@ -1345,6 +1345,10 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
     const summaryRequestId = makeRequestId(`source-summary-${sourceKey}`);
     const videosRequestId = makeRequestId(`source-videos-${sourceKey}`);
     setLoading(true);
+    setTracks([]);
+    setDescription('');
+    setFolderTitle('');
+    setFolderCover('');
     const loadSourceVideos = async (): Promise<DesktopVideo[]> => {
       const items: DesktopVideo[] = [];
       let page = 1;
@@ -1363,32 +1367,37 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
       }
       return dedupeVideos(items);
     };
-    void Promise.all([
-      window.nyamiDesktop.content.getFavoriteSources({
-        requestId: summaryRequestId,
-        uid: props.auth.uid,
-        sourceKeys: [sourceKey],
-      }),
-      loadSourceVideos(),
-    ])
-      .then(([summaries, nextTracks]) => {
+    const summaryPromise = window.nyamiDesktop.content.getFavoriteSources({
+      requestId: summaryRequestId,
+      uid: props.auth.uid,
+      sourceKeys: [sourceKey],
+    });
+    const videosPromise = loadSourceVideos();
+    void Promise.allSettled([summaryPromise, videosPromise])
+      .then(([summaryResult, videosResult]) => {
         if (disposed) {
           return;
         }
-        const summary = summaries[0];
-        setTracks(nextTracks);
-        setDescription(summary?.description ?? '');
-        setFolderTitle(summary?.title ?? '');
-        setFolderCover(summary?.cover ?? '');
-        setSourceKind(summary?.kind ?? 'owned');
-      })
-      .catch(error => {
-        if (disposed || isAbortError(error)) {
+        if (summaryResult.status === 'fulfilled') {
+          const summary = summaryResult.value[0];
+          setDescription(summary?.description ?? '');
+          setFolderTitle(summary?.title ?? '');
+          setFolderCover(summary?.cover ?? '');
+          setSourceKind(summary?.kind ?? 'owned');
+        } else if (!isAbortError(summaryResult.reason)) {
+          onNotice('info', '收藏夹摘要暂时无法读取');
+        }
+        if (videosResult.status === 'fulfilled') {
+          setTracks(videosResult.value);
           return;
         }
-        const message =
-          error instanceof Error ? error.message : '收藏夹读取失败';
-        onNotice('error', message);
+        if (!isAbortError(videosResult.reason)) {
+          const message =
+            videosResult.reason instanceof Error
+              ? videosResult.reason.message
+              : '收藏夹歌曲读取失败';
+          onNotice('error', message);
+        }
         setTracks([]);
       })
       .finally(() => {
