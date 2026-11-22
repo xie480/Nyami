@@ -519,6 +519,8 @@ export class PlaybackRuntime {
       return this.getState();
     }
     if (event.type === 'playing') {
+      // 只有媒体真正开始播放后才清零重试次数，避免每次重新解析地址都重新打开重试预算。
+      this.retryCount = 0;
       this.ignoreTimeupdateUntilPlaying = false;
       this.snapshot.state = 'playing';
       this.snapshot.error = null;
@@ -702,7 +704,6 @@ export class PlaybackRuntime {
       };
       this.snapshot.cached = true;
       this.snapshot.duration = track.duration;
-      this.retryCount = 0;
       this.emitSource(this.currentSource);
       this.emitResumeSeekCommand(track.id, revision, track.duration);
       this.emitPlayCommand(track.id, revision, autoplay);
@@ -747,7 +748,6 @@ export class PlaybackRuntime {
     this.snapshot = this.snapshotFromQueue('loading');
     this.snapshot.duration = resolved.duration;
     this.snapshot.cached = false;
-    this.retryCount = 0;
     this.currentSource = {
       trackId: resolvedTrack.id,
       url: resolved.url,
@@ -1020,6 +1020,9 @@ export class PlaybackRuntime {
       ? error.message
       : '音频播放失败';
     this.snapshot = this.snapshotFromQueue('error');
+    this.currentSource = null;
+    this.retryCount = 0;
+    this.snapshot.cached = false;
     this.snapshot.error = message;
     this.snapshot.diagnostic = this.createDiagnostic(
       kind,

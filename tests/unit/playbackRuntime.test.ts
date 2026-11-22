@@ -57,6 +57,7 @@ function createRuntime(
     cache: cache as never,
     logger: {
       warn: jest.fn(),
+      info: jest.fn(),
     } as never,
     statePath,
   });
@@ -193,6 +194,105 @@ describe('PlaybackRuntime 大队列窗口', () => {
         'nyami-cache://audio/broken-cache',
         'https://audio.example.test/BV1.m4s',
       ]);
+    } finally {
+      await fs.rm(statePath, {force: true});
+      await fs.rm(`${statePath}.tmp`, {force: true});
+    }
+  });
+
+  it('连续获取音频地址失败时耗尽重试次数并停止循环', async () => {
+    const statePath = path.join(
+      os.tmpdir(),
+      `nyami-playback-${randomUUID()}.json`,
+    );
+    const resolve = jest.fn().mockImplementation(
+      async (track: ReturnType<typeof createQueueItem>) => ({
+        track,
+        cid: 1,
+        url: `https://audio.example.test/${track.id}.m4s`,
+        backupUrls: [],
+        mimeType: 'audio/mp4',
+        duration: track.duration,
+        parts: [],
+      }),
+    );
+    const runtime = createRuntime(statePath, {}, {resolve});
+
+    try {
+      await runtime.loadQueue({
+        items: [createQueueItem('BV1')],
+        autoplay: true,
+        expandParts: false,
+      });
+
+      await runtime.reportAudioEvent({
+        type: 'error',
+        trackId: 'BV1',
+        code: 4,
+        message: '媒体源不受支持或地址已过期',
+      });
+      await runtime.reportAudioEvent({
+        type: 'error',
+        trackId: 'BV1',
+        code: 4,
+        message: '媒体源不受支持或地址已过期',
+      });
+      const failed = await runtime.reportAudioEvent({
+        type: 'error',
+        trackId: 'BV1',
+        code: 4,
+        message: '媒体源不受支持或地址已过期',
+      });
+
+      expect(resolve).toHaveBeenCalledTimes(3);
+      expect(failed).toMatchObject({
+        state: 'error',
+        trackId: 'BV1',
+      });
+    } finally {
+      await fs.rm(statePath, {force: true});
+      await fs.rm(`${statePath}.tmp`, {force: true});
+    }
+  });
+
+  it('终止后手动播放会重新解析当前歌曲', async () => {
+    const statePath = path.join(
+      os.tmpdir(),
+      `nyami-playback-${randomUUID()}.json`,
+    );
+    const resolve = jest.fn().mockImplementation(
+      async (track: ReturnType<typeof createQueueItem>) => ({
+        track,
+        cid: 1,
+        url: `https://audio.example.test/${track.id}.m4s`,
+        backupUrls: [],
+        mimeType: 'audio/mp4',
+        duration: track.duration,
+        parts: [],
+      }),
+    );
+    const runtime = createRuntime(statePath, {}, {resolve});
+
+    try {
+      await runtime.loadQueue({
+        items: [createQueueItem('BV1')],
+        autoplay: true,
+        expandParts: false,
+      });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await runtime.reportAudioEvent({
+          type: 'error',
+          trackId: 'BV1',
+          code: 4,
+          message: '媒体源不受支持或地址已过期',
+        });
+      }
+
+      expect(runtime.getState().state).toBe('error');
+      await runtime.play();
+
+      expect(resolve).toHaveBeenCalledTimes(4);
+      expect(runtime.getState().state).toBe('loading');
     } finally {
       await fs.rm(statePath, {force: true});
       await fs.rm(`${statePath}.tmp`, {force: true});
