@@ -171,10 +171,12 @@ const paths: Record<IconName, JSX.Element> = {
     </>
   ),
   settings: (
-    <>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.5 1.5-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-2.1v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-1.5-1.5.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H7v-2.1h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.5-1.5.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V5h2.1v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1 1.5 1.5-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2V13h-.2a1.7 1.7 0 0 0-1.6 1Z" />
-    </>
+    <path
+      d="M5.842 2.758V.529h3v2.229c.699.22 1.34.591 1.88 1.087l1.932-1.115 1.5 2.598-1.93 1.115a5.017 5.017 0 0 1 0 2.173l1.93 1.114-1.5 2.597-1.93-1.115A4.995 4.995 0 0 1 8.841 12.3v2.23h-3V12.3a4.994 4.994 0 0 1-1.88-1.087L2.03 12.328.53 9.731l1.93-1.114a5.017 5.017 0 0 1 0-2.173L.53 5.329l1.5-2.598 1.93 1.115a4.995 4.995 0 0 1 1.882-1.087zm1.5 7.27c3.334 0 3.334-5 0-5-3.333 0-3.333 5 0 5z"
+      fill="currentColor"
+      fillRule="evenodd"
+      stroke="none"
+    />
   ),
   sparkles: (
     <>
@@ -213,6 +215,9 @@ const paths: Record<IconName, JSX.Element> = {
 
 /** 渲染统一线性图标，保证导航和控制图标的视觉风格一致。 */
 export function Icon({name, size = 18, ...props}: IconProps): JSX.Element {
+  const viewBox =
+    name === 'settings' ? '0 0 14.683 15.058' : '0 0 24 24';
+
   return (
     <svg
       aria-hidden="true"
@@ -222,7 +227,7 @@ export function Icon({name, size = 18, ...props}: IconProps): JSX.Element {
       strokeLinecap="round"
       strokeLinejoin="round"
       strokeWidth="1.8"
-      viewBox="0 0 24 24"
+      viewBox={viewBox}
       width={size}
       {...props}>
       {paths[name]}

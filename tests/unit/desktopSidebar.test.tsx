@@ -20,7 +20,7 @@ describe('桌面端侧边栏', () => {
     expect(libraryNav.findAllByProps({className: 'nav-hint'})).toHaveLength(0);
   });
 
-  it('设置导航图标使用独立的对齐类', () => {
+  it('设置导航图标使用完整的齿轮轮廓', () => {
     const tree = renderer.create(
       <Sidebar
         auth={{loggedIn: false, uid: null}}
@@ -35,6 +35,7 @@ describe('桌面端侧边栏', () => {
     });
     const settingsIcon = settingsNav.findByType('svg');
 
-    expect(settingsIcon.props.className).toBe('nav-icon-settings');
+    expect(settingsIcon.props.viewBox).toBe('0 0 14.683 15.058');
+    expect(settingsIcon.findByType('path').props.fill).toBe('currentColor');
   });
 });

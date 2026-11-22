@@ -1282,13 +1282,7 @@ export function Sidebar({
               key={item.route}
               onClick={() => onRouteChange(item.route)}
               type="button">
-              <Icon
-                className={
-                  item.icon === 'settings' ? 'nav-icon-settings' : undefined
-                }
-                name={item.icon}
-                size={18}
-              />
+              <Icon name={item.icon} size={18} />
               <span>{item.label}</span>
             </button>
           ))}
