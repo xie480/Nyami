@@ -36,6 +36,7 @@ import {ElectronAudioPlayerAdapter} from './audio/electronAudioPlayer';
 import {
   PrototypeImmersivePage,
   PrototypePage,
+  PrototypeSelect,
   type PrototypeRoute,
 } from './PrototypePages';
 import {
@@ -856,6 +857,7 @@ export function App(): JSX.Element {
     settings,
     searchQuery,
     spectrum,
+    sync,
     route,
     selectedFolderId,
     selectedSourceKey,
@@ -2029,19 +2031,21 @@ function SettingsPage({
             <strong>播放音质</strong>
             <small>仅影响后续请求，实际质量仍以 Bilibili 音源为准。</small>
           </span>
-          <select
-            aria-label="播放音质"
-            onChange={event =>
+          <PrototypeSelect
+            ariaLabel="播放音质"
+            className="settings-quality-select"
+            onChange={value =>
               updatePreference({
-                quality: event.target
-                  .value as DesktopUserPreferences['quality'],
+                quality: value as DesktopUserPreferences['quality'],
               })
             }
-            value={preferences.quality}>
-            <option value="standard">标准</option>
-            <option value="high">高品质</option>
-            <option value="best">最高可用</option>
-          </select>
+            options={[
+              {value: 'standard', label: '标准'},
+              {value: 'high', label: '高品质'},
+              {value: 'best', label: '最高可用'},
+            ]}
+            value={preferences.quality}
+          />
         </label>
       </section>
       <section className="settings-card">
@@ -2757,7 +2761,10 @@ function PlayerPlaceholder({
             }
             title={playback.mode === 'shuffle' ? '随机播放' : '顺序播放'}
             type="button">
-            <Icon name="shuffle" size={15} />
+            <Icon
+              name={playback.mode === 'shuffle' ? 'shuffle' : 'repeat'}
+              size={15}
+            />
           </button>
         </div>
       </div>

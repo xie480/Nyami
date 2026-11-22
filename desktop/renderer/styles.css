@@ -1436,6 +1436,25 @@ kbd {
   width: 156px;
 }
 
+.audio-select-control .prototype-select-menu {
+  width: 156px;
+}
+
+.audio-select-control .prototype-select-trigger {
+  min-height: 32px;
+  border-color: var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.audio-select-control .prototype-select-options {
+  top: calc(100% + 7px);
+  bottom: auto;
+}
+
 .graphic-eq-grid {
   display: grid;
   grid-template-columns: repeat(10, minmax(36px, 1fr));

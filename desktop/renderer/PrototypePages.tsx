@@ -13,6 +13,7 @@ import type {
   PlaybackSnapshot,
   PlaybackQueueMode,
   PlaybackQueueContext,
+  SyncSnapshot,
   UserProfile,
 } from '../shared/types';
 import {
@@ -31,6 +32,12 @@ import coverNightUrl from './assets/cover-night.png';
 import coverPinkUrl from './assets/cover-pink.png';
 import coverPortraitUrl from './assets/cover-portrait.png';
 import coverSummerUrl from './assets/cover-summer.png';
+import {
+  DEFAULT_SEARCH_TAG_FILTER,
+  filterSearchVideosByTags,
+  migrateSearchTagFilter,
+  type SearchTagFilterState,
+} from '../shared/searchTagFilters';
 
 /** PC 端设计稿对应的路由集合，沉浸式页面不参与普通导航。 */
 export type PrototypeRoute =
@@ -42,16 +49,6 @@ export type PrototypeRoute =
 
 type PrototypeNoticeTone = 'info' | 'success' | 'error';
 
-type SearchTagMode = 'and' | 'or';
-
-type SearchTagListMode = 'whitelist' | 'blacklist';
-
-type SearchTagFilterState = {
-  tags: string[];
-  mode: SearchTagMode;
-  listMode: SearchTagListMode;
-};
-
 const SEARCH_TAG_FILTER_STORAGE_KEY = 'nyami-search-tag-filter-v1';
 
 type PrototypePageProps = {
@@ -62,6 +59,7 @@ type PrototypePageProps = {
   spectrum: number[];
   searchQuery: string;
   settings: DesktopSettings | null;
+  sync: SyncSnapshot;
   onRouteChange: (route: PrototypeRoute) => void;
   onSelectFolder: (folderId: number) => void;
   onSelectSource: (sourceKey: string) => void;
@@ -217,12 +215,11 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
   const [maxDuration, setMaxDuration] = useState('');
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [showMoreFilters, setShowMoreFilters] = useState(false);
-  const [tagInput, setTagInput] = useState('');
-  const [tagFilter, setTagFilter] = useState<SearchTagFilterState>({
-    tags: [],
-    mode: 'and',
-    listMode: 'whitelist',
-  });
+  const [whitelistTagInput, setWhitelistTagInput] = useState('');
+  const [blacklistTagInput, setBlacklistTagInput] = useState('');
+  const [tagFilter, setTagFilter] = useState<SearchTagFilterState>(
+    DEFAULT_SEARCH_TAG_FILTER,
+  );
   const [result, setResult] = useState<DesktopPage<DesktopVideo> | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -237,21 +234,7 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
       if (!raw) {
         return;
       }
-      const parsed = JSON.parse(raw) as Partial<SearchTagFilterState>;
-      setTagFilter({
-        tags: Array.isArray(parsed.tags)
-          ? Array.from(
-              new Set(
-                parsed.tags.filter(
-                  (value): value is string =>
-                    typeof value === 'string' && value.trim().length > 0,
-                ),
-              ),
-            )
-          : [],
-        mode: parsed.mode === 'or' ? 'or' : 'and',
-        listMode: parsed.listMode === 'blacklist' ? 'blacklist' : 'whitelist',
-      });
+      setTagFilter(migrateSearchTagFilter(JSON.parse(raw)));
     } catch {
       // 本地筛选偏好损坏时使用默认条件，不阻断搜索页面。
     }
@@ -414,19 +397,33 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
     setActiveQuery(query.trim());
   };
 
-  const addSearchTag = (): void => {
-    const tag = tagInput.trim();
+  const addSearchTag = (
+    listMode: 'whitelist' | 'blacklist',
+  ): void => {
+    const input =
+      listMode === 'whitelist' ? whitelistTagInput : blacklistTagInput;
+    const tag = input.trim();
     if (!tag) {
       return;
     }
-    setTagFilter(current => ({
-      ...current,
-      tags: current.tags.includes(tag) ? current.tags : [...current.tags, tag],
-    }));
-    setTagInput('');
+    setTagFilter(current => {
+      const key = listMode === 'whitelist' ? 'whitelistTags' : 'blacklistTags';
+      const tags = current[key];
+      return tags.includes(tag)
+        ? current
+        : {...current, [key]: [...tags, tag]};
+    });
+    if (listMode === 'whitelist') {
+      setWhitelistTagInput('');
+    } else {
+      setBlacklistTagInput('');
+    }
   };
 
-  const filteredItems = filterSearchVideos(result?.items ?? [], tagFilter);
+  const filteredItems = filterSearchVideosByTags(
+    result?.items ?? [],
+    tagFilter,
+  );
 
   const sortOptions = [
     '综合排序',
@@ -549,74 +546,41 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
           </label>
         </FilterRow>
         <FilterRow label="标签">
-          <div className="prototype-tag-filter-editor">
-            <input
-              aria-label="添加搜索标签"
-              onChange={event => setTagInput(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  addSearchTag();
-                }
-              }}
-              placeholder="输入标签后回车"
-              value={tagInput}
+          <div className="prototype-tag-filter-layout">
+            <TagFilterSection
+              input={whitelistTagInput}
+              listMode="whitelist"
+              mode={tagFilter.whitelistMode}
+              onAdd={() => addSearchTag('whitelist')}
+              onInput={setWhitelistTagInput}
+              onModeChange={mode =>
+                setTagFilter(current => ({...current, whitelistMode: mode}))
+              }
+              onRemove={tag =>
+                setTagFilter(current => ({
+                  ...current,
+                  whitelistTags: current.whitelistTags.filter(
+                    value => value !== tag,
+                  ),
+                }))
+              }
+              tags={tagFilter.whitelistTags}
             />
-            <button
-              className="prototype-filter-chip"
-              onClick={addSearchTag}
-              type="button">
-              添加
-            </button>
-          </div>
-          <div className="prototype-mode-switch" role="group" aria-label="标签匹配模式">
-            <button
-              className={tagFilter.mode === 'and' ? 'is-active' : ''}
-              onClick={() => setTagFilter(current => ({...current, mode: 'and'}))}
-              type="button">
-              And
-            </button>
-            <button
-              className={tagFilter.mode === 'or' ? 'is-active' : ''}
-              onClick={() => setTagFilter(current => ({...current, mode: 'or'}))}
-              type="button">
-              Or
-            </button>
-          </div>
-          <div className="prototype-mode-switch" role="group" aria-label="标签名单模式">
-            <button
-              className={tagFilter.listMode === 'whitelist' ? 'is-active' : ''}
-              onClick={() =>
-                setTagFilter(current => ({...current, listMode: 'whitelist'}))
+            <TagFilterSection
+              input={blacklistTagInput}
+              listMode="blacklist"
+              onAdd={() => addSearchTag('blacklist')}
+              onInput={setBlacklistTagInput}
+              onRemove={tag =>
+                setTagFilter(current => ({
+                  ...current,
+                  blacklistTags: current.blacklistTags.filter(
+                    value => value !== tag,
+                  ),
+                }))
               }
-              type="button">
-              白名单
-            </button>
-            <button
-              className={tagFilter.listMode === 'blacklist' ? 'is-active' : ''}
-              onClick={() =>
-                setTagFilter(current => ({...current, listMode: 'blacklist'}))
-              }
-              type="button">
-              黑名单
-            </button>
-          </div>
-          <div className="prototype-tag-filter-chips">
-            {tagFilter.tags.map(tag => (
-              <button
-                aria-label={`移除标签 ${tag}`}
-                className="prototype-filter-chip is-selected"
-                key={tag}
-                onClick={() =>
-                  setTagFilter(current => ({
-                    ...current,
-                    tags: current.tags.filter(value => value !== tag),
-                  }))
-                }
-                type="button">
-                {tag} ×
-              </button>
-            ))}
+              tags={tagFilter.blacklistTags}
+            />
           </div>
         </FilterRow>
       </section>
@@ -714,23 +678,87 @@ function SearchLoadingState(): JSX.Element {
   );
 }
 
-/** 根据白名单或黑名单标签过滤搜索结果。 */
-function filterSearchVideos(
-  videos: DesktopVideo[],
-  filter: SearchTagFilterState,
-): DesktopVideo[] {
-  const tags = filter.tags.map(tag => tag.trim().toLocaleLowerCase());
-  if (!tags.length) {
-    return videos;
-  }
-  return videos.filter(video => {
-    const videoTags = video.tags.map(tag => tag.trim().toLocaleLowerCase());
-    const matched =
-      filter.mode === 'and'
-        ? tags.every(tag => videoTags.includes(tag))
-        : tags.some(tag => videoTags.includes(tag));
-    return filter.listMode === 'blacklist' ? !matched : matched;
-  });
+/** 渲染一组标签输入、匹配模式和已添加标签。 */
+function TagFilterSection({
+  input,
+  listMode,
+  mode,
+  onAdd,
+  onInput,
+  onModeChange,
+  onRemove,
+  tags,
+}: {
+  input: string;
+  listMode: 'whitelist' | 'blacklist';
+  mode?: 'and' | 'or';
+  onAdd: () => void;
+  onInput: (value: string) => void;
+  onModeChange?: (mode: 'and' | 'or') => void;
+  onRemove: (tag: string) => void;
+  tags: string[];
+}): JSX.Element {
+  const isWhitelist = listMode === 'whitelist';
+  return (
+    <section
+      aria-label={isWhitelist ? '白名单标签' : '黑名单标签'}
+      className={`prototype-tag-filter-section ${
+        isWhitelist ? 'is-whitelist' : 'is-blacklist'
+      }`}>
+      <div className="prototype-tag-filter-section-head">
+        <strong>{isWhitelist ? '白名单标签' : '黑名单标签'}</strong>
+        <small>{isWhitelist ? '参与匹配' : '固定 And，全部命中才排除'}</small>
+      </div>
+      <div className="prototype-tag-filter-editor">
+        <input
+          aria-label={isWhitelist ? '添加白名单标签' : '添加黑名单标签'}
+          onChange={event => onInput(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              onAdd();
+            }
+          }}
+          placeholder="输入标签后回车"
+          value={input}
+        />
+        <button className="prototype-filter-chip" onClick={onAdd} type="button">
+          添加
+        </button>
+      </div>
+      {isWhitelist && mode && onModeChange ? (
+        <div
+          aria-label="白名单匹配模式"
+          className="prototype-mode-switch"
+          role="group">
+          <button
+            className={mode === 'and' ? 'is-active' : ''}
+            onClick={() => onModeChange('and')}
+            type="button">
+            And
+          </button>
+          <button
+            className={mode === 'or' ? 'is-active' : ''}
+            onClick={() => onModeChange('or')}
+            type="button">
+            Or
+          </button>
+        </div>
+      ) : null}
+      <div className="prototype-tag-filter-chips">
+        {tags.map(tag => (
+          <button
+            aria-label={`移除${isWhitelist ? '白名单' : '黑名单'}标签 ${tag}`}
+            className="prototype-filter-chip is-selected"
+            key={tag}
+            onClick={() => onRemove(tag)}
+            type="button">
+            {tag} ×
+          </button>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 /** 渲染与 B 站一致的三行筛选控制。 */
@@ -749,6 +777,101 @@ function FilterRow({
   );
 }
 
+export type PrototypeSelectOption = {
+  value: string;
+  label: string;
+};
+
+/** 绘制跨平台下拉菜单，避免使用系统原生弹出层破坏 NYAMI 视觉。 */
+export function PrototypeSelect({
+  ariaLabel,
+  className,
+  onChange,
+  options,
+  value,
+}: {
+  ariaLabel: string;
+  className?: string;
+  onChange: (value: string) => void;
+  options: PrototypeSelectOption[];
+  value: string;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find(option => option.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [open]);
+
+  const selectOption = (next: string): void => {
+    onChange(next);
+    setOpen(false);
+  };
+
+  return (
+    <div
+      className={`prototype-select-menu ${className ?? ''}`.trim()}
+      ref={rootRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={ariaLabel}
+        className="prototype-select-trigger"
+        onClick={() => setOpen(current => !current)}
+        onKeyDown={event => {
+          if (event.key === 'Escape') {
+            setOpen(false);
+            return;
+          }
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            const currentIndex = Math.max(
+              0,
+              options.findIndex(option => option.value === value),
+            );
+            const offset = event.key === 'ArrowDown' ? 1 : -1;
+            const nextIndex =
+              (currentIndex + offset + options.length) % options.length;
+            selectOption(options[nextIndex].value);
+          }
+        }}
+        type="button">
+        <span>{selected?.label ?? ''}</span>
+        <Icon name="chevron-down" size={13} />
+      </button>
+      {open ? (
+        <div className="prototype-select-options" role="listbox">
+          {options.map(option => (
+            <button
+              aria-selected={option.value === value}
+              className={
+                option.value === value
+                  ? 'prototype-select-option is-selected'
+                  : 'prototype-select-option'
+              }
+              key={option.value}
+              onClick={() => selectOption(option.value)}
+              role="option"
+              type="button">
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** 音乐库页读取真实收藏夹，并提供导入范围与全局随机播放。 */
 function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
   const [sources, setSources] = useState<FavoriteSourceSummary[]>([]);
@@ -758,6 +881,25 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const syncActive =
+    loading ||
+    refreshing ||
+    props.sync.state === 'running';
+
+  const persistVisibleSourceKeys = (next: string[]): void => {
+    setVisibleSourceKeys(next);
+    setFavoriteIndex(filterVisibleFavoriteIndex(allFavoriteIndex, next));
+    if (props.auth.uid) {
+      try {
+        window.localStorage.setItem(
+          `nyami-imported-sources-${props.auth.uid}`,
+          JSON.stringify(next),
+        );
+      } catch {
+        // 仅持久化失败时保留本次会话选择。
+      }
+    }
+  };
 
   useEffect(() => {
     if (!props.auth.loggedIn || !props.auth.uid) {
@@ -842,19 +984,12 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
     const next = visibleSourceKeys.includes(sourceKey)
       ? visibleSourceKeys.filter(value => value !== sourceKey)
       : [...visibleSourceKeys, sourceKey];
-    setVisibleSourceKeys(next);
-    setFavoriteIndex(filterVisibleFavoriteIndex(allFavoriteIndex, next));
-    if (props.auth.uid) {
-      try {
-        window.localStorage.setItem(
-          `nyami-imported-sources-${props.auth.uid}`,
-          JSON.stringify(next),
-        );
-      } catch {
-        // 仅持久化失败时保留本次会话选择。
-      }
-    }
+    persistVisibleSourceKeys(next);
   };
+
+  const allSourcesSelected =
+    sources.length > 0 &&
+    sources.every(source => visibleSourceKeys.includes(source.sourceKey));
 
   const refreshImportedSources = async (): Promise<void> => {
     if (!props.auth.uid || refreshing || !visibleSourceKeys.length) {
@@ -898,11 +1033,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
   const recentTracks = importedTracks
     .sort((left, right) => (right.favTime ?? 0) - (left.favTime ?? 0))
     .slice(0, 8);
-  const syncNote = loading
-    ? 'SYNCING / BILIBILI'
-    : sources.some(source =>
-        source.syncStatus === 'syncing' || source.syncStatus === 'running',
-      )
+  const syncNote = syncActive
     ? 'SYNCING / BILIBILI'
     : sources.some(source => source.syncStatus === 'success')
     ? 'SYNCED / LOCAL ARCHIVE'
@@ -911,7 +1042,14 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
     source => ({
       sourceKey: source.sourceKey,
       title: source.title,
-      subtitle: `${source.kind === 'owned' ? 'Bilibili 收藏夹' : '导入来源'} · ${getSyncStatusLabel(source.syncStatus)}`,
+      subtitle: `${source.kind === 'owned' ? 'Bilibili 收藏夹' : '导入来源'} · ${getSyncStatusLabel(
+        syncActive &&
+          (source.syncStatus === 'syncing' || source.syncStatus === 'running')
+          ? source.syncStatus
+          : source.syncStatus === 'syncing' || source.syncStatus === 'running'
+          ? 'idle'
+          : source.syncStatus,
+      )}`,
       count: source.mediaCount,
       cover: source.cover || coverSummerUrl,
     }),
@@ -981,7 +1119,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
               }}
               type="button">
               <div className="prototype-cover">
-                <img alt={`${folder.title}封面`} src={folder.cover} />
+                <SourceCover cover={folder.cover} title={folder.title} />
               </div>
               <div className="prototype-card-body">
                 <h3>{folder.title}</h3>
@@ -1013,12 +1151,27 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
                 <span className="prototype-meta">PLAYLIST SOURCES</span>
                 <h2>导入收藏夹</h2>
               </div>
-              <button
-                aria-label="关闭导入收藏夹"
-                onClick={() => setImportOpen(false)}
-                type="button">
-                <Icon name="x" size={16} />
-              </button>
+              <div className="prototype-modal-head-actions">
+                <button
+                  className="prototype-button prototype-button-quiet"
+                  disabled={!sources.length}
+                  onClick={() =>
+                    persistVisibleSourceKeys(
+                      allSourcesSelected
+                        ? []
+                        : sources.map(source => source.sourceKey),
+                    )
+                  }
+                  type="button">
+                  {allSourcesSelected ? '取消全选' : '全选'}
+                </button>
+                <button
+                  aria-label="关闭导入收藏夹"
+                  onClick={() => setImportOpen(false)}
+                  type="button">
+                  <Icon name="x" size={16} />
+                </button>
+              </div>
             </div>
             <div className="prototype-import-grid">
               {sources.map(source => (
@@ -1031,7 +1184,17 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
                   <span>
                     <strong>{source.title}</strong>
                     <small>
-                      {source.mediaCount.toLocaleString()} 首 · {getSyncStatusLabel(source.syncStatus)}
+                      {source.mediaCount.toLocaleString()} 首 ·{' '}
+                      {getSyncStatusLabel(
+                        syncActive &&
+                          (source.syncStatus === 'syncing' ||
+                            source.syncStatus === 'running')
+                          ? source.syncStatus
+                          : source.syncStatus === 'syncing' ||
+                            source.syncStatus === 'running'
+                          ? 'idle'
+                          : source.syncStatus,
+                      )}
                     </small>
                   </span>
                 </label>
@@ -1333,29 +1496,31 @@ function SoundLabPage(props: PrototypePageProps): JSX.Element {
                   </label>
                   <label>
                     <span>滤波器类型</span>
-                    <select
-                      aria-label={`PEQ ${index + 1} 滤波器类型`}
-                      onChange={event => {
+                    <PrototypeSelect
+                      ariaLabel={`PEQ ${index + 1} 滤波器类型`}
+                      className="audio-settings-select"
+                      onChange={value => {
                         const next = audio.peqBands.map((item, itemIndex) =>
                           itemIndex === index
                             ? {
                                 ...item,
-                                type: event.target
-                                  .value as DesktopPeqFilterType,
+                                type: value as DesktopPeqFilterType,
                               }
                             : item,
                         );
                         updateAudio({peqBands: next});
                       }}
-                      value={band.type}>
-                      <option value="Peak">峰值 · Peak</option>
-                      <option value="LowShelf">低频搁架</option>
-                      <option value="HighShelf">高频搁架</option>
-                      <option value="LowPass">低通</option>
-                      <option value="HighPass">高通</option>
-                      <option value="Notch">陷波</option>
-                      <option value="BandPass">带通</option>
-                    </select>
+                      options={[
+                        {value: 'Peak', label: '峰值 · Peak'},
+                        {value: 'LowShelf', label: '低频搁架'},
+                        {value: 'HighShelf', label: '高频搁架'},
+                        {value: 'LowPass', label: '低通'},
+                        {value: 'HighPass', label: '高通'},
+                        {value: 'Notch', label: '陷波'},
+                        {value: 'BandPass', label: '带通'},
+                      ]}
+                      value={band.type}
+                    />
                   </label>
                   <label>
                     <span>频率</span>
@@ -1508,6 +1673,7 @@ function SoundLabPage(props: PrototypePageProps): JSX.Element {
 export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
   const {onNext, onPause, onPlay, onPrevious, onRouteChange, playback} = props;
   const [queueOpen, setQueueOpen] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const [paletteIndex, setPaletteIndex] = useState(0);
   const [coverPalette, setCoverPalette] = useState<ImmersivePalette>(
     IMMERSIVE_PALETTES[0],
@@ -1555,6 +1721,9 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
   useEffect(() => {
     setQueueOpen(false);
     setPaletteIndex(0);
+    setIsReady(false);
+    const frame = window.requestAnimationFrame(() => setIsReady(true));
+    return () => window.cancelAnimationFrame(frame);
   }, [track.bvid]);
 
   useEffect(() => {
@@ -1665,7 +1834,9 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
 
   return (
     <div
-      className="prototype-immersive prototype-immersive-windowed"
+      className={`prototype-immersive prototype-immersive-windowed ${
+        isReady ? 'is-ready' : ''
+      }`}
       style={immersiveStyle}>
       <div className="prototype-immersive-backdrop" />
       <header className="prototype-immersive-heading">
@@ -1750,7 +1921,10 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
             )
           }
           type="button">
-          <Icon name="shuffle" size={16} />
+          <Icon
+            name={playback.mode === 'shuffle' ? 'shuffle' : 'repeat'}
+            size={16}
+          />
         </button>
         <button
           aria-label="打开播放列表"
@@ -1760,25 +1934,30 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
         </button>
         <label className="prototype-floating-sleep">
           <Icon name="moon" size={14} />
-          <select
-            aria-label="睡眠定时器"
-            onChange={event => {
-              const value = event.target.value;
+          <PrototypeSelect
+            ariaLabel="睡眠定时器"
+            className="prototype-floating-select"
+            onChange={value =>
               props.onSleepTimer(
                 value === 'active' ? null : value ? Number(value) : null,
-              );
-            }}
-            value={sleepValue}>
-            <option value="">睡眠</option>
-            <option value="900">15 分钟</option>
-            <option value="1800">30 分钟</option>
-            <option value="3600">60 分钟</option>
-            {sleepValue === 'active' ? (
-              <option value="active">
-                剩余 {props.playback.sleepTimerSeconds} 秒
-              </option>
-            ) : null}
-          </select>
+              )
+            }
+            options={[
+              {value: '', label: '睡眠'},
+              {value: '900', label: '15 分钟'},
+              {value: '1800', label: '30 分钟'},
+              {value: '3600', label: '60 分钟'},
+              ...(sleepValue === 'active'
+                ? [
+                    {
+                      value: 'active',
+                      label: `剩余 ${props.playback.sleepTimerSeconds} 秒`,
+                    },
+                  ]
+                : []),
+            ]}
+            value={sleepValue}
+          />
         </label>
       </div>
       {queueOpen ? (
@@ -1911,6 +2090,40 @@ function SectionHeading({
         {action}
       </div>
     </div>
+  );
+}
+
+/** 渲染收藏夹封面，并在远端图片失效时保留可辨识的本地占位。 */
+function SourceCover({
+  cover,
+  title,
+}: {
+  cover: string;
+  title: string;
+}): JSX.Element {
+  const [failed, setFailed] = useState(false);
+  const initials = title.trim().slice(0, 2) || 'NY';
+  const hue = Array.from(title).reduce(
+    (total, character) => total + character.charCodeAt(0),
+    0,
+  ) % 360;
+  return (
+    <>
+      {cover && !failed ? (
+        <img
+          alt={`${title}封面`}
+          onError={() => setFailed(true)}
+          src={cover}
+        />
+      ) : (
+        <span
+          aria-label={`${title}封面占位`}
+          className="prototype-source-cover-placeholder"
+          style={{'--source-cover-hue': hue} as CSSProperties}>
+          {initials}
+        </span>
+      )}
+    </>
   );
 }
 

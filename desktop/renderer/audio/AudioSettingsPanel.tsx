@@ -9,6 +9,7 @@ import {
   GRAPHIC_BAND_FREQUENCIES,
   getPresetGains,
 } from './eqPresets';
+import {PrototypeSelect} from '../PrototypePages';
 
 type AudioSettingsPanelProps = {
   settings: DesktopAudioSettings;
@@ -88,40 +89,44 @@ export function AudioSettingsPanel({
       <div className="audio-control-row">
         <label className="audio-select-control">
           <span>EQ 模式</span>
-          <select
-            aria-label="EQ 模式"
-            onChange={event =>
+          <PrototypeSelect
+            ariaLabel="EQ 模式"
+            className="audio-settings-select"
+            onChange={value =>
               updateAudio({
-                mode: event.target.value as DesktopAudioSettings['mode'],
+                mode: value as DesktopAudioSettings['mode'],
               })
             }
-            value={settings.mode}>
-            <option value="graphic">Graphic EQ</option>
-            <option value="parametric">PEQ</option>
-          </select>
+            options={[
+              {value: 'graphic', label: 'Graphic EQ'},
+              {value: 'parametric', label: 'PEQ'},
+            ]}
+            value={settings.mode}
+          />
         </label>
         <label className="audio-select-control">
           <span>Graphic 预设</span>
-          <select
-            aria-label="Graphic EQ 预设"
-            onChange={event => {
-              const preset = event.target
-                .value as DesktopAudioSettings['graphicPreset'];
+          <PrototypeSelect
+            ariaLabel="Graphic EQ 预设"
+            className="audio-settings-select"
+            onChange={value => {
+              const preset = value as DesktopAudioSettings['graphicPreset'];
               updateAudio({
                 graphicPreset: preset,
                 graphicGains: getPresetGains(preset),
               });
             }}
-            value={settings.graphicPreset}>
-            {DESKTOP_GRAPHIC_PRESETS.map(preset => (
-              <option key={preset.id} value={preset.id}>
-                {preset.label}
-              </option>
-            ))}
-            {settings.graphicPreset === 'custom' ? (
-              <option value="custom">自定义</option>
-            ) : null}
-          </select>
+            options={[
+              ...DESKTOP_GRAPHIC_PRESETS.map(preset => ({
+                value: preset.id,
+                label: preset.label,
+              })),
+              ...(settings.graphicPreset === 'custom'
+                ? [{value: 'custom', label: '自定义'}]
+                : []),
+            ]}
+            value={settings.graphicPreset}
+          />
         </label>
       </div>
       {settings.mode === 'graphic' ? (
@@ -161,20 +166,17 @@ export function AudioSettingsPanel({
               </label>
               <label>
                 <span>滤波器类型</span>
-                <select
-                  aria-label={`PEQ ${index + 1} 滤波器类型`}
-                  onChange={event =>
+                <PrototypeSelect
+                  ariaLabel={`PEQ ${index + 1} 滤波器类型`}
+                  className="audio-settings-select"
+                  onChange={value =>
                     updatePeqBand(index, {
-                      type: event.target.value as DesktopPeqFilterType,
+                      type: value as DesktopPeqFilterType,
                     })
                   }
-                  value={band.type}>
-                  {PEQ_FILTER_OPTIONS.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  options={PEQ_FILTER_OPTIONS.slice()}
+                  value={band.type}
+                />
               </label>
               <label>
                 <span>频率</span>

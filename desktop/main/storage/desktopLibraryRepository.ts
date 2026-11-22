@@ -42,6 +42,7 @@ type PlaylistRow = {
   owner_mid: number;
   owner_name: string;
   cover: string;
+  resolved_cover?: string | null;
   description: string;
   remote_revision: string | null;
   updated_at: number;
@@ -408,7 +409,21 @@ export class DesktopLibraryRepository implements FavoriteRepository {
       ? ` AND playlist_id IN (${normalizedKeys.map(() => '?').join(', ')})`
       : '';
     const rows = this.database.all<PlaylistRow>(
-      `SELECT * FROM playlist_meta
+      `SELECT playlist_meta.*,
+              COALESCE(
+                NULLIF(playlist_meta.cover, ''),
+                (
+                  SELECT video_meta.cover
+                  FROM video_meta
+                  WHERE video_meta.uid = playlist_meta.uid
+                    AND video_meta.playlist_id = playlist_meta.playlist_id
+                    AND video_meta.is_deleted = 0
+                    AND video_meta.cover <> ''
+                  ORDER BY video_meta.fav_time DESC, video_meta.updated_at DESC
+                  LIMIT 1
+                )
+              ) AS resolved_cover
+       FROM playlist_meta
        WHERE uid = ?${filter}
        ORDER BY updated_at DESC, title COLLATE NOCASE ASC`,
       [normalizedUid, ...normalizedKeys],
@@ -420,7 +435,7 @@ export class DesktopLibraryRepository implements FavoriteRepository {
       ownerMid: row.owner_mid,
       ownerName: row.owner_name,
       title: row.title,
-      cover: row.cover,
+      cover: row.resolved_cover ?? row.cover,
       mediaCount: row.remote_video_count,
       description: row.description,
       syncStatus: normalizeSyncStatus(row.sync_status),

@@ -25,6 +25,7 @@ export type IconName =
   | 'play'
   | 'plus'
   | 'refresh'
+  | 'repeat'
   | 'shuffle'
   | 'restore'
   | 'search'
@@ -138,6 +139,14 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M3 4v6h6" />
       <path d="M4 13a8 8 0 0 0 14.8 4L21 14" />
       <path d="M21 20v-6h-6" />
+    </>
+  ),
+  repeat: (
+    <>
+      <path d="M17 4 20 7l-3 3" />
+      <path d="M4 7h12a4 4 0 0 1 4 4v1" />
+      <path d="m7 20-3-3 3-3" />
+      <path d="M20 17H8a4 4 0 0 1-4-4v-1" />
     </>
   ),
   shuffle: (
