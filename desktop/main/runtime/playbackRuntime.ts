@@ -673,7 +673,7 @@ export class PlaybackRuntime {
     this.snapshot.diagnostic = null;
     this.emitState();
     const cacheRequest = this.toCacheRequest(track);
-    const bypassCache = this.bypassCacheOnce;
+    const bypassCache = this.bypassCacheOnce && net.isOnline();
     this.bypassCacheOnce = false;
     const cached = bypassCache
       ? null
@@ -1073,6 +1073,8 @@ export class PlaybackRuntime {
         86400,
       );
       this.snapshot.volume = clampNumber(parsed.volume, 0, 1);
+      // 重启后缓存文件只验证了存在性，首次播放在线时先重新解析地址，避免坏缓存先触发媒体错误。
+      this.bypassCacheOnce = true;
     } catch {
       // 首次启动没有播放恢复文件，直接从空队列开始。
     }

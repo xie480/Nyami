@@ -196,4 +196,48 @@ describe('PlaybackRuntime 大队列窗口', () => {
       await fs.rm(`${statePath}.tmp`, {force: true});
     }
   });
+
+  it('重启后的首次播放绕过未验证缓存并直接解析远程地址', async () => {
+    const statePath = path.join(
+      os.tmpdir(),
+      `nyami-playback-${randomUUID()}.json`,
+    );
+    const cacheGet = jest.fn().mockResolvedValue({key: 'stale-cache'});
+    const queueItem = createQueueItem('BV1');
+
+    await fs.writeFile(
+      statePath,
+      JSON.stringify({
+        queue: [queueItem],
+        currentTrackId: queueItem.id,
+        mode: 'sequential',
+        context: null,
+        position: 18,
+        duration: 60,
+        volume: 1,
+      }),
+      'utf8',
+    );
+
+    const runtime = createRuntime(statePath, {
+      get: cacheGet,
+    });
+    const sources: string[] = [];
+    runtime.subscribe(event => {
+      if (event.type === 'source') {
+        sources.push(event.source.url);
+      }
+    });
+
+    try {
+      const snapshot = await runtime.play();
+
+      expect(cacheGet).not.toHaveBeenCalled();
+      expect(snapshot.cached).toBe(false);
+      expect(sources).toEqual(['https://audio.example.test/BV1.m4s']);
+    } finally {
+      await fs.rm(statePath, {force: true});
+      await fs.rm(`${statePath}.tmp`, {force: true});
+    }
+  });
 });
