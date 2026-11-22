@@ -324,8 +324,7 @@
 
 .prototype-app .player-step-button,
 .prototype-app .player-tool-button,
-.prototype-app .player-volume-control,
-.prototype-app .sleep-timer-control {
+.prototype-app .player-volume-control {
   border-color: var(--prototype-line);
   border-radius: 0;
   background: transparent;
@@ -334,8 +333,7 @@
 
 .prototype-app .player-step-button:hover,
 .prototype-app .player-tool-button:hover,
-.prototype-app .player-volume-control:focus-within,
-.prototype-app .sleep-timer-control:focus-within {
+.prototype-app .player-volume-control:focus-within {
   border-color: var(--prototype-accent);
   background: var(--prototype-accent-soft);
   color: var(--prototype-accent);
@@ -2083,6 +2081,43 @@
   box-shadow: 0 18px 44px rgba(72, 56, 39, 0.16);
   padding: 14px;
   animation: nyami-queue-in 180ms ease-out both;
+  scrollbar-color: var(--prototype-accent) transparent;
+  scrollbar-width: thin;
+}
+
+.prototype-app .queue-panel::-webkit-scrollbar {
+  width: 9px;
+}
+
+.prototype-app .queue-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.prototype-app .queue-panel::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--prototype-accent);
+  background-clip: padding-box;
+}
+
+.prototype-app .queue-item:hover {
+  background: var(--prototype-paper-2);
+}
+
+.prototype-app .queue-item.active {
+  border-color: rgba(200, 76, 49, 0.42);
+  background: linear-gradient(
+    90deg,
+    var(--prototype-accent-soft),
+    rgba(200, 76, 49, 0.04)
+  );
+  box-shadow: inset 3px 0 0 var(--prototype-accent),
+    0 0 0 1px rgba(200, 76, 49, 0.08);
+}
+
+.prototype-app .queue-item.active .queue-item-play strong {
+  color: var(--prototype-accent);
+  font-weight: 700;
 }
 
 @keyframes nyami-queue-in {
@@ -2338,24 +2373,9 @@
   white-space: nowrap;
 }
 
-.prototype-floating-track input {
+.prototype-floating-progress {
   width: 100%;
   accent-color: #f4b69e;
-}
-
-.prototype-floating-sleep {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: rgba(255, 250, 244, 0.72);
-}
-
-.prototype-floating-sleep select {
-  max-width: 76px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 10px;
 }
 
 .prototype-immersive-spectrum {
@@ -2475,9 +2495,6 @@
     width: calc(100vw - 24px);
   }
 
-  .prototype-floating-sleep {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2933,8 +2950,7 @@
 }
 
 .prototype-app .prototype-floating-player > button:focus-visible,
-.prototype-app .prototype-floating-sleep select:focus-visible,
-.prototype-app .prototype-floating-track input:focus-visible {
+.prototype-app .prototype-floating-progress:focus-visible {
   outline: 2px solid #fffaf4;
   outline-offset: 3px;
   box-shadow: 0 0 0 4px rgba(200, 76, 49, 0.45);
@@ -3351,8 +3367,7 @@
 }
 
 .prototype-immersive .prototype-floating-player > button,
-.prototype-immersive .prototype-floating-track strong,
-.prototype-immersive .prototype-floating-sleep {
+.prototype-immersive .prototype-floating-track strong {
   color: var(--immersive-text, #fffaf4);
 }
 
@@ -3553,33 +3568,6 @@
   outline: 0;
 }
 
-.prototype-app .prototype-floating-select {
-  width: 28px;
-  min-width: 28px;
-}
-
-.prototype-app .prototype-floating-select .prototype-select-trigger {
-  display: grid;
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  place-items: center;
-  min-height: 24px;
-  border-color: transparent;
-  background: transparent;
-  color: inherit;
-  padding: 2px 0;
-}
-
-.prototype-app .prototype-floating-select .prototype-select-trigger:hover,
-.prototype-app .prototype-floating-select .prototype-select-trigger:focus-visible {
-  border-color: transparent;
-  background: transparent;
-  color: inherit;
-  outline: 0;
-  box-shadow: none;
-}
-
 .prototype-app .settings-quality-select .prototype-select-options {
   top: calc(100% + 7px);
   bottom: auto;
@@ -3595,13 +3583,6 @@
 
 .prototype-app .prototype-floating-player > button:focus-visible {
   box-shadow: 0 0 0 4px rgba(200, 76, 49, 0.34);
-}
-
-.prototype-app .prototype-floating-sleep,
-.prototype-app .prototype-floating-sleep:focus-within {
-  background: transparent;
-  outline: 0;
-  box-shadow: none;
 }
 
 @media (max-width: 920px) {

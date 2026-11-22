@@ -2142,7 +2142,6 @@ kbd {
 }
 
 .player-volume-control,
-.sleep-timer-control,
 .player-tool-button {
   display: inline-flex;
   min-height: 34px;
@@ -2153,8 +2152,7 @@ kbd {
   color: var(--muted-strong);
 }
 
-.player-volume-control,
-.sleep-timer-control {
+.player-volume-control {
   gap: 7px;
   padding: 0 9px;
 }
@@ -2178,20 +2176,9 @@ kbd {
 }
 
 .player-tool-button:hover,
-.sleep-timer-control:focus-within,
 .player-volume-control:focus-within {
   border-color: var(--accent);
   color: var(--accent);
-}
-
-.sleep-timer-select {
-  border: 0;
-  outline: 0;
-  background: transparent;
-  padding: 0;
-  color: inherit;
-  font: inherit;
-  font-size: 10px;
 }
 
 .player-diagnostic {
@@ -2506,16 +2493,6 @@ kbd {
 
   .player-volume-control input {
     width: 52px;
-  }
-
-  .sleep-timer-control {
-    gap: 4px;
-    padding-right: 6px;
-    padding-left: 6px;
-  }
-
-  .sleep-timer-select {
-    max-width: 58px;
   }
 
   .player-progress-row {

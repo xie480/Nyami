@@ -1,5 +1,10 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import type {ChangeEvent, CSSProperties, FormEvent} from 'react';
+import type {
+  ChangeEvent,
+  CSSProperties,
+  FormEvent,
+  RefObject,
+} from 'react';
 import {Icon} from './icons';
 import type {
   AuthStatus,
@@ -33,6 +38,7 @@ import coverNightUrl from './assets/cover-night.png';
 import coverPinkUrl from './assets/cover-pink.png';
 import coverPortraitUrl from './assets/cover-portrait.png';
 import coverSummerUrl from './assets/cover-summer.png';
+import {SmoothProgressInput} from './SmoothProgressInput';
 import {
   DEFAULT_SEARCH_TAG_FILTER,
   filterSearchVideosByTags,
@@ -55,6 +61,7 @@ const DEFAULT_SEARCH_KEYWORD = '音乐';
 const SOURCE_COVER_HYDRATION_LIMIT = 16;
 
 type PrototypePageProps = {
+  audioElementRef: RefObject<HTMLAudioElement | null>;
   route: PrototypeRoute;
   auth: AuthStatus;
   profile: UserProfile | null;
@@ -66,7 +73,6 @@ type PrototypePageProps = {
   onRouteChange: (route: PrototypeRoute) => void;
   onSelectFolder: (folderId: number) => void;
   onSelectSource: (sourceKey: string) => void;
-  onSleepTimer: (seconds: number | null) => void;
   onPlayVideo: (video: DesktopVideo) => void;
   onPlayVideos: (
     videos: DesktopVideo[],
@@ -1884,8 +1890,6 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [exitImmersive, onNext, onPause, onPlay, onPrevious, playback.state]);
 
-  const sleepValue = props.playback.sleepTimerSeconds ? 'active' : '';
-
   return (
     <div
       className="prototype-immersive prototype-immersive-windowed"
@@ -1946,22 +1950,12 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
         </button>
         <div className="prototype-floating-track">
           <strong title={track.title}>{track.title}</strong>
-          <input
-            aria-label="浮动播放器进度"
-            max={track.duration}
-            min="0"
-            onChange={event => props.onSeek(Number(event.target.value))}
-            style={
-              {
-                '--range-progress': `${Math.round(
-                  (Math.min(props.playback.position, track.duration) /
-                    Math.max(track.duration, 1)) *
-                    100,
-                )}%`,
-              } as CSSProperties
-            }
-            type="range"
-            value={Math.min(track.duration, props.playback.position)}
+          <SmoothProgressInput
+            ariaLabel="浮动播放器进度"
+            audioElementRef={props.audioElementRef}
+            className="prototype-floating-progress"
+            onSeek={props.onSeek}
+            playback={props.playback}
           />
         </div>
         <button
@@ -1984,34 +1978,6 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
           type="button">
           <Icon name="list" size={16} />
         </button>
-        <label className="prototype-floating-sleep">
-          <Icon name="moon" size={14} />
-          <PrototypeSelect
-            ariaLabel="睡眠定时器"
-            className="prototype-floating-select"
-            iconOnly
-            onChange={value =>
-              props.onSleepTimer(
-                value === 'active' ? null : value ? Number(value) : null,
-              )
-            }
-            options={[
-              {value: '', label: '睡眠'},
-              {value: '900', label: '15 分钟'},
-              {value: '1800', label: '30 分钟'},
-              {value: '3600', label: '60 分钟'},
-              ...(sleepValue === 'active'
-                ? [
-                    {
-                      value: 'active',
-                      label: `剩余 ${props.playback.sleepTimerSeconds} 秒`,
-                    },
-                  ]
-                : []),
-            ]}
-            value={sleepValue}
-          />
-        </label>
       </div>
       {queueOpen ? (
         <PrototypeQueueDrawer

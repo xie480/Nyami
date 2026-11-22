@@ -4,6 +4,7 @@ import type {
   CSSProperties,
   FormEvent,
   KeyboardEvent,
+  RefObject,
   ReactNode,
 } from 'react';
 import {Icon, type IconName} from './icons';
@@ -46,6 +47,7 @@ import {
   saveDesktopUserPreferences,
   type DesktopUserPreferences,
 } from './preferences';
+import {SmoothProgressInput} from './SmoothProgressInput';
 
 type Route = PrototypeRoute;
 type NoticeTone = 'info' | 'success' | 'error';
@@ -577,19 +579,6 @@ export function App(): JSX.Element {
     [pushNotice],
   );
 
-  /** 设置或取消睡眠定时器。 */
-  const setPlaybackSleepTimer = useCallback(
-    (seconds: number | null): void => {
-      void window.nyamiDesktop.playback
-        .setSleepTimer({seconds})
-        .then(setPlayback)
-        .catch(error => {
-          pushNotice('error', getErrorMessage(error, '设置睡眠定时器失败'));
-        });
-    },
-    [pushNotice],
-  );
-
   /** 从播放队列移除一个项目。 */
   const removePlaybackItem = useCallback(
     (trackId: string): void => {
@@ -953,6 +942,7 @@ export function App(): JSX.Element {
   const isImmersiveRoute = route === 'immersive-windowed';
   const prototypePageProps = {
     auth,
+    audioElementRef,
     onAddVideo: addVideoToQueue,
     onNext: () => {
       void window.nyamiDesktop.playback.skipNext().then(setPlayback);
@@ -982,7 +972,6 @@ export function App(): JSX.Element {
       setSelectedSourceKey(sourceKey);
     },
     onSeek: seekPlayback,
-    onSleepTimer: setPlaybackSleepTimer,
     onSelectTrack: playQueueTrack,
     onUpdateSettings: updateSettings,
     onVolume: setPlaybackVolume,
@@ -1151,6 +1140,7 @@ export function App(): JSX.Element {
               </main>
 
               <PlayerPlaceholder
+                audioElementRef={audioElementRef}
                 playback={playback}
                 onModeChange={setPlaybackMode}
                 onNext={() =>
@@ -3126,6 +3116,7 @@ function Pagination({
 
 /** 渲染底部播放器、进度控制和可拖拽播放队列。 */
 function PlayerPlaceholder({
+  audioElementRef,
   playback,
   onModeChange,
   onNext,
@@ -3140,6 +3131,7 @@ function PlayerPlaceholder({
   onOpenPlayback,
   onVolume,
 }: {
+  audioElementRef: RefObject<HTMLAudioElement | null>;
   playback: PlaybackSnapshot;
   onModeChange: (mode: PlaybackQueueMode) => void;
   onNext: () => void;
@@ -3157,7 +3149,6 @@ function PlayerPlaceholder({
   const isPlaying = playback.state === 'playing';
   const [queueOpen, setQueueOpen] = useState(false);
   const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null);
-  const duration = playback.duration > 0 ? playback.duration : 1;
 
   /** 将拖拽中的队列项目移动到目标位置。 */
   const handleDrop = (targetId: string): void => {
@@ -3273,23 +3264,12 @@ function PlayerPlaceholder({
       </div>
       <div className="player-progress-row">
         <span className="player-time">{formatDuration(playback.position)}</span>
-        <input
-          aria-label="播放进度"
+        <SmoothProgressInput
+          ariaLabel="播放进度"
+          audioElementRef={audioElementRef}
           className="player-progress-input"
-          disabled={!playback.trackId}
-          max={duration}
-          min="0"
-          onChange={event => onSeek(Number(event.target.value))}
-          step="0.1"
-          style={
-            {
-              '--range-progress': `${Math.round(
-                (Math.min(playback.position, duration) / duration) * 100,
-              )}%`,
-            } as CSSProperties
-          }
-          type="range"
-          value={Math.min(playback.position, duration)}
+          onSeek={onSeek}
+          playback={playback}
         />
         <span className="player-time">{formatDuration(playback.duration)}</span>
       </div>
