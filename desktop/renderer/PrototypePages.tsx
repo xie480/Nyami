@@ -38,6 +38,11 @@ import coverNightUrl from './assets/cover-night.png';
 import coverPinkUrl from './assets/cover-pink.png';
 import coverPortraitUrl from './assets/cover-portrait.png';
 import coverSummerUrl from './assets/cover-summer.png';
+import {
+  DEFAULT_COVER_PALETTE,
+  extractCoverPalette,
+  type CoverPalette,
+} from './coverPalette';
 import {SmoothProgressInput} from './SmoothProgressInput';
 import {
   DEFAULT_SEARCH_TAG_FILTER,
@@ -1894,7 +1899,7 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
     <div
       className="prototype-immersive prototype-immersive-windowed"
       style={immersiveStyle}>
-      <div className="prototype-immersive-backdrop" />
+      <CoverPaletteBackdrop cover={track.cover} />
       <header className="prototype-immersive-heading">
         <div>
           <span className="prototype-meta">NYAMI / WINDOWED IMMERSIVE</span>
@@ -1989,6 +1994,80 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
         />
       ) : null}
     </div>
+  );
+}
+
+type CoverPaletteTransitionState = {
+  current: CoverPalette;
+  previous: CoverPalette;
+  revision: number;
+};
+
+/** 渲染封面三色渐变，并用两层透明度过渡承接歌曲切换。 */
+function CoverPaletteBackdrop({cover}: {cover: string}): JSX.Element {
+  const [transition, setTransition] = useState<CoverPaletteTransitionState>({
+    current: DEFAULT_COVER_PALETTE,
+    previous: DEFAULT_COVER_PALETTE,
+    revision: 0,
+  });
+
+  useEffect(() => {
+    let disposed = false;
+    void extractCoverPalette(cover).then(nextPalette => {
+      if (disposed) {
+        return;
+      }
+      setTransition(current => {
+        if (isSamePalette(current.current, nextPalette)) {
+          return current;
+        }
+        return {
+          current: nextPalette,
+          previous: current.current,
+          revision: current.revision + 1,
+        };
+      });
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [cover]);
+
+  return (
+    <div className="prototype-immersive-backdrop" aria-hidden="true">
+      <span
+        className="prototype-immersive-backdrop-layer is-previous"
+        key={`previous-${transition.revision}`}
+        style={toPaletteStyle(transition.previous)}
+      />
+      <span
+        className="prototype-immersive-backdrop-layer is-current"
+        key={`current-${transition.revision}`}
+        style={toPaletteStyle(transition.current)}
+      />
+      <span className="prototype-immersive-backdrop-glass" />
+    </div>
+  );
+}
+
+/** 将取色结果映射为 CSS 自定义属性，保持渐变层与页面布局解耦。 */
+function toPaletteStyle(palette: CoverPalette): CSSProperties {
+  return {
+    '--cover-primary': palette.primary,
+    '--cover-secondary': palette.secondary,
+    '--cover-tertiary': palette.tertiary,
+  } as CSSProperties;
+}
+
+/** 判断新旧取色是否相同，避免重复创建过渡层。 */
+function isSamePalette(
+  left: CoverPalette,
+  right: CoverPalette,
+): boolean {
+  return (
+    left.primary === right.primary &&
+    left.secondary === right.secondary &&
+    left.tertiary === right.tertiary
   );
 }
 

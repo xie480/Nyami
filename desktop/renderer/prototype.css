@@ -983,7 +983,7 @@
 }
 
 .prototype-immersive-windowed {
-  background: linear-gradient(120deg, #e5ddd4, #efe9e1 52%, #e0d6ce);
+  background: #e7dfd8;
   color: var(--prototype-ink);
 }
 
@@ -2133,7 +2133,8 @@
 
 .prototype-immersive {
   overflow: hidden;
-  background: #3c1d31;
+  isolation: isolate;
+  background: #e7dfd8;
   background-position: center;
   background-size: cover;
   color: #fffaf4;
@@ -2142,14 +2143,83 @@
 .prototype-immersive-backdrop {
   position: absolute;
   inset: 0;
-  background: radial-gradient(
-      circle at 50% 25%,
-      rgba(255, 255, 255, 0.22),
-      transparent 32%
-    ),
-    linear-gradient(120deg, transparent 30%, rgba(0, 0, 0, 0.24));
-  backdrop-filter: blur(34px) saturate(1.2);
+  z-index: 0;
+  overflow: hidden;
+  isolation: isolate;
   pointer-events: none;
+}
+
+.prototype-immersive-backdrop-layer {
+  position: absolute;
+  inset: -9%;
+  background: radial-gradient(
+      ellipse at 13% 17%,
+      color-mix(in srgb, var(--cover-primary) 66%, transparent),
+      transparent 57%
+    ),
+    radial-gradient(
+      ellipse at 85% 15%,
+      color-mix(in srgb, var(--cover-secondary) 60%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse at 55% 91%,
+      color-mix(in srgb, var(--cover-tertiary) 62%, transparent),
+      transparent 66%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--cover-primary) 68%, #fbf7f2 32%),
+      color-mix(in srgb, var(--cover-secondary) 62%, #fbf7f2 38%) 48%,
+      color-mix(in srgb, var(--cover-tertiary) 60%, #fbf7f2 40%)
+    );
+  filter: blur(32px) saturate(1.04);
+  transform: scale(1.08);
+  will-change: opacity;
+}
+
+.prototype-immersive-backdrop-layer.is-previous {
+  z-index: 1;
+  animation: nyami-cover-backdrop-out 980ms cubic-bezier(0.22, 0.61, 0.36, 1)
+    both;
+}
+
+.prototype-immersive-backdrop-layer.is-current {
+  z-index: 2;
+  animation: nyami-cover-backdrop-in 980ms cubic-bezier(0.22, 0.61, 0.36, 1)
+    both;
+}
+
+.prototype-immersive-backdrop-glass {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.2),
+    rgba(255, 255, 255, 0.06) 47%,
+    rgba(255, 255, 255, 0.14)
+  );
+  backdrop-filter: blur(9px) saturate(0.98);
+  -webkit-backdrop-filter: blur(9px) saturate(0.98);
+}
+
+@keyframes nyami-cover-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes nyami-cover-backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
 
 .prototype-immersive-heading {
