@@ -78,6 +78,8 @@ describe('ElectronAudioPlayerAdapter', () => {
       revision: 2,
     });
 
+    expect(audio.crossOrigin).toBe('anonymous');
+
     // 某些浏览器在新资源元数据到达前会暂时保留旧 currentTime。
     audio.currentTime = 42;
     emit('loadedmetadata');

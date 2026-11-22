@@ -42,7 +42,7 @@ export function registerLocalAudioScheme(): void {
  * 不接收参数，不返回值。
  */
 export function registerLocalAudioHandler(): void {
-  protocol.handle(LOCAL_AUDIO_SCHEME, request => {
+  protocol.handle(LOCAL_AUDIO_SCHEME, async request => {
     const url = new URL(request.url);
     if (url.hostname !== 'sample' || url.pathname !== '/silence_10s.wav') {
       return new Response('Not Found', {status: 404});
@@ -51,7 +51,18 @@ export function registerLocalAudioHandler(): void {
     const source = app.isPackaged
       ? path.join(process.resourcesPath, 'resource', 'silence_10s.wav')
       : path.join(app.getAppPath(), 'resource', 'silence_10s.wav');
-    return net.fetch(pathToFileURL(source).toString());
+    const response = await net.fetch(pathToFileURL(source).toString());
+    const headers = new Headers(response.headers);
+    headers.set('Access-Control-Allow-Origin', '*');
+    headers.set(
+      'Access-Control-Expose-Headers',
+      'Accept-Ranges, Content-Length, Content-Range, Content-Type',
+    );
+    return new Response(response.body, {
+      headers,
+      status: response.status,
+      statusText: response.statusText,
+    });
   });
 }
 
@@ -86,6 +97,9 @@ export function registerAudioCacheHandler(cacheStore: AudioCacheStore): void {
       const end = range?.end ?? Math.max(0, stat.size - 1);
       const headers = new Headers({
         'Accept-Ranges': 'bytes',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers':
+          'Accept-Ranges, Content-Length, Content-Range, Content-Type',
         'Cache-Control': 'no-store',
         'Content-Length': String(Math.max(0, end - start + 1)),
         'Content-Type': entry.mimeType,

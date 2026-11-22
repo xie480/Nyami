@@ -94,6 +94,7 @@ export class ElectronAudioPlayerAdapter
     }
     this.activeTrackId = track.id;
     this.effects.resetLoudness();
+    this.prepareAudioSource(track.url);
     this.audio.volume = 0;
     this.audio.src = track.url;
     this.audio.load();
@@ -107,6 +108,7 @@ export class ElectronAudioPlayerAdapter
     this.activeRevision = source.revision;
     this.activeTrackId = source.trackId;
     this.effects.resetLoudness();
+    this.prepareAudioSource(source.url);
     // 新资源的元数据到达前，部分浏览器会暂时沿用旧时间线；先挂起零点跳转，避免切歌继承旧进度。
     this.pendingSeekPosition = 0;
     this.cancelFade();
@@ -340,6 +342,16 @@ export class ElectronAudioPlayerAdapter
     };
     this.report(event);
     this.listeners.forEach(listener => listener(event));
+  }
+
+  /** 在加载远程音频前启用匿名 CORS，保证 MediaElementAudioSourceNode 不输出静音。 */
+  private prepareAudioSource(url: string): void {
+    const usesControlledAudioScheme =
+      url.startsWith('nyami-cache://') || url.startsWith('nyami-local://');
+    this.audio.crossOrigin =
+      url.startsWith('https://') || usesControlledAudioScheme
+        ? 'anonymous'
+        : '';
   }
 
   /** 在媒体元数据可用后应用重启恢复或提前到达的跳转位置。 */

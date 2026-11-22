@@ -8,6 +8,7 @@ import {
   isAllowedBiliAudioUrl,
   isAllowedBiliImageUrl,
 } from '../security/urlPolicy';
+import {withAudioCorsHeaders} from './audioCors';
 
 const BILIBILI_MEDIA_REQUEST_FILTER = {
   urls: [
@@ -64,6 +65,10 @@ export function registerAudioInterception(
           details.statusCode,
           details.responseHeaders,
         );
+        callback({
+          responseHeaders: withAudioCorsHeaders(details.responseHeaders),
+        });
+        return;
       }
       callback({responseHeaders: details.responseHeaders});
     },
