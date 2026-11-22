@@ -18,6 +18,33 @@
 
 </div>
 
+## 📥 平台版本与下载
+
+| 平台 | Release 入口 | 说明 |
+| --- | --- | --- |
+| Windows 桌面端 | [NYAMI PC v1.0.0](https://github.com/xie480/Nyami/releases/tag/desktop-v1.0.0) | Windows x64 NSIS 安装包，双击即可安装 |
+| Android | [Nyami Android v2.0.3](https://github.com/xie480/Nyami/releases/tag/v2.0.3) | 当前 Android 发布版本 |
+
+> Android 端的 UI 重构工程仍在进行中，移动端界面和交互会继续迭代。
+
+## 🖥️ Windows 桌面端预览
+
+Windows 桌面端已提供独立 Release，包含音乐库、收藏夹详情、搜索、沉浸式播放和桌面设置界面。
+
+<table align="center">
+  <tr>
+    <td align="center"><strong>音乐库</strong><br/><img src="./resource/windows/library.png" width="440" alt="Windows 音乐库界面"/></td>
+    <td align="center"><strong>收藏夹详情</strong><br/><img src="./resource/windows/folder-detail.png" width="440" alt="Windows 收藏夹详情界面"/></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>搜索</strong><br/><img src="./resource/windows/search.png" width="440" alt="Windows 搜索界面"/></td>
+    <td align="center"><strong>桌面设置</strong><br/><img src="./resource/windows/settings.png" width="440" alt="Windows 桌面设置界面"/></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><strong>沉浸式播放</strong><br/><img src="./resource/windows/now-playing.png" width="880" alt="Windows 沉浸式播放界面"/></td>
+  </tr>
+</table>
+
 ## 📱 v2.0.0 界面预览
 
 <table align="center">
@@ -59,7 +86,7 @@ Nyami 的目标不是简单“听视频”，而是打造 **真正可替代主�
 
 ## 📦 当前版本
 
-当前版本：**Nyami v2.0.3**（2026-10-19）。本次版本恢复收藏夹关键词 / 作者搜索，修复完整搜索结果的播放队列，并统一主题、内容浏览、播放、设置与音效界面的交互体验。
+当前 Android 版本：**Nyami v2.0.3**（2026-10-19）。本次版本恢复收藏夹关键词 / 作者搜索，修复完整搜索结果的播放队列，并统一主题、内容浏览、播放、设置与音效界面的交互体验。
 
 [查看 v2.0.3 完整更新日志](release/RELEASE_NOTES_v2.0.3.md)
 
