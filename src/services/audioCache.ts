@@ -13,6 +13,8 @@ const MAX_BYTES = 500 * 1024 * 1024; // 500 MB
 interface CacheItem {
   bvid: string;
   quality: Quality;
+  sourceId?: number;
+  mimeType?: string;
   path: string;
   size: number;
   lastAccess: number;
@@ -54,7 +56,9 @@ class AudioCache {
     bvid: string,
     quality: Quality,
     streamUrl: string,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    sourceId?: number,
+    mimeType?: string,
   ): Promise<string> {
     await this.ready;
     const cacheKey = this.key(bvid, quality);
@@ -94,6 +98,8 @@ class AudioCache {
         meta[cacheKey] = {
           bvid,
           quality,
+          sourceId,
+          mimeType,
           path: filePath,
           size: Number(stat.size),
           lastAccess: Date.now(),

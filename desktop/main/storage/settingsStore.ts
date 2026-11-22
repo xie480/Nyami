@@ -8,13 +8,14 @@ import type {
   DesktopPeqFilterType,
   DesktopSettings,
   DesktopSettingsPatch,
+  DesktopPlaybackQuality,
   DesktopTheme,
   WindowSettings,
 } from '../../shared/types';
 import type {AppDirectories} from './appDirectories';
 
 const SETTINGS_FILE_NAME = 'desktop.json';
-const SETTINGS_VERSION = 3 as const;
+const SETTINGS_VERSION = 4 as const;
 const MIN_WINDOW_WIDTH = 960;
 const MIN_WINDOW_HEIGHT = 640;
 const MAX_WINDOW_WIDTH = 8192;
@@ -71,6 +72,7 @@ const DEFAULT_PEQ_BANDS: DesktopPeqBand[] = [
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   version: SETTINGS_VERSION,
   theme: 'system',
+  quality: 'high',
   closeToTray: false,
   autoSyncIndex: false,
   window: {
@@ -210,6 +212,9 @@ export function normalizeSettings(value: unknown): DesktopSettings {
     theme: isTheme(record.theme)
       ? record.theme
       : DEFAULT_DESKTOP_SETTINGS.theme,
+    quality: isPlaybackQuality(record.quality)
+      ? record.quality
+      : DEFAULT_DESKTOP_SETTINGS.quality,
     closeToTray:
       typeof record.closeToTray === 'boolean'
         ? record.closeToTray
@@ -391,6 +396,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 function isTheme(value: unknown): value is DesktopTheme {
   return typeof value === 'string' && THEMES.includes(value as DesktopTheme);
+}
+
+/** 判断桌面源音质档位是否属于公开设置枚举。 */
+function isPlaybackQuality(value: unknown): value is DesktopPlaybackQuality {
+  return value === 'standard' || value === 'high' || value === 'best';
 }
 
 /**

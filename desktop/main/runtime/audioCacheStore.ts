@@ -17,6 +17,10 @@ const AUDIO_CACHE_TARGET_BYTES = Math.floor(AUDIO_CACHE_MAX_BYTES * 0.9);
 export type AudioCacheRequest = {
   track: PlaybackQueueItem;
   quality: string;
+  /** 实际命中的 Bilibili 音轨 ID，仅用于索引留痕，不改变请求档位键。 */
+  sourceId?: number;
+  /** 实际响应的 MIME 类型，便于定位解码和缓存问题。 */
+  codec?: string;
 };
 
 export type AudioCacheEntry = {
@@ -24,6 +28,8 @@ export type AudioCacheEntry = {
   bvid: string;
   cid: number;
   quality: string;
+  sourceId?: number;
+  codec?: string;
   path: string;
   size: number;
   mimeType: string;
@@ -259,6 +265,8 @@ export class AudioCacheStore {
           bvid: request.track.bvid,
           cid: request.track.cid ?? 0,
           quality: request.quality,
+          sourceId: request.sourceId,
+          codec: request.codec,
           path: finalPath,
           size: stat.size,
           mimeType: response.headers.get('content-type') ?? 'audio/mp4',

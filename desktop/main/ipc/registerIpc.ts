@@ -1018,6 +1018,7 @@ function assertSettingsPatch(
   }
   const allowedKeys = new Set([
     'theme',
+    'quality',
     'closeToTray',
     'autoSyncIndex',
     'window',
@@ -1031,6 +1032,12 @@ function assertSettingsPatch(
     !['system', 'light', 'dark', 'glass'].includes(String(value.theme))
   ) {
     throw new Error('设置主题无效');
+  }
+  if (
+    value.quality !== undefined &&
+    !['standard', 'high', 'best'].includes(String(value.quality))
+  ) {
+    throw new Error('播放音质无效');
   }
   if (
     value.closeToTray !== undefined &&

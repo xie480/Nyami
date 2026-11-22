@@ -24,13 +24,13 @@ import type {
 import {getCachedAudioUrl} from '../audio/localAudioProtocol';
 import {
   BiliAudioResolver,
+  type AudioQuality,
   type ResolvedPlaybackAudio,
 } from '../audio/biliAudioResolver';
 import {AppLogger} from '../logging/appLogger';
 import {AudioCacheStore, type AudioCacheRequest} from './audioCacheStore';
 import {normalizeBiliAssetUrl} from '../security/urlPolicy';
 
-const AUDIO_CACHE_QUALITY = 'high';
 const FADE_IN_MS = 180;
 const FADE_OUT_MS = 120;
 const MAX_RETRY_COUNT = 2;
@@ -68,6 +68,7 @@ type PlaybackRuntimeOptions = {
   cache: AudioCacheStore;
   logger: AppLogger;
   statePath: string;
+  quality?: () => AudioQuality;
   popularContinuation?: (
     context: PlaybackQueueContext,
     signal: AbortSignal,
@@ -715,7 +716,8 @@ export class PlaybackRuntime {
         false,
       );
     }
-    const resolved = await this.options.resolver.resolve(track, signal);
+    const quality = this.getQuality();
+    const resolved = await this.options.resolver.resolve(track, signal, quality);
     if (!this.queueController.isCurrent(revision)) {
       return this.getState();
     }
@@ -752,6 +754,12 @@ export class PlaybackRuntime {
       cached: false,
       revision,
     };
+    this.options.logger.info('audio.source-selected', {
+      trackId: resolvedTrack.id,
+      quality,
+      audioId: resolved.audioId,
+      mimeType: resolved.mimeType,
+    });
     this.emitSource(this.currentSource);
     this.emitResumeSeekCommand(
       resolvedTrack.id,
@@ -893,9 +901,14 @@ export class PlaybackRuntime {
     request: AudioCacheRequest,
     resolved: ResolvedPlaybackAudio,
   ): void {
+    const downloadRequest: AudioCacheRequest = {
+      ...request,
+      sourceId: resolved.audioId,
+      codec: resolved.mimeType,
+    };
     void this.options.cache
       .download(
-        request,
+        downloadRequest,
         [resolved.url, ...resolved.backupUrls],
       )
       .then(() => this.options.cache.evict(this.getProtectedCacheKeys()))
@@ -923,7 +936,7 @@ export class PlaybackRuntime {
       keys.add(
         AudioCacheStore.getKey({
           track,
-          quality: AUDIO_CACHE_QUALITY,
+          quality: this.getQuality(),
         }),
       );
     }
@@ -940,8 +953,13 @@ export class PlaybackRuntime {
   private toCacheRequest(track: PlaybackQueueItem): AudioCacheRequest {
     return {
       track,
-      quality: AUDIO_CACHE_QUALITY,
+      quality: this.getQuality(),
     };
+  }
+
+  /** 读取当前请求音质，未注入设置提供器时保持历史高音质行为。 */
+  private getQuality(): AudioQuality {
+    return this.options.quality?.() ?? 'high';
   }
 
   /** 将持久化进度重新应用到刚加载的音频源，避免重启后从零开始播放。 */

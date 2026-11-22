@@ -7,7 +7,10 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {AudioProbe} from '../audio/audioProbe';
-import {BiliAudioResolver} from '../audio/biliAudioResolver';
+import {
+  BiliAudioResolver,
+  type AudioQuality,
+} from '../audio/biliAudioResolver';
 import {AudioRequestRecorder} from '../audio/audioRequestRecorder';
 import {registerAudioCacheHandler} from '../audio/localAudioProtocol';
 import {registerAudioInterception} from '../audio/registerAudioInterception';
@@ -28,6 +31,7 @@ import {SqliteDatabase} from '../storage/sqliteDatabase';
 import {SettingsStore} from '../storage/settingsStore';
 import {UpdateService} from '../updater/updateService';
 import type {
+  DesktopPlaybackQuality,
   PlaybackQueueContext,
   PlaybackQueueItem,
 } from '../../shared/types';
@@ -139,6 +143,7 @@ export function createMainWindow(
     cache: audioCache,
     logger: dependencies.logger,
     statePath: path.join(dependencies.directories.settings, 'playback.json'),
+    quality: () => toAudioQuality(dependencies.settingsStore.get().quality),
     popularContinuation: async (
       context: PlaybackQueueContext,
       signal: AbortSignal,
@@ -289,6 +294,17 @@ export function createMainWindow(
     flushPlaybackState: () => playbackRuntime.flush(),
     dispose,
   };
+}
+
+/** 将桌面设置映射为共享解析器的音质优先级。 */
+function toAudioQuality(quality: DesktopPlaybackQuality): AudioQuality {
+  if (quality === 'best') {
+    return 'hires';
+  }
+  if (quality === 'standard') {
+    return 'medium';
+  }
+  return 'high';
 }
 
 /**

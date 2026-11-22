@@ -2160,17 +2160,17 @@ function SettingsPage({
           <PrototypeSelect
             ariaLabel="播放音质"
             className="settings-quality-select"
-            onChange={value =>
-              updatePreference({
-                quality: value as DesktopUserPreferences['quality'],
-              })
-            }
+            onChange={value => {
+              const quality = value as DesktopUserPreferences['quality'];
+              updatePreference({quality});
+              onUpdate({quality});
+            }}
             options={[
               {value: 'standard', label: '标准'},
               {value: 'high', label: '高品质'},
               {value: 'best', label: '最高可用'},
             ]}
-            value={preferences.quality}
+            value={settings?.quality ?? preferences.quality}
           />
         </label>
       </section>

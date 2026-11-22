@@ -493,7 +493,16 @@ async function hydrateVideoUncached(
         setCachedUrl(v.bvid, url, headers, effectiveCid);
 
         if (shouldCacheAudio) {
-          audioCache.download(cacheKey, quality, url, headers).catch(() => {});
+          audioCache
+            .download(
+              cacheKey,
+              quality,
+              url,
+              headers,
+              info.audio.id,
+              info.audio.mimeType,
+            )
+            .catch(() => {});
         }
 
         if (!cid && info.parts && info.parts.length > 1) {
@@ -1147,7 +1156,7 @@ async function autoCache(bvid: string, cid?: number) {
     await audioCache.download(cacheKey, s.quality, info.audio.baseUrl, {
       Referer: config.referer,
       'User-Agent': config.userAgent,
-    });
+    }, info.audio.id, info.audio.mimeType);
   } catch {}
 }
 

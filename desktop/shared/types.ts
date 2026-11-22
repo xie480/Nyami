@@ -396,6 +396,9 @@ export type CacheSummary = {
 
 export type DesktopTheme = 'system' | 'light' | 'dark' | 'glass';
 
+/** 桌面端请求的源音质档位，实际命中音轨由账号和视频能力决定。 */
+export type DesktopPlaybackQuality = 'standard' | 'high' | 'best';
+
 export type DesktopEqMode = 'graphic' | 'parametric';
 
 export type DesktopGraphicPreset =
@@ -449,8 +452,9 @@ export type DesktopWindowState = {
 };
 
 export type DesktopSettings = {
-  version: 3;
+  version: 4;
   theme: DesktopTheme;
+  quality: DesktopPlaybackQuality;
   closeToTray: boolean;
   autoSyncIndex: boolean;
   window: WindowSettings;
@@ -459,6 +463,7 @@ export type DesktopSettings = {
 
 export type DesktopSettingsPatch = {
   theme?: DesktopTheme;
+  quality?: DesktopPlaybackQuality;
   closeToTray?: boolean;
   autoSyncIndex?: boolean;
   window?: Partial<WindowSettings>;
