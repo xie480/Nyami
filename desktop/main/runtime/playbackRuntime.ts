@@ -82,6 +82,9 @@ type PersistedPlaybackState = {
   currentTrackId: string | null;
   mode: PlaybackQueueMode;
   context: PlaybackQueueContext | null;
+  position: number;
+  duration: number;
+  volume: number;
 };
 
 /**
@@ -111,6 +114,12 @@ export class PlaybackRuntime {
 
   private lastProgressEventAt = 0;
 
+  private lastProgressPersistAt = 0;
+
+  private progressPersistTimer: NodeJS.Timeout | null = null;
+
+  private persistQueue: Promise<void> = Promise.resolve();
+
   private sleepTimer: NodeJS.Timeout | null = null;
 
   private sleepTimerExpiresAt: number | null = null;
@@ -131,11 +140,20 @@ export class PlaybackRuntime {
     return this.snapshotFromQueue(this.snapshot.state);
   }
 
+  /** 在应用退出前刷新当前播放位置，确保最后一段进度不会只留在内存中。 */
+  async flush(): Promise<void> {
+    this.clearProgressPersistTimer();
+    this.lastProgressPersistAt = Date.now();
+    await this.persistState();
+  }
+
   /** 替换队列，按需展开多 P，并开始指定项目。 */
   async loadQueue(request: PlaybackQueueRequest): Promise<PlaybackSnapshot> {
     const items = normalizeQueueItems(request.items);
     this.abortCurrentOperation();
     this.queueSessionKey = normalizeQueueSessionKey(request.queueKey);
+    this.snapshot.position = 0;
+    this.snapshot.duration = 0;
     if (items.length === 0) {
       this.queueController.replaceQueue([]);
       this.currentSource = null;
@@ -159,6 +177,7 @@ export class PlaybackRuntime {
     this.operationController = controller;
     this.currentSource = null;
     this.retryCount = 0;
+    this.snapshot.duration = initialItem.duration;
     this.snapshot.cached = false;
     this.snapshot = this.snapshotFromQueue('loading');
     this.emitState();
@@ -230,7 +249,7 @@ export class PlaybackRuntime {
     await this.persistState();
     this.emitState();
     if (request.autoplay === true && this.snapshot.trackId !== item.id) {
-      return this.activateTrack(item.id, true);
+      return this.activateTrack(item.id, true, false);
     }
     return this.getState();
   }
@@ -248,7 +267,7 @@ export class PlaybackRuntime {
     await this.persistState();
     this.emitState();
     if (wasCurrent && this.snapshot.trackId) {
-      return this.activateTrack(this.snapshot.trackId, true);
+      return this.activateTrack(this.snapshot.trackId, true, false);
     }
     if (!this.snapshot.trackId) {
       this.snapshot = this.snapshotFromQueue('idle');
@@ -314,7 +333,7 @@ export class PlaybackRuntime {
       return this.getState();
     }
     if (!this.currentSource) {
-      return this.activateTrack(this.snapshot.trackId, true);
+      return this.activateTrack(this.snapshot.trackId, true, true);
     }
     this.snapshot = this.snapshotFromQueue('playing');
     this.emitCommand({
@@ -350,6 +369,7 @@ export class PlaybackRuntime {
       });
     }
     this.snapshot = this.snapshotFromQueue('paused');
+    await this.persistState();
     this.emitState();
     return this.getState();
   }
@@ -375,6 +395,7 @@ export class PlaybackRuntime {
     this.currentSource = null;
     this.snapshot = this.snapshotFromQueue('stopped');
     this.snapshot.position = 0;
+    await this.persistState();
     this.emitState();
     return this.getState();
   }
@@ -389,6 +410,7 @@ export class PlaybackRuntime {
       Math.max(0, Math.round(request.position * 1000) / 1000),
     );
     this.snapshot.position = position;
+    await this.persistState();
     this.emitCommand({
       type: 'seek',
       trackId: this.snapshot.trackId,
@@ -440,7 +462,7 @@ export class PlaybackRuntime {
         this.snapshot.diagnostic?.kind === 'network-offline' &&
         this.snapshot.trackId
       ) {
-        return this.activateTrack(this.snapshot.trackId, true);
+        return this.activateTrack(this.snapshot.trackId, true, true);
       }
       this.emitState();
       return this.getState();
@@ -463,6 +485,7 @@ export class PlaybackRuntime {
         0,
         86400,
       );
+      this.scheduleProgressPersist();
       if (Date.now() - this.lastProgressEventAt < PROGRESS_EVENT_INTERVAL_MS) {
         return this.getState();
       }
@@ -489,6 +512,7 @@ export class PlaybackRuntime {
       if (this.snapshot.state !== 'stopped') {
         this.snapshot.state = 'paused';
       }
+      await this.persistState();
       this.emitState();
       return this.getState();
     }
@@ -513,7 +537,7 @@ export class PlaybackRuntime {
     if (!item) {
       return this.continuePopular();
     }
-    return this.activateTrack(item.id, true);
+    return this.activateTrack(item.id, true, false);
   }
 
   /** 在热门队列播放到末尾时请求下一页并追加到当前队列。 */
@@ -561,7 +585,7 @@ export class PlaybackRuntime {
       );
       await this.persistState();
       const next = this.queueController.next();
-      return next ? this.activateTrack(next.id, true) : this.getState();
+      return next ? this.activateTrack(next.id, true, false) : this.getState();
     } catch (error) {
       if (isAbortError(error)) {
         return this.getState();
@@ -579,16 +603,24 @@ export class PlaybackRuntime {
   private async activateTrack(
     trackId: string,
     autoplay: boolean,
+    resumePosition: boolean,
   ): Promise<PlaybackSnapshot> {
     const queue = this.queueController.getSnapshot().queue;
     if (!queue.some(item => item.id === trackId)) {
       return this.getState();
     }
+    const previousTrackId = this.snapshot.trackId;
+    const shouldResume = resumePosition && previousTrackId === trackId;
     this.abortCurrentOperation();
     const revision = this.queueController.replaceQueue(queue, trackId);
     const controller = new AbortController();
     this.operationController = controller;
     this.currentSource = null;
+    if (!shouldResume) {
+      this.snapshot.position = 0;
+      this.snapshot.duration = 0;
+      this.retryCount = 0;
+    }
     this.snapshot.cached = false;
     try {
       return await this.activateCurrent(
@@ -599,6 +631,16 @@ export class PlaybackRuntime {
     } catch (error) {
       if (isAbortError(error) || !this.queueController.isCurrent(revision)) {
         return this.getState();
+      }
+      if (net.isOnline() && this.retryCount < MAX_RETRY_COUNT) {
+        this.retryCount += 1;
+        this.snapshot.diagnostic = this.createDiagnostic(
+          'url-expired',
+          '正在重新获取音频地址',
+          true,
+        );
+        this.emitState();
+        return this.activateTrack(trackId, autoplay, resumePosition);
       }
       const kind = !net.isOnline() ? 'network-offline' : 'playback-error';
       return this.failPlayback(error, kind, false);
@@ -639,6 +681,7 @@ export class PlaybackRuntime {
       this.snapshot.duration = track.duration;
       this.retryCount = 0;
       this.emitSource(this.currentSource);
+      this.emitResumeSeekCommand(track.id, revision, track.duration);
       this.emitPlayCommand(track.id, revision, autoplay);
       this.emitState();
       return this.getState();
@@ -688,6 +731,11 @@ export class PlaybackRuntime {
       revision,
     };
     this.emitSource(this.currentSource);
+    this.emitResumeSeekCommand(
+      resolvedTrack.id,
+      revision,
+      resolved.duration,
+    );
     this.emitPlayCommand(resolvedTrack.id, revision, autoplay);
     this.cacheInBackground(this.toCacheRequest(resolvedTrack), resolved);
     this.emitState();
@@ -722,7 +770,7 @@ export class PlaybackRuntime {
       true,
     );
     this.emitState();
-    return this.activateTrack(trackId, true);
+    return this.activateTrack(trackId, true, true);
   }
 
   /** 预加载队列详情并展开多 P，单个详情失败时保留原项目。 */
@@ -858,6 +906,29 @@ export class PlaybackRuntime {
     };
   }
 
+  /** 将持久化进度重新应用到刚加载的音频源，避免重启后从零开始播放。 */
+  private emitResumeSeekCommand(
+    trackId: string,
+    revision: number,
+    duration: number,
+  ): void {
+    const position = clampNumber(
+      this.snapshot.position,
+      0,
+      duration > 0 ? duration : 86400,
+    );
+    this.snapshot.position = position;
+    if (position <= 0) {
+      return;
+    }
+    this.emitCommand({
+      type: 'seek',
+      trackId,
+      position,
+      revision,
+    });
+  }
+
   /** 生成并发布播放命令。 */
   private emitPlayCommand(
     trackId: string,
@@ -952,16 +1023,26 @@ export class PlaybackRuntime {
       if (queue.length === 0) {
         return;
       }
-      this.queueController.replaceQueue(
-        queue,
+      const currentTrackId =
         typeof parsed.currentTrackId === 'string'
           ? parsed.currentTrackId
-          : queue[0].id,
+          : queue[0].id;
+      this.queueController.replaceQueue(
+        queue,
+        currentTrackId,
         parsed.context ?? null,
       );
       if (parsed.mode === 'shuffle') {
         this.queueController.setMode('shuffle');
       }
+      const currentTrack = queue.find(item => item.id === currentTrackId);
+      this.snapshot.position = clampNumber(parsed.position, 0, 86400);
+      this.snapshot.duration = clampNumber(
+        parsed.duration ?? currentTrack?.duration,
+        0,
+        86400,
+      );
+      this.snapshot.volume = clampNumber(parsed.volume, 0, 1);
     } catch {
       // 首次启动没有播放恢复文件，直接从空队列开始。
     }
@@ -969,6 +1050,15 @@ export class PlaybackRuntime {
 
   /** 使用原子替换保存不含签名 URL 的队列状态。 */
   private async persistState(): Promise<void> {
+    const operation = this.persistQueue.then(() => this.writePersistedState());
+    this.persistQueue = operation.catch(error => {
+      this.options.logger.warn('playback.state-persist-failed', {error});
+    });
+    return operation;
+  }
+
+  /** 串行写入播放状态，避免进度节流与队列操作同时替换状态文件。 */
+  private async writePersistedState(): Promise<void> {
     const snapshot = this.queueController.getSnapshot();
     const state: PersistedPlaybackState = {
       queue: snapshot.queue,
@@ -977,6 +1067,9 @@ export class PlaybackRuntime {
       context: isQueueContext(snapshot.context)
         ? snapshot.context
         : null,
+      position: this.snapshot.position,
+      duration: this.snapshot.duration,
+      volume: this.snapshot.volume,
     };
     const temporaryPath = `${this.options.statePath}.${Date.now()}.tmp`;
     await fs.mkdir(path.dirname(this.options.statePath), {recursive: true});
@@ -986,6 +1079,37 @@ export class PlaybackRuntime {
     } finally {
       await fs.rm(temporaryPath, {force: true});
     }
+  }
+
+  /** 以约 1 秒频率保存进度，避免每个媒体 timeupdate 都写磁盘。 */
+  private scheduleProgressPersist(): void {
+    if (!this.snapshot.trackId) {
+      return;
+    }
+    const now = Date.now();
+    const elapsed = now - this.lastProgressPersistAt;
+    if (elapsed >= 1000) {
+      this.lastProgressPersistAt = now;
+      void this.persistState().catch(() => undefined);
+      return;
+    }
+    if (this.progressPersistTimer) {
+      return;
+    }
+    this.progressPersistTimer = setTimeout(() => {
+      this.progressPersistTimer = null;
+      this.lastProgressPersistAt = Date.now();
+      void this.persistState().catch(() => undefined);
+    }, Math.max(1, 1000 - elapsed));
+  }
+
+  /** 清理尚未触发的节流保存定时器。 */
+  private clearProgressPersistTimer(): void {
+    if (!this.progressPersistTimer) {
+      return;
+    }
+    clearTimeout(this.progressPersistTimer);
+    this.progressPersistTimer = null;
   }
 
   /** 清理睡眠定时器。 */

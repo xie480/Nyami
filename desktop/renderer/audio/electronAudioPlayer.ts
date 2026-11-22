@@ -36,6 +36,8 @@ export class ElectronAudioPlayerAdapter
 
   private fadeFrame: number | null = null;
 
+  private pendingSeekPosition: number | null = null;
+
   private setupDone = false;
 
   private readonly effects: AudioEffectsController;
@@ -56,7 +58,10 @@ export class ElectronAudioPlayerAdapter
     this.audio.preload = 'auto';
     this.audio.volume = this.targetVolume;
     await this.effects.setup();
-    this.bind('loadedmetadata', () => this.emitProgress('loadedmetadata'));
+    this.bind('loadedmetadata', () => {
+      this.applyPendingSeek();
+      this.emitProgress('loadedmetadata');
+    });
     this.bind('canplay', () => this.emitProgress('canplay'));
     this.bind('playing', () => this.emitSimple('playing'));
     this.bind('pause', () => this.emitSimple('pause'));
@@ -88,6 +93,7 @@ export class ElectronAudioPlayerAdapter
     }
     this.activeRevision = source.revision;
     this.activeTrackId = source.trackId;
+    this.pendingSeekPosition = null;
     this.cancelFade();
     this.audio.pause();
     this.audio.currentTime = 0;
@@ -154,14 +160,20 @@ export class ElectronAudioPlayerAdapter
 
   /** 跳转到指定秒数。 */
   async seek(position: number): Promise<void> {
+    const normalizedPosition = Math.max(0, position);
+    this.pendingSeekPosition = normalizedPosition;
     if (Number.isFinite(this.audio.duration)) {
       this.audio.currentTime = Math.min(
-        Math.max(0, position),
+        normalizedPosition,
         Math.max(0, this.audio.duration),
       );
+      this.pendingSeekPosition = null;
       return;
     }
-    this.audio.currentTime = Math.max(0, position);
+    if (this.audio.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      this.audio.currentTime = normalizedPosition;
+      this.pendingSeekPosition = null;
+    }
   }
 
   /** 队列切换由主进程 QueueController 负责。 */
@@ -288,6 +300,21 @@ export class ElectronAudioPlayerAdapter
     };
     this.report(event);
     this.listeners.forEach(listener => listener(event));
+  }
+
+  /** 在媒体元数据可用后应用重启恢复或提前到达的跳转位置。 */
+  private applyPendingSeek(): void {
+    if (this.pendingSeekPosition === null) {
+      return;
+    }
+    const duration = Number.isFinite(this.audio.duration)
+      ? Math.max(0, this.audio.duration)
+      : null;
+    if (duration === null) {
+      return;
+    }
+    this.audio.currentTime = Math.min(this.pendingSeekPosition, duration);
+    this.pendingSeekPosition = null;
   }
 
   /** 在指定时长内平滑调整音量，失败时回退到目标音量。 */

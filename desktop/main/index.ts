@@ -25,6 +25,8 @@ const hasSingleInstance = app.requestSingleInstanceLock();
 let mainWindow: Electron.BrowserWindow | null = null;
 let desktopShell: import('./tray/desktopShell').DesktopShell | null = null;
 let disposeWindow: (() => void) | null = null;
+let flushPlaybackState: (() => Promise<void>) | null = null;
+let flushingPlaybackState = false;
 let shouldFocusWhenReady = false;
 let pendingAssociatedFile: string | null = findAssociatedFile(process.argv);
 let localAudioHandlerRegistered = false;
@@ -59,8 +61,22 @@ if (!hasSingleInstance) {
     app.quit();
   });
 
-  app.on('before-quit', () => {
+  app.on('before-quit', event => {
     desktopShell?.markQuitting();
+    if (flushPlaybackState && !flushingPlaybackState) {
+      event.preventDefault();
+      flushingPlaybackState = true;
+      const flush = flushPlaybackState;
+      void flush()
+        .catch(error => {
+          logger.warn('playback.state-flush-failed', {error});
+        })
+        .finally(() => {
+          flushPlaybackState = null;
+          app.quit();
+        });
+      return;
+    }
     disposeWindow?.();
     disposeWindow = null;
     mainWindow = null;
@@ -113,6 +129,7 @@ async function bootstrap(): Promise<void> {
   });
   mainWindow = runtime.window;
   desktopShell = runtime.shell;
+  flushPlaybackState = runtime.flushPlaybackState;
   disposeWindow = runtime.dispose;
   globalThis.__nyamiMainWindow = runtime.window;
 

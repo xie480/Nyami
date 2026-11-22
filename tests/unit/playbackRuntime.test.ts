@@ -93,4 +93,59 @@ describe('PlaybackRuntime 大队列窗口', () => {
       await fs.rm(`${statePath}.tmp`, {force: true});
     }
   });
+
+  it('重启后恢复播放进度，并在重新解析地址后发出跳转命令', async () => {
+    const statePath = path.join(
+      os.tmpdir(),
+      `nyami-playback-${randomUUID()}.json`,
+    );
+    const firstRuntime = createRuntime(statePath);
+
+    try {
+      await firstRuntime.loadQueue({
+        items: [createQueueItem('BV1')],
+        autoplay: false,
+        expandParts: false,
+      });
+      await firstRuntime.reportAudioEvent({
+        type: 'timeupdate',
+        trackId: 'BV1',
+        position: 23,
+        duration: 60,
+      });
+      await firstRuntime.flush();
+
+      expect(JSON.parse(await fs.readFile(statePath, 'utf8'))).toMatchObject({
+        currentTrackId: 'BV1',
+        position: 23,
+      });
+      const secondRuntime = createRuntime(statePath);
+      expect(secondRuntime.getState()).toMatchObject({
+        trackId: 'BV1',
+        position: 23,
+      });
+
+      const events: Array<{type: string; command?: {type: string; position?: number}}> = [];
+      secondRuntime.subscribe(event => {
+        if (event.type === 'command') {
+          events.push(event);
+        }
+      });
+      await secondRuntime.play();
+
+      expect(
+        events.find(
+          event => event.type === 'command' && event.command?.type === 'seek',
+        ),
+      ).toMatchObject({
+        command: {
+          type: 'seek',
+          position: 23,
+        },
+      });
+    } finally {
+      await fs.rm(statePath, {force: true});
+      await fs.rm(`${statePath}.tmp`, {force: true});
+    }
+  });
 });

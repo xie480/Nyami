@@ -54,6 +54,7 @@ export function createMainWindow(
 ): {
   window: BrowserWindow;
   shell: DesktopShell;
+  flushPlaybackState: () => Promise<void>;
   dispose: () => void;
 } {
   const settings = dependencies.settingsStore.get();
@@ -285,6 +286,7 @@ export function createMainWindow(
   return {
     window,
     shell,
+    flushPlaybackState: () => playbackRuntime.flush(),
     dispose,
   };
 }
