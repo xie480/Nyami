@@ -36,13 +36,9 @@ export class ElectronAudioPlayerAdapter
 
   private fadeFrame: number | null = null;
 
-  private fadeResolve: (() => void) | null = null;
-
   private pendingSeekPosition: number | null = null;
 
   private setupDone = false;
-
-  private commandQueue: Promise<void> = Promise.resolve();
 
   private readonly effects: AudioEffectsController;
 
@@ -61,6 +57,7 @@ export class ElectronAudioPlayerAdapter
     this.setupDone = true;
     this.audio.preload = 'auto';
     this.audio.volume = this.targetVolume;
+    await this.effects.setup();
     this.bind('loadedmetadata', () => {
       this.applyPendingSeek();
       this.emitProgress('loadedmetadata');
@@ -73,8 +70,6 @@ export class ElectronAudioPlayerAdapter
     this.bind('timeupdate', () => this.emitProgress('timeupdate'));
     this.bind('ended', () => this.emitSimple('ended'));
     this.bind('error', () => this.emitError());
-    // 先绑定媒体事件，再等待 AudioWorklet 初始化，避免首次加载期间丢失 error/playing 事件。
-    await this.effects.setup();
   }
 
   /** 加载共享 AudioPlayer 契约中的队列项目。 */
@@ -89,7 +84,6 @@ export class ElectronAudioPlayerAdapter
     }
     this.activeTrackId = track.id;
     this.effects.resetLoudness();
-    this.audio.volume = 0;
     this.audio.src = track.url;
     this.audio.load();
   }
@@ -107,22 +101,12 @@ export class ElectronAudioPlayerAdapter
     this.cancelFade();
     this.audio.pause();
     this.audio.currentTime = 0;
-    this.audio.volume = 0;
     this.audio.src = source.url;
     this.audio.load();
   }
 
-  /** 按到达顺序串行执行主进程发来的播放命令，避免首次播放的淡入和 play 竞态。 */
-  handleCommand(command: PlaybackCommand): Promise<void> {
-    const operation = this.commandQueue.then(() =>
-      this.executeCommand(command),
-    );
-    this.commandQueue = operation.catch(() => undefined);
-    return operation;
-  }
-
-  /** 校验并执行单条播放命令。 */
-  private async executeCommand(command: PlaybackCommand): Promise<void> {
+  /** 执行主进程发来的播放命令。 */
+  async handleCommand(command: PlaybackCommand): Promise<void> {
     if (command.revision < this.activeRevision) {
       return;
     }
@@ -348,13 +332,11 @@ export class ElectronAudioPlayerAdapter
     }
     await new Promise<void>(resolve => {
       const startedAt = performance.now();
-      this.fadeResolve = resolve;
       const step = (now: number): void => {
         const ratio = Math.min(1, (now - startedAt) / durationMs);
         this.audio.volume = start + (target - start) * ratio;
         if (ratio >= 1) {
           this.fadeFrame = null;
-          this.fadeResolve = null;
           resolve();
           return;
         }
@@ -370,8 +352,5 @@ export class ElectronAudioPlayerAdapter
       cancelAnimationFrame(this.fadeFrame);
       this.fadeFrame = null;
     }
-    const resolve = this.fadeResolve;
-    this.fadeResolve = null;
-    resolve?.();
   }
 }
