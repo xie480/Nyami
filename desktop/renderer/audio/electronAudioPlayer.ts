@@ -14,6 +14,9 @@ import {AudioEffectsController} from './audioEffectsController';
 
 type EventListener = (event: PlaybackAudioEvent) => void;
 
+/** 播放条直接读取媒体元素，跨进程进度上报只需保持约 10fps。 */
+const PROGRESS_REPORT_INTERVAL_MS = 100;
+
 /**
  * 基于 HTMLAudioElement 的 Electron 播放器适配器。
  * 主进程负责队列和 URL，Renderer 只负责媒体元素、淡入淡出和浏览器事件转发。
@@ -39,6 +42,8 @@ export class ElectronAudioPlayerAdapter
   private fadeResolve: (() => void) | null = null;
 
   private pendingSeekPosition: number | null = null;
+
+  private lastProgressReportAt = 0;
 
   private setupDone = false;
 
@@ -288,6 +293,13 @@ export class ElectronAudioPlayerAdapter
 
   /** 上报媒体进度事件。 */
   private emitProgress(type: PlaybackAudioEvent['type']): void {
+    if (type === 'timeupdate') {
+      const now = Date.now();
+      if (now - this.lastProgressReportAt < PROGRESS_REPORT_INTERVAL_MS) {
+        return;
+      }
+      this.lastProgressReportAt = now;
+    }
     const progress = this.audio.buffered.length > 0
       ? this.audio.buffered.end(this.audio.buffered.length - 1)
       : 0;

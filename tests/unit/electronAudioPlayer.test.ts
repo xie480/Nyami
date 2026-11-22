@@ -115,6 +115,29 @@ describe('ElectronAudioPlayerAdapter', () => {
     await setupPromise;
   });
 
+  it('将高频 timeupdate 限制为约 10fps，避免重复 IPC 和 React 更新', async () => {
+    const originalNow = Date.now;
+    let now = 1000;
+    Date.now = () => now;
+    try {
+      const {audio, emit} = createAudioStub();
+      const report = jest.fn();
+      const adapter = new ElectronAudioPlayerAdapter(audio, report);
+
+      await adapter.setup();
+      emit('timeupdate');
+      now = 1050;
+      emit('timeupdate');
+      now = 1100;
+      emit('timeupdate');
+
+      expect(report).toHaveBeenCalledTimes(2);
+      adapter.dispose();
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
   it('首次播放会等待淡入完成后再调用媒体播放', async () => {
     const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
     const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
