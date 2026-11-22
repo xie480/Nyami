@@ -3045,6 +3045,28 @@
   will-change: width;
 }
 
+.prototype-app .smooth-progress-thumb {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--prototype-surface);
+  border-radius: 50%;
+  background: var(--prototype-accent);
+  box-shadow: 0 2px 8px rgba(200, 76, 49, 0.28);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: box-shadow 160ms ease, transform 160ms ease;
+  will-change: left;
+}
+
+.prototype-app .smooth-progress-input-container:hover .smooth-progress-thumb,
+.prototype-app .smooth-progress-input-container:focus-within .smooth-progress-thumb {
+  box-shadow: 0 0 0 5px rgba(200, 76, 49, 0.16);
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
 .prototype-app .smooth-progress-native {
   position: absolute;
   z-index: 1;
@@ -3062,8 +3084,23 @@
   background: transparent;
 }
 
+.prototype-app .smooth-progress-native::-webkit-slider-thumb {
+  width: 15px;
+  height: 15px;
+  appearance: none;
+  border: 0;
+  background: transparent;
+}
+
 .prototype-app .smooth-progress-native::-moz-range-track {
   height: 6px;
+  background: transparent;
+}
+
+.prototype-app .smooth-progress-native::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: 0;
   background: transparent;
 }
 

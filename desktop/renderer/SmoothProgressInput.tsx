@@ -25,6 +25,7 @@ function clampProgressPosition(position: number, duration: number): number {
 function updateProgressFill(
   container: HTMLDivElement,
   fill: HTMLSpanElement,
+  thumb: HTMLSpanElement,
   ratio: number,
 ): void {
   const trackWidth = Math.max(0, container.clientWidth);
@@ -35,6 +36,7 @@ function updateProgressFill(
   const fillWidth =
     RANGE_THUMB_RADIUS + Math.min(1, Math.max(0, ratio)) * availableTrackWidth;
   fill.style.width = `${fillWidth}px`;
+  thumb.style.left = `${fillWidth}px`;
 }
 
 /** 使用音频元素的当前时间驱动进度控件，避免等待 IPC 状态刷新造成跳帧。 */
@@ -47,6 +49,7 @@ export function SmoothProgressInput({
 }: SmoothProgressInputProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fillRef = useRef<HTMLSpanElement | null>(null);
+  const thumbRef = useRef<HTMLSpanElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const playbackRef = useRef(playback);
   const seekRef = useRef(onSeek);
@@ -60,13 +63,14 @@ export function SmoothProgressInput({
     const input = inputRef.current;
     const container = containerRef.current;
     const fill = fillRef.current;
-    if (!input || !container || !fill) {
+    const thumb = thumbRef.current;
+    if (!input || !container || !fill || !thumb) {
       return;
     }
     draggingRef.current = false;
     const position = clampProgressPosition(playback.position, duration);
     input.value = String(position);
-    updateProgressFill(container, fill, position / duration);
+    updateProgressFill(container, fill, thumb, position / duration);
   }, [duration, playback.trackId]);
 
   useEffect(() => {
@@ -76,12 +80,13 @@ export function SmoothProgressInput({
     const input = inputRef.current;
     const container = containerRef.current;
     const fill = fillRef.current;
-    if (!input || !container || !fill || draggingRef.current) {
+    const thumb = thumbRef.current;
+    if (!input || !container || !fill || !thumb || draggingRef.current) {
       return;
     }
     const position = clampProgressPosition(playback.position, duration);
     input.value = String(position);
-    updateProgressFill(container, fill, position / duration);
+    updateProgressFill(container, fill, thumb, position / duration);
   }, [duration, playback.position, playback.state]);
 
   useEffect(() => {
@@ -94,9 +99,10 @@ export function SmoothProgressInput({
     const renderFrame = (): void => {
       const container = containerRef.current;
       const fill = fillRef.current;
+      const thumb = thumbRef.current;
       const input = inputRef.current;
       const snapshot = playbackRef.current;
-      if (input && container && fill) {
+      if (input && container && fill && thumb) {
         const duration = Math.max(1, snapshot.duration);
         const audio = audioElementRef.current;
         const audioPosition =
@@ -113,7 +119,7 @@ export function SmoothProgressInput({
         if (!draggingRef.current) {
           input.value = String(position);
         }
-        updateProgressFill(container, fill, position / duration);
+        updateProgressFill(container, fill, thumb, position / duration);
       }
       frame = window.requestAnimationFrame(renderFrame);
     };
@@ -130,7 +136,8 @@ export function SmoothProgressInput({
     const updateLayout = (): void => {
       const input = inputRef.current;
       const fill = fillRef.current;
-      if (!input || !fill) {
+      const thumb = thumbRef.current;
+      if (!input || !fill || !thumb) {
         return;
       }
       const position = clampProgressPosition(
@@ -140,6 +147,7 @@ export function SmoothProgressInput({
       updateProgressFill(
         container,
         fill,
+        thumb,
         position / Math.max(1, Number(input.max)),
       );
     };
@@ -167,6 +175,12 @@ export function SmoothProgressInput({
         ref={fillRef}
         style={{width: `${RANGE_THUMB_RADIUS}px`}}
       />
+      <span
+        aria-hidden="true"
+        className="smooth-progress-thumb"
+        ref={thumbRef}
+        style={{left: `${RANGE_THUMB_RADIUS}px`}}
+      />
       <input
         aria-label={ariaLabel}
         className={inputClassName}
@@ -184,8 +198,9 @@ export function SmoothProgressInput({
           );
           const container = containerRef.current;
           const fill = fillRef.current;
-          if (container && fill) {
-            updateProgressFill(container, fill, position / duration);
+          const thumb = thumbRef.current;
+          if (container && fill && thumb) {
+            updateProgressFill(container, fill, thumb, position / duration);
           }
           seekRef.current(position);
         }}
