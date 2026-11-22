@@ -27,6 +27,12 @@ import {getFavoriteSourceKey} from '../../shared/libraryFilters';
 
 const FAVORITE_PAGE_SIZE = 20;
 
+/** Bilibili 导入来源目录接口的单页大小。 */
+const IMPORTED_CATALOG_PAGE_SIZE = 50;
+
+/** 导入来源目录允许读取的最大分页数，防止异常分页响应造成无限请求。 */
+const MAX_IMPORTED_CATALOG_PAGES = 200;
+
 type LibrarySyncOptions = {
   force?: boolean;
   signal?: AbortSignal;
@@ -122,13 +128,14 @@ export class DesktopLibraryRuntime {
             source,
           ]),
         );
+        const requested = new Set(
+          (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
+        );
         const remoteSources = await this.buildSourceCatalog(
           uid,
           signal,
           localSources,
-        );
-        const requested = new Set(
-          (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
+          requested,
         );
         return remoteSources
           .filter(source => !requested.size || requested.has(source.sourceKey))
@@ -419,25 +426,44 @@ export class DesktopLibraryRuntime {
     const items: BiliCollectedPlaylist[] = [];
     let page = 1;
     let expectedCount = 0;
-    while (!signal?.aborted) {
+    let previousPageSignature = '';
+    let completed = false;
+    while (!signal?.aborted && page <= MAX_IMPORTED_CATALOG_PAGES) {
       const response = await this.api.getCollectedPlaylists(
         uid,
         page,
-        50,
+        IMPORTED_CATALOG_PAGE_SIZE,
         signal,
         'index',
       );
       const nextItems = response.list ?? [];
       expectedCount = response.count ?? expectedCount;
+      const pageSignature = getCollectedPageSignature(nextItems);
+      if (pageSignature && pageSignature === previousPageSignature) {
+        this.logger.warn('library.source-catalog-repeated-page', {
+          uid,
+          page,
+        });
+        completed = true;
+        break;
+      }
+      previousPageSignature = pageSignature;
       items.push(...nextItems);
       if (
         !nextItems.length ||
         (expectedCount > 0 && items.length >= expectedCount) ||
-        nextItems.length < 50
+        nextItems.length < IMPORTED_CATALOG_PAGE_SIZE
       ) {
+        completed = true;
         break;
       }
       page += 1;
+    }
+    if (!completed && !signal?.aborted) {
+      this.logger.warn('library.source-catalog-page-limit', {
+        uid,
+        maxPages: MAX_IMPORTED_CATALOG_PAGES,
+      });
     }
     const deduplicated = new Map<string, FavoriteSourceSummary>();
     for (const item of items) {
@@ -455,6 +481,7 @@ export class DesktopLibraryRuntime {
     uid: string,
     signal?: AbortSignal,
     localSources = new Map<string, FavoriteSourceSummary>(),
+    requestedSourceKeys = new Set<string>(),
   ): Promise<FavoriteSourceSummary[]> {
     const folderResponse = await this.api.getFavoriteFolders(
       uid,
@@ -482,10 +509,13 @@ export class DesktopLibraryRuntime {
     return Promise.all(
       sources.map(async source => {
         const localCover = localSources.get(source.sourceKey)?.cover ?? '';
+        // 全量目录只读取元数据，避免为每个来源补第一页封面而阻塞音乐库；详情页再按来源补齐。
         const cover =
           normalizeBiliAssetUrl(source.cover) ||
           normalizeBiliAssetUrl(localCover) ||
-          (await this.fetchSourceCover(source, signal));
+          (requestedSourceKeys.has(source.sourceKey)
+            ? await this.fetchSourceCover(source, signal)
+            : '');
         return {...source, cover};
       }),
     );
@@ -574,6 +604,20 @@ function createAbortError(message: string): Error {
   const error = new Error(message);
   error.name = 'AbortError';
   return error;
+}
+
+/** 生成导入来源分页签名，用于识别接口重复返回同一页。 */
+function getCollectedPageSignature(
+  items: readonly BiliCollectedPlaylist[],
+): string {
+  return items
+    .map(
+      item =>
+        `${item.id}:${item.season_id ?? 0}:${
+          item.mid ?? item.upper?.mid ?? 0
+        }`,
+    )
+    .join('|');
 }
 
 /** 将本地收藏视频转换为安全的桌面内容卡片。 */
