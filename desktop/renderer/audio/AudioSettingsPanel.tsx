@@ -133,18 +133,22 @@ export function AudioSettingsPanel({
         <div className="graphic-eq-grid" aria-label="十段 Graphic EQ">
           {GRAPHIC_BAND_FREQUENCIES.map((frequency, index) => (
             <label className="graphic-band" key={frequency}>
-              <span>{formatFrequency(frequency)}</span>
-              <input
-                aria-label={`${formatFrequency(frequency)} Hz 增益`}
-                max="12"
-                min="-12"
-                onChange={event =>
-                  updateGraphicGain(index, Number(event.target.value))
-                }
-                step="0.5"
-                type="range"
-                value={settings.graphicGains[index] ?? 0}
-              />
+              <span className="graphic-band-frequency">
+                {formatFrequency(frequency)}
+              </span>
+              <div className="graphic-slider">
+                <input
+                  aria-label={`${formatFrequency(frequency)} Hz 增益`}
+                  max="12"
+                  min="-12"
+                  onChange={event =>
+                    updateGraphicGain(index, Number(event.target.value))
+                  }
+                  step="0.5"
+                  type="range"
+                  value={settings.graphicGains[index] ?? 0}
+                />
+              </div>
               <small>{formatGain(settings.graphicGains[index] ?? 0)}</small>
             </label>
           ))}

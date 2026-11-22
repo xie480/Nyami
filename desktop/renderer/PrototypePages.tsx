@@ -865,7 +865,9 @@ export function PrototypeSelect({
 
   return (
     <div
-      className={`prototype-select-menu ${className ?? ''}`.trim()}
+      className={`prototype-select-menu ${open ? 'is-open' : ''} ${
+        className ?? ''
+      }`.trim()}
       ref={rootRef}>
       <button
         aria-expanded={open}

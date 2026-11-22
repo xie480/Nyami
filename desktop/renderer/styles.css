@@ -1382,6 +1382,7 @@ kbd {
 }
 
 .audio-settings-card {
+  position: relative;
   gap: 16px;
 }
 
@@ -1400,6 +1401,8 @@ kbd {
 }
 
 .audio-control-row {
+  position: relative;
+  z-index: 4;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -1413,6 +1416,12 @@ kbd {
   gap: 12px;
   color: var(--muted-strong);
   font-size: 11px;
+}
+
+.audio-select-control {
+  position: relative;
+  z-index: 5;
+  min-width: 0;
 }
 
 .audio-select-control select,
@@ -1446,11 +1455,18 @@ kbd {
 }
 
 .audio-select-control .prototype-select-options {
+  z-index: 500;
   top: calc(100% + 7px);
   bottom: auto;
 }
 
+.audio-select-control .prototype-select-menu.is-open {
+  z-index: 500;
+}
+
 .graphic-eq-grid {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: repeat(10, minmax(36px, 1fr));
   align-items: end;
@@ -1463,26 +1479,47 @@ kbd {
 
 .graphic-band {
   display: flex;
+  min-height: 150px;
   min-width: 0;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  justify-content: space-between;
+  gap: 6px;
   color: var(--muted);
   font-size: 10px;
 }
 
-.graphic-band input {
-  width: 92px;
-  max-width: 100%;
+.graphic-band-frequency {
+  min-height: 14px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.graphic-slider {
+  display: flex;
+  width: 100%;
+  min-width: 24px;
+  height: 108px;
+  align-items: center;
+  justify-content: center;
+}
+
+.graphic-slider input {
+  width: 104px;
+  height: 20px;
+  max-width: none;
   accent-color: var(--accent);
   cursor: pointer;
   transform: rotate(-90deg);
 }
 
 .graphic-band small {
+  min-height: 14px;
+  line-height: 14px;
   color: var(--text-soft);
   font-size: 9px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .peq-grid {
