@@ -34,4 +34,36 @@ describe('共享 Bilibili API 用例', () => {
       {headers: {Cookie: 'SESSDATA=session; DedeUserID=7; bili_jct=csrf'}},
     );
   });
+
+  it('请求完整 DASH 能力以便返回专用音轨', async () => {
+    const get = jest.fn(async () => ({dash: {audio: []}}));
+    const sign = jest.fn(() => 'signed-play-url');
+    const api = createBiliApi({
+      http: {get},
+      wbi: {
+        getKeys: async () => ({imgKey: 'img', subKey: 'sub'}),
+        sign,
+      },
+      credentials: {
+        getCredentials: async () => ({cookie: '', refreshToken: null}),
+        saveCredentials: async () => undefined,
+        clearCredentials: async () => undefined,
+      },
+    });
+
+    await api.getPlayUrl('BV1quality001', 123);
+
+    expect(sign).toHaveBeenCalledWith({
+      bvid: 'BV1quality001',
+      cid: 123,
+      fnval: 4048,
+      fnver: 0,
+      fourk: 1,
+    });
+    expect(get).toHaveBeenCalledWith(
+      '/x/player/wbi/playurl?signed-play-url',
+      {signal: undefined},
+      undefined,
+    );
+  });
 });

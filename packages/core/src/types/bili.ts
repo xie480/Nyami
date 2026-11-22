@@ -143,18 +143,31 @@ export interface BiliVideoInfo {
 
 export interface BiliDashAudio {
   id: number;            // 音质 ID（30216/30232/30280 等）
-  baseUrl: string;
+  baseUrl?: string;
   base_url?: string;
   backupUrl?: string[];
   backup_url?: string[];
-  bandwidth: number;
-  mimeType: string;
+  bandwidth?: number;
+  mimeType?: string;
   mime_type?: string;
+  codecs?: string;
+  codecid?: number;
+  segment_base?: {
+    initialization?: string;
+    index_range?: string;
+  };
+}
+
+/** Bilibili DASH 专用音轨容器，例如 Dolby 和 Hi-Res。 */
+export interface BiliDashAudioGroup {
+  audio?: BiliDashAudio[];
 }
 
 export interface BiliPlayUrlData {
   dash?: {
     audio?: BiliDashAudio[];
+    dolby?: BiliDashAudioGroup;
+    flac?: BiliDashAudioGroup;
     video?: any[];
   };
   durl?: {

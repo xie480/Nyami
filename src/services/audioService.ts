@@ -1,7 +1,7 @@
 import { biliApi } from './biliApi';
 import { cache } from '../core/cache';
 import { config } from '../config';
-import { normalizeAudio } from './transformers';
+import { normalizeDashAudios } from './transformers';
 import { ResourceUnavailableError } from '../core/errors';
 import type { AudioInfo, Quality } from '../types/domain';
 
@@ -151,7 +151,7 @@ export const audioService = {
           const targetCid = cid ?? info.cid;
           const playUrl = await biliApi.getPlayUrl(bvid, targetCid);
           
-          let audios = (playUrl.dash?.audio || []).map(normalizeAudio);
+          let audios = normalizeDashAudios(playUrl.dash);
           
           if (audios.length === 0 && playUrl.durl && playUrl.durl.length > 0) {
             audios = playUrl.durl.map(d => ({

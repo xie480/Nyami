@@ -3,6 +3,7 @@ import type {
   BiliFavoriteVideoMedia,
   BiliFolder,
   BiliPopularVideoItem,
+  BiliPlayUrlData,
   BiliVideoSearchItem,
   BiliVideoTag,
 } from './types/bili';
@@ -162,9 +163,39 @@ export function searchVideoToFavoriteVideo(
 export function normalizeAudio(audio: BiliDashAudio) {
   return {
     id: audio.id,
-    bandwidth: audio.bandwidth,
+    bandwidth: audio.bandwidth ?? 0,
     mimeType: audio.mimeType || audio.mime_type || 'audio/mp4',
     baseUrl: audio.baseUrl || audio.base_url || '',
     backupUrl: audio.backupUrl || audio.backup_url || [],
+    codecs: audio.codecs || '',
   };
+}
+
+/**
+ * 收集 DASH 普通、Dolby 和 Hi-Res 音轨并按音轨 ID与地址去重。
+ * @param dash 播放接口返回的 DASH 数据
+ * @returns 可供质量选择器使用的规范化音轨
+ */
+export function normalizeDashAudios(
+  dash: BiliPlayUrlData['dash'] | undefined,
+) {
+  const sources = [
+    ...(dash?.audio ?? []),
+    ...(dash?.dolby?.audio ?? []),
+    ...(dash?.flac?.audio ?? []),
+  ];
+  const seen = new Set<string>();
+  return sources
+    .map(normalizeAudio)
+    .filter(audio => {
+      if (!audio.baseUrl) {
+        return false;
+      }
+      const key = `${audio.id}:${audio.baseUrl}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
 }

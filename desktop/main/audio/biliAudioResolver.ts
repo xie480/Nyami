@@ -2,9 +2,10 @@ import {
   config,
   createBiliApi,
   createBiliHttpClient,
-  normalizeAudio,
+  normalizeDashAudios,
   ResourceUnavailableError,
   WbiSigner,
+  type Quality,
   type BiliApi,
   type BiliVideoInfo,
 } from '../../../packages/core/src';
@@ -20,7 +21,7 @@ import {
   normalizeBiliAssetUrl,
 } from '../security/urlPolicy';
 
-type AudioQuality = 'low' | 'medium' | 'high';
+export type AudioQuality = Quality;
 
 type AudioCandidate = {
   id: number;
@@ -33,6 +34,7 @@ type AudioCandidate = {
 export type ResolvedPlaybackAudio = {
   track: PlaybackQueueItem;
   cid: number;
+  audioId: number;
   url: string;
   backupUrls: string[];
   mimeType: string;
@@ -120,7 +122,7 @@ export class BiliAudioResolver {
     const info = await this.api.getVideoInfo(track.bvid, signal);
     const cid = track.cid ?? info.cid;
     const playUrl = await this.api.getPlayUrl(track.bvid, cid, signal);
-    const audios = (playUrl.dash?.audio ?? []).map(normalizeAudio);
+    const audios = normalizeDashAudios(playUrl.dash);
     const candidates = audios.length
       ? audios
       : (playUrl.durl ?? []).map(item => ({
@@ -152,6 +154,7 @@ export class BiliAudioResolver {
           normalizeBiliAssetUrl(info.pic),
       },
       cid,
+      audioId: audio.id,
       url,
       backupUrls,
       mimeType: audio.mimeType,
@@ -228,6 +231,8 @@ function pickAudio<T extends AudioCandidate>(
   quality: AudioQuality,
 ): T {
   const qualityIds: Record<AudioQuality, number[]> = {
+    hires: [30251, 30250, 30280, 30232, 30216],
+    dolby: [30250, 30280, 30232, 30216],
     high: [30280, 30232, 30216],
     medium: [30232, 30216, 30280],
     low: [30216, 30232, 30280],

@@ -19,6 +19,7 @@ import type {
 } from '../types/bili';
 
 const VIDEO_TAGS_ENDPOINT = '/x/tag/archive/tags';
+const DASH_PLAY_URL_FNVAL = 4048;
 
 type FolderListResponse = {
   count: number;
@@ -355,7 +356,7 @@ export function createBiliApi(dependencies: BiliApiDependencies) {
       const query = await dependencies.wbi.sign({
         bvid,
         cid,
-        fnval: 16,
+        fnval: DASH_PLAY_URL_FNVAL,
         fnver: 0,
         fourk: 1,
       });
