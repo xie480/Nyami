@@ -481,6 +481,20 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
     setActiveQuery(query.trim());
   };
 
+  /** 清除当前关键词并取消未完成的搜索请求。 */
+  const clearSearch = (): void => {
+    cancelActiveRequest();
+    loadingRef.current = false;
+    setQuery('');
+    setActiveQuery('');
+    setSearchRequested(false);
+    setSearchRevision(current => current + 1);
+    setResult(null);
+    setLoading(false);
+    setLoadingMore(false);
+    setRequestError('');
+  };
+
   const addSearchTag = (
     listMode: 'whitelist' | 'blacklist',
   ): void => {
@@ -528,16 +542,28 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
       <form
         className="prototype-toolbar prototype-search-toolbar"
         onSubmit={submit}>
-        <input
-          aria-label="搜索音乐"
-          className="prototype-search-field"
-          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            setQuery(event.target.value)
-          }
-          placeholder="搜索标题、艺术家、专辑"
-          type="search"
-          value={query}
-        />
+        <div className="prototype-search-field-wrap">
+          <input
+            aria-label="搜索音乐"
+            className="prototype-search-field"
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              setQuery(event.target.value)
+            }
+            placeholder="搜索标题、艺术家、专辑"
+            type="search"
+            value={query}
+          />
+          {query ? (
+            <button
+              aria-label="清除搜索关键词"
+              className="prototype-search-clear"
+              onClick={clearSearch}
+              title="清除搜索关键词"
+              type="button">
+              <Icon name="x" size={15} />
+            </button>
+          ) : null}
+        </div>
         <button
           className="prototype-button prototype-button-primary"
           type="submit">
