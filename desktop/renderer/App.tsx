@@ -15,6 +15,7 @@ import type {
   CacheSummary,
   DesktopPage,
   DesktopSettings,
+  DesktopSettingsPatch,
   DesktopTheme,
   DesktopUpdateInfo,
   DesktopVideo,
@@ -49,6 +50,10 @@ import {
   type DesktopUserPreferences,
 } from './preferences';
 import {SmoothProgressInput} from './SmoothProgressInput';
+import {
+  applyDesktopSettingsPatch,
+  mergeDesktopSettingsPatches,
+} from './settingsState';
 
 type Route = PrototypeRoute;
 type NoticeTone = 'info' | 'success' | 'error';
@@ -82,6 +87,9 @@ const PLAYBACK_QUEUE_BATCH_SIZE = 500;
 
 /** 播放到窗口尾部前提前装载下一批，避免切歌时等待 IPC。 */
 const PLAYBACK_QUEUE_PREFETCH_THRESHOLD = 80;
+
+/** 音频滑动条停止操作后再持久化，避免拖动过程频繁写设置文件。 */
+const SETTINGS_PERSIST_DEBOUNCE_MS = 160;
 
 type PlaybackQueueWindow = {
   items: PlaybackQueueItem[];
@@ -180,6 +188,10 @@ export function App(): JSX.Element {
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const audioAdapterRef = useRef<ElectronAudioPlayerAdapter | null>(null);
+  const settingsRef = useRef<DesktopSettings | null>(null);
+  const pendingSettingsPatchRef = useRef<DesktopSettingsPatch>({});
+  const settingsPersistTimerRef = useRef<number | null>(null);
+  const settingsPersistInFlightRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const noticeSequenceRef = useRef(0);
   const authRefreshSequenceRef = useRef(0);
@@ -827,8 +839,12 @@ export function App(): JSX.Element {
         setWebViewState(event);
       },
     );
-    const unsubscribeSettings =
-      window.nyamiDesktop.settings.onChanged(setSettings);
+    const unsubscribeSettings = window.nyamiDesktop.settings.onChanged(
+      next => {
+        settingsRef.current = next;
+        setSettings(next);
+      },
+    );
     const unsubscribePlayback = window.nyamiDesktop.playback.onStateChanged(
       event => {
         setPlayback(event.snapshot);
@@ -843,7 +859,10 @@ export function App(): JSX.Element {
     );
     void Promise.all([
       refreshAuth(),
-      window.nyamiDesktop.settings.get().then(setSettings),
+      window.nyamiDesktop.settings.get().then(next => {
+        settingsRef.current = next;
+        setSettings(next);
+      }),
       window.nyamiDesktop.playback.getState().then(setPlayback),
       window.nyamiDesktop.sync.getStatus().then(setSync),
       window.nyamiDesktop.cache.getSummary().then(setCacheSummary),
@@ -859,7 +878,11 @@ export function App(): JSX.Element {
       unsubscribeSync();
       unsubscribeCache();
     };
-  }, [appendPlaybackWindow, pushNotice, refreshAuth]);
+  }, [
+    appendPlaybackWindow,
+    pushNotice,
+    refreshAuth,
+  ]);
 
   /** 初始化自绘窗口边框状态，并订阅主进程的最大化变化。 */
   useEffect(() => {
@@ -885,18 +908,93 @@ export function App(): JSX.Element {
   /** 根据用户设置将页面映射为桌面主题类名。 */
   const themeClassName = 'theme-light';
 
-  /** 修改桌面设置，并在失败时恢复可见提示。 */
+  /** 写入 Renderer 设置快照，并让音频适配器立即接收最新参数。 */
+  const setSettingsSnapshot = useCallback((next: DesktopSettings): void => {
+    settingsRef.current = next;
+    setSettings(next);
+    audioAdapterRef.current?.setAudioSettings(next.audio);
+  }, []);
+
+  /** 将合并后的设置补丁持久化到主进程，失败时保留当前 UI 状态并提示用户。 */
+  const flushSettingsPatch = useCallback(async (): Promise<void> => {
+    if (settingsPersistInFlightRef.current) {
+      return;
+    }
+    const patch = pendingSettingsPatchRef.current;
+    pendingSettingsPatchRef.current = {};
+    if (
+      !patch.audio &&
+      !patch.window &&
+      patch.theme === undefined &&
+      patch.quality === undefined &&
+      patch.closeToTray === undefined &&
+      patch.autoSyncIndex === undefined
+    ) {
+      return;
+    }
+    settingsPersistInFlightRef.current = true;
+    try {
+      const next = await window.nyamiDesktop.settings.update(patch);
+      setSettingsSnapshot(next);
+    } catch (error) {
+      pushNotice('error', getErrorMessage(error, '设置保存失败'));
+    } finally {
+      settingsPersistInFlightRef.current = false;
+      if (
+        Object.keys(pendingSettingsPatchRef.current).length > 0 &&
+        settingsPersistTimerRef.current === null
+      ) {
+        settingsPersistTimerRef.current = window.setTimeout(() => {
+          settingsPersistTimerRef.current = null;
+          void flushSettingsPatch();
+        }, SETTINGS_PERSIST_DEBOUNCE_MS);
+      }
+    }
+  }, [pushNotice, setSettingsSnapshot]);
+
+  /** 延迟提交设置补丁，连续拖动时只保留停止后的最后一次写入。 */
+  const scheduleSettingsPersist = useCallback((): void => {
+    if (settingsPersistTimerRef.current !== null) {
+      window.clearTimeout(settingsPersistTimerRef.current);
+    }
+    settingsPersistTimerRef.current = window.setTimeout(() => {
+      settingsPersistTimerRef.current = null;
+      void flushSettingsPatch();
+    }, SETTINGS_PERSIST_DEBOUNCE_MS);
+  }, [flushSettingsPatch]);
+
+  /** 修改桌面设置，先更新音频链路，再合并延迟持久化补丁。 */
   const updateSettings = useCallback(
-    async (
-      patch: Parameters<typeof window.nyamiDesktop.settings.update>[0],
-    ) => {
-      try {
-        setSettings(await window.nyamiDesktop.settings.update(patch));
-      } catch (error) {
-        pushNotice('error', getErrorMessage(error, '设置保存失败'));
+    (patch: DesktopSettingsPatch): void => {
+      const current = settingsRef.current;
+      if (current) {
+        const next = applyDesktopSettingsPatch(current, patch);
+        settingsRef.current = next;
+        setSettings(next);
+        if (patch.audio) {
+          audioAdapterRef.current?.setAudioSettings(next.audio);
+        }
+      }
+      pendingSettingsPatchRef.current = mergeDesktopSettingsPatches(
+        pendingSettingsPatchRef.current,
+        patch,
+      );
+      scheduleSettingsPersist();
+    },
+    [scheduleSettingsPersist],
+  );
+
+  useEffect(
+    () => () => {
+      if (settingsPersistTimerRef.current !== null) {
+        window.clearTimeout(settingsPersistTimerRef.current);
+        settingsPersistTimerRef.current = null;
+      }
+      if (Object.keys(pendingSettingsPatchRef.current).length > 0) {
+        void flushSettingsPatch();
       }
     },
-    [pushNotice],
+    [flushSettingsPatch],
   );
 
   /** 删除指定收藏来源的本地索引，并让主进程校验当前账号。 */

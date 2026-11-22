@@ -1,3 +1,4 @@
+import type {CSSProperties} from 'react';
 import type {
   DesktopAudioSettings,
   DesktopPeqBand,
@@ -9,6 +10,7 @@ import {
   GRAPHIC_BAND_FREQUENCIES,
   getPresetGains,
 } from './eqPresets';
+import {getRangeProgressPercent} from './rangeProgress';
 import {PrototypeSelect} from '../PrototypePages';
 
 type AudioSettingsPanelProps = {
@@ -28,6 +30,13 @@ const PEQ_FILTER_OPTIONS: ReadonlyArray<{
   {value: 'Notch', label: '陷波'},
   {value: 'BandPass', label: '带通'},
 ];
+
+const GRAPHIC_GAIN_MIN = -12;
+const GRAPHIC_GAIN_MAX = 12;
+const LIMITER_THRESHOLD_MIN = 0.5;
+const LIMITER_THRESHOLD_MAX = 1;
+const LOUDNESS_TARGET_MIN = -24;
+const LOUDNESS_TARGET_MAX = -12;
 
 /**
  * 桌面端音频设置面板。
@@ -139,12 +148,21 @@ export function AudioSettingsPanel({
               <div className="graphic-slider">
                 <input
                   aria-label={`${formatFrequency(frequency)} Hz 增益`}
-                  max="12"
-                  min="-12"
+                  max={GRAPHIC_GAIN_MAX}
+                  min={GRAPHIC_GAIN_MIN}
                   onChange={event =>
                     updateGraphicGain(index, Number(event.target.value))
                   }
                   step="0.5"
+                  style={
+                    {
+                      '--range-progress': `${getRangeProgressPercent(
+                        settings.graphicGains[index] ?? 0,
+                        GRAPHIC_GAIN_MIN,
+                        GRAPHIC_GAIN_MAX,
+                      )}%`,
+                    } as CSSProperties
+                  }
                   type="range"
                   value={settings.graphicGains[index] ?? 0}
                 />
@@ -252,12 +270,21 @@ export function AudioSettingsPanel({
         <input
           aria-label="Limiter 阈值"
           disabled={!settings.limiterEnabled}
-          max="1"
-          min="0.5"
+          max={LIMITER_THRESHOLD_MAX}
+          min={LIMITER_THRESHOLD_MIN}
           onChange={event =>
             updateAudio({limiterThreshold: Number(event.target.value)})
           }
           step="0.01"
+          style={
+            {
+              '--range-progress': `${getRangeProgressPercent(
+                settings.limiterThreshold,
+                LIMITER_THRESHOLD_MIN,
+                LIMITER_THRESHOLD_MAX,
+              )}%`,
+            } as CSSProperties
+          }
           type="range"
           value={settings.limiterThreshold}
         />
@@ -284,12 +311,21 @@ export function AudioSettingsPanel({
         <input
           aria-label="响度目标"
           disabled={!settings.loudnessEnabled}
-          max="-12"
-          min="-24"
+          max={LOUDNESS_TARGET_MAX}
+          min={LOUDNESS_TARGET_MIN}
           onChange={event =>
             updateAudio({loudnessTargetDb: Number(event.target.value)})
           }
           step="0.5"
+          style={
+            {
+              '--range-progress': `${getRangeProgressPercent(
+                settings.loudnessTargetDb,
+                LOUDNESS_TARGET_MIN,
+                LOUDNESS_TARGET_MAX,
+              )}%`,
+            } as CSSProperties
+          }
           type="range"
           value={settings.loudnessTargetDb}
         />
