@@ -12,6 +12,10 @@ export default defineConfig({
   main: {
     build: {
       sourcemap: false,
+      // 安装包只收集 desktop/out，主进程使用的第三方依赖必须内联。
+      externalizeDeps: {
+        exclude: ['md5', 'qrcode'],
+      },
       lib: {
         entry: resolve(desktopRoot, 'main/index.ts'),
       },
