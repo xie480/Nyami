@@ -52,6 +52,7 @@ type PrototypeNoticeTone = 'info' | 'success' | 'error';
 
 const SEARCH_TAG_FILTER_STORAGE_KEY = 'nyami-search-tag-filter-v1';
 const DEFAULT_SEARCH_KEYWORD = '音乐';
+const SOURCE_COVER_HYDRATION_LIMIT = 16;
 
 type PrototypePageProps = {
   route: PrototypeRoute;
@@ -952,6 +953,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
     const uid = props.auth.uid;
     const sourcesRequestId = makeRequestId('favorite-sources');
     const indexRequestId = makeRequestId('favorite-index');
+    let coverRequestId: string | null = null;
     setLoading(true);
     void Promise.all([
       window.nyamiDesktop.content.getFavoriteSources({
@@ -993,6 +995,61 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
         setFavoriteIndex(
           filterVisibleFavoriteIndex(nextIndex, nextVisibleKeys),
         );
+
+        const sourceByKey = new Map(
+          nextSources.map(source => [source.sourceKey, source]),
+        );
+        const coverKeys = nextVisibleKeys
+          .map(sourceKey => sourceByKey.get(sourceKey))
+          .filter(
+            (source): source is FavoriteSourceSummary =>
+              Boolean(source && !source.cover),
+          )
+          .slice(0, SOURCE_COVER_HYDRATION_LIMIT)
+          .map(source => source.sourceKey);
+        if (coverKeys.length) {
+          coverRequestId = makeRequestId('favorite-source-covers');
+          void window.nyamiDesktop.content
+            .getFavoriteSources({
+              requestId: coverRequestId,
+              uid,
+              sourceKeys: coverKeys,
+            })
+            .then(hydratedSources => {
+              if (disposed) {
+                return;
+              }
+              const hydratedByKey = new Map(
+                hydratedSources
+                  .filter(source => Boolean(source.cover))
+                  .map(source => [source.sourceKey, source.cover]),
+              );
+              if (!hydratedByKey.size) {
+                return;
+              }
+              setSources(current =>
+                current.map(source => ({
+                  ...source,
+                  cover: hydratedByKey.get(source.sourceKey) ?? source.cover,
+                })),
+              );
+            })
+            .catch(error => {
+              if (!disposed && !isAbortError(error)) {
+                props.onNotice(
+                  'info',
+                  '部分收藏夹封面暂时无法读取',
+                );
+              }
+            })
+            .finally(() => {
+              if (coverRequestId) {
+                void window.nyamiDesktop.content.cancel({
+                  requestId: coverRequestId,
+                });
+              }
+            });
+        }
       })
       .catch(error => {
         if (!disposed) {
@@ -1015,6 +1072,9 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
       disposed = true;
       void window.nyamiDesktop.content.cancel({requestId: sourcesRequestId});
       void window.nyamiDesktop.content.cancel({requestId: indexRequestId});
+      if (coverRequestId) {
+        void window.nyamiDesktop.content.cancel({requestId: coverRequestId});
+      }
     };
   }, [props.auth.loggedIn, props.auth.uid, props.onNotice]);
 
@@ -1263,6 +1323,7 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
   const [tracks, setTracks] = useState<DesktopVideo[]>([]);
   const [description, setDescription] = useState('');
   const [folderTitle, setFolderTitle] = useState('');
+  const [folderCover, setFolderCover] = useState('');
   const [sourceKind, setSourceKind] = useState<FavoriteSourceSummary['kind']>('owned');
   const [loading, setLoading] = useState(false);
   const sourceKey =
@@ -1276,6 +1337,7 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
       setTracks([]);
       setDescription('');
       setFolderTitle('');
+      setFolderCover('');
       setLoading(false);
       return;
     }
@@ -1317,6 +1379,7 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
         setTracks(nextTracks);
         setDescription(summary?.description ?? '');
         setFolderTitle(summary?.title ?? '');
+        setFolderCover(summary?.cover ?? '');
         setSourceKind(summary?.kind ?? 'owned');
       })
       .catch(error => {
@@ -1340,7 +1403,7 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
     };
   }, [onNotice, props.auth.loggedIn, props.auth.uid, sourceKey]);
 
-  const cover = tracks[0]?.cover || coverSummerUrl;
+  const cover = tracks[0]?.cover || folderCover || coverSummerUrl;
   const totalDuration = tracks.reduce((sum, track) => sum + track.duration, 0);
   const playSource = (shuffle: boolean, startIndex = 0): void => {
     if (!sourceKey) {
@@ -1357,7 +1420,7 @@ function FolderDetailPage(props: PrototypePageProps): JSX.Element {
     <div className="prototype-content">
       <section className="prototype-detail-head">
         <div className="prototype-detail-cover">
-          <img alt="收藏夹封面" src={cover} />
+          <SourceCover cover={cover} title={folderTitle || '收藏夹'} />
         </div>
         <div className="prototype-detail-copy">
           <div className="prototype-meta">

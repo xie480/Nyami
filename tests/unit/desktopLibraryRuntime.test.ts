@@ -22,6 +22,7 @@ function createRuntimeFixture(): RuntimeFixture {
   const repository = {
     switchAccount: jest.fn(),
     getSourceSummaries: jest.fn().mockReturnValue([]),
+    getSourceVideos: jest.fn().mockReturnValue({items: [], total: 0}),
   };
   const credentials = {
     getStatus: jest.fn().mockResolvedValue({
@@ -112,6 +113,56 @@ describe('DesktopLibraryRuntime 来源目录读取', () => {
     expect(fixture.logger.warn).toHaveBeenCalledWith(
       'library.source-catalog-repeated-page',
       expect.objectContaining({page: 2}),
+    );
+  });
+
+  it('未同步来源详情会回退读取远端歌曲', async () => {
+    const fixture = createRuntimeFixture();
+    fixture.api.getFavoriteVideos.mockResolvedValue({
+      info: {
+        media_count: 1,
+        intro: '远端简介',
+      },
+      has_more: false,
+      medias: [
+        {
+          aid: 42,
+          bvid: 'BV1remote',
+          title: '远端歌曲',
+          cover: '//i0.hdslb.com/remote.jpg',
+          duration: 120,
+          page: 1,
+          pub_time: 0,
+          pubdate: 1700000000,
+          fav_time: 1700000000,
+          attr: 0,
+          upper: {
+            mid: 2,
+            name: 'UP 主',
+          },
+        },
+      ],
+    });
+
+    const result = await fixture.runtime.getSourceVideos(
+      '1',
+      'collectedFavorite:2:7',
+      1,
+    );
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      bvid: 'BV1remote',
+      cover: 'https://i0.hdslb.com/remote.jpg',
+      sourceKeys: ['collectedFavorite:2:7'],
+    });
+    expect(result.total).toBe(1);
+    expect(fixture.api.getFavoriteVideos).toHaveBeenCalledWith(
+      7,
+      1,
+      20,
+      expect.any(AbortSignal),
+      'normal',
     );
   });
 });

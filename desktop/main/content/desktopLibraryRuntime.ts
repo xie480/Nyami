@@ -188,7 +188,7 @@ export class DesktopLibraryRuntime {
   ): Promise<DesktopPage<DesktopVideo>> {
     return this.withRequest(
       requestId ?? `source-videos:${uid}:${sourceKey}:${page}`,
-      async () => {
+      async signal => {
         await this.assertCurrentAccount(uid);
         this.repository.switchAccount(uid);
         const result = this.repository.getSourceVideos(
@@ -197,6 +197,16 @@ export class DesktopLibraryRuntime {
           page,
           FAVORITE_PAGE_SIZE,
         );
+        const localSource = this.repository
+          .getSourceSummaries(uid, [sourceKey])
+          .find(source => source.sourceKey === sourceKey);
+        if (result.total === 0 && localSource?.syncStatus !== 'success') {
+          return this.fetchRemoteSourceVideos(
+            sourceKey,
+            page,
+            signal,
+          );
+        }
         return {
           items: result.items.map(video => toFavoriteDesktopVideo(video)),
           page,
@@ -422,6 +432,7 @@ export class DesktopLibraryRuntime {
   private async loadImportedCatalog(
     uid: string,
     signal?: AbortSignal,
+    requestedSourceKeys = new Set<string>(),
   ): Promise<FavoriteSourceSummary[]> {
     const items: BiliCollectedPlaylist[] = [];
     let page = 1;
@@ -449,6 +460,21 @@ export class DesktopLibraryRuntime {
       }
       previousPageSignature = pageSignature;
       items.push(...nextItems);
+      if (requestedSourceKeys.size) {
+        const foundKeys = new Set(
+          items
+            .map(item => normalizeImportedSource(item, uid)?.sourceKey)
+            .filter((sourceKey): sourceKey is string => Boolean(sourceKey)),
+        );
+        if (
+          Array.from(requestedSourceKeys).every(sourceKey =>
+            foundKeys.has(sourceKey),
+          )
+        ) {
+          completed = true;
+          break;
+        }
+      }
       if (
         !nextItems.length ||
         (expectedCount > 0 && items.length >= expectedCount) ||
@@ -504,7 +530,19 @@ export class DesktopLibraryRuntime {
         syncStatus: 'idle' as const,
         lastSyncedAt: null,
       }));
-    const imported = await this.loadImportedCatalog(uid, signal);
+    const requestedImportedKeys = new Set(
+      Array.from(requestedSourceKeys).filter(sourceKey => {
+        const target = parseFavoriteSourceTarget(sourceKey);
+        return target !== null && target.kind !== 'owned';
+      }),
+    );
+    const imported = requestedSourceKeys.size && !requestedImportedKeys.size
+      ? []
+      : await this.loadImportedCatalog(
+          uid,
+          signal,
+          requestedImportedKeys,
+        );
     const sources = [...owned, ...imported];
     return Promise.all(
       sources.map(async source => {
@@ -564,6 +602,75 @@ export class DesktopLibraryRuntime {
       }
       return '';
     }
+  }
+
+  /** 未建立本地索引时读取单个来源的远端视频分页。 */
+  private async fetchRemoteSourceVideos(
+    sourceKey: string,
+    page: number,
+    signal: AbortSignal,
+  ): Promise<DesktopPage<DesktopVideo>> {
+    const target = parseFavoriteSourceTarget(sourceKey);
+    if (!target) {
+      return {
+        items: [],
+        page,
+        hasMore: false,
+        total: 0,
+      };
+    }
+
+    if (target.kind === 'subscribedSeason') {
+      const response = await this.api.getSeasonArchives(
+        target.ownerMid,
+        target.remoteId,
+        page,
+        FAVORITE_PAGE_SIZE,
+        signal,
+        'normal',
+      );
+      const archives = response.archives ?? [];
+      const pageSize = response.page?.page_size ?? FAVORITE_PAGE_SIZE;
+      const total = response.page?.total ?? null;
+      const videos = archives
+        .map(archive => toSeasonFavoriteVideo(archive, sourceKey))
+        .filter((video): video is FavoriteVideo => video !== null)
+        .map(video => toFavoriteDesktopVideo(video));
+      return {
+        items: videos,
+        page,
+        hasMore:
+          total !== null
+            ? page * pageSize < total
+            : archives.length === FAVORITE_PAGE_SIZE,
+        total,
+      };
+    }
+
+    const response = await this.api.getFavoriteVideos(
+      target.remoteId,
+      page,
+      FAVORITE_PAGE_SIZE,
+      signal,
+      'normal',
+    );
+    const medias = response.medias ?? [];
+    const videos = medias
+      .filter(media => media.attr === 0)
+      .map(media => ({
+        ...trimFavoriteVideo(media),
+        sourceKeys: [sourceKey],
+      }))
+      .map(video => toFavoriteDesktopVideo(video));
+    const total = response.info?.media_count ?? null;
+    return {
+      items: videos,
+      page,
+      hasMore:
+        response.has_more === true || medias.length === FAVORITE_PAGE_SIZE,
+      total,
+      description: response.info?.intro?.trim() ?? '',
+    };
   }
 
   /** 校验调用方仍持有目标账号，避免账号切换期间写错本地数据。 */
@@ -701,6 +808,44 @@ function toSeasonFavoriteVideo(
     attr: 0,
     sourceKeys: [sourceKey],
   };
+}
+
+/** 从稳定来源键解析远端收藏夹类型和数字 ID。 */
+function parseFavoriteSourceTarget(
+  sourceKey: string,
+):
+  | {
+      kind: 'owned' | 'collectedFavorite';
+      remoteId: number;
+    }
+  | {
+      kind: 'subscribedSeason';
+      ownerMid: number;
+      remoteId: number;
+    }
+  | null {
+  const parts = sourceKey.split(':');
+  const remoteId = Number(parts.at(-1));
+  if (!Number.isSafeInteger(remoteId) || remoteId <= 0) {
+    return null;
+  }
+  if (parts.length === 2 && parts[0] === 'ownedFavorite') {
+    return {kind: 'owned', remoteId};
+  }
+  if (parts.length !== 3) {
+    return null;
+  }
+  const ownerMid = Number(parts[1]);
+  if (!Number.isSafeInteger(ownerMid) || ownerMid <= 0) {
+    return null;
+  }
+  if (parts[0] === 'subscribedSeason') {
+    return {kind: 'subscribedSeason', ownerMid, remoteId};
+  }
+  if (parts[0] === 'collectedFavorite') {
+    return {kind: 'collectedFavorite', remoteId};
+  }
+  return null;
 }
 
 export type {LibrarySyncOptions};
