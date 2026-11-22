@@ -260,6 +260,38 @@ export function AudioSettingsPanel({
       </label>
       <label className="setting-row">
         <span>
+          <strong>响度匹配</strong>
+          <small>缓慢跟随短期 RMS，减少不同音轨切换时的音量落差，增益限制在 ±6 dB。</small>
+        </span>
+        <input
+          aria-label="启用响度匹配"
+          checked={settings.loudnessEnabled}
+          onChange={event =>
+            updateAudio({loudnessEnabled: event.target.checked})
+          }
+          type="checkbox"
+        />
+      </label>
+      <label className="range-setting">
+        <span>
+          <strong>响度目标</strong>
+          <small>{settings.loudnessTargetDb.toFixed(1)} dBFS RMS</small>
+        </span>
+        <input
+          aria-label="响度目标"
+          disabled={!settings.loudnessEnabled}
+          max="-12"
+          min="-24"
+          onChange={event =>
+            updateAudio({loudnessTargetDb: Number(event.target.value)})
+          }
+          step="0.5"
+          type="range"
+          value={settings.loudnessTargetDb}
+        />
+      </label>
+      <label className="setting-row">
+        <span>
           <strong>实时频谱</strong>
           <small>
             以 30 Hz 上限发送 128 段 FFT 数据，降低列表滚动时的主线程开销。

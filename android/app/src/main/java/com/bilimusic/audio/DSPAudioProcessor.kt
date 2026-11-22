@@ -7,6 +7,8 @@ import java.nio.ByteOrder
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
+import kotlin.math.pow
+import kotlin.math.sqrt
 
 /**
  * 基于 ExoPlayer/Media3 BaseAudioProcessor 模式的 DSP 引擎
@@ -104,6 +106,12 @@ class DSPAudioProcessor {
     private var limiterThreshold = 0.95f
     private var limiterEnabled = true
 
+    // 响度匹配只做缓慢增益跟随，不压缩瞬态；默认关闭以保持原音行为。
+    private var loudnessEnabled = false
+    private var loudnessTargetDb = -18f
+    private var loudnessRms = 0f
+    private var loudnessGain = 1f
+
     enum class EQMode { GRAPHIC, PARAMETRIC }
 
     init {
@@ -160,7 +168,10 @@ class DSPAudioProcessor {
     }
 
     fun setEnabled(enabled: Boolean) {
-        lock.write { this.enabled = enabled }
+        lock.write {
+            this.enabled = enabled
+            if (!enabled) resetLoudnessState()
+        }
     }
 
     fun setSpectrumEnabled(enabled: Boolean) {
@@ -169,6 +180,21 @@ class DSPAudioProcessor {
 
     fun setMode(mode: EQMode) {
         lock.write { this.mode = mode }
+    }
+
+    /** 开关短期 RMS 响度匹配，关闭时立即恢复单位增益。 */
+    fun setLoudnessEnabled(enabled: Boolean) {
+        lock.write {
+            loudnessEnabled = enabled
+            if (!enabled) resetLoudnessState()
+        }
+    }
+
+    /** 设置响度匹配目标，限制在保守的 -24~-12 dBFS RMS 范围。 */
+    fun setLoudnessTargetDb(targetDb: Float) {
+        lock.write {
+            loudnessTargetDb = targetDb.coerceIn(-24f, -12f)
+        }
     }
 
     /**
@@ -264,6 +290,9 @@ class DSPAudioProcessor {
                     }
                 }
             }
+
+            if (loudnessEnabled) applyLoudnessGain(buffer, sampleCount)
+
             // 简易 Limiter（防止削波失真），只扫描本块有效样本。
             if (limiterEnabled) applyLimiter(buffer, sampleCount)
         }
@@ -313,6 +342,37 @@ class DSPAudioProcessor {
 
     // ====== Limiter ======
 
+    /** 根据短期 RMS 缓慢调整增益，避免切歌时仅因响度差异产生错觉。 */
+    private fun applyLoudnessGain(buffer: FloatArray, sampleCount: Int) {
+        var energy = 0.0
+        for (index in 0 until sampleCount) {
+            val sample = buffer[index].toDouble()
+            energy += sample * sample
+        }
+        val blockRms = sqrt(energy / sampleCount).toFloat()
+        if (!blockRms.isFinite() || blockRms < 1e-5f) return
+
+        loudnessRms = if (loudnessRms > 0f) {
+            loudnessRms * 0.995f + blockRms * 0.005f
+        } else {
+            blockRms
+        }
+        val targetRms = 10.0.pow(loudnessTargetDb.toDouble() / 20.0).toFloat()
+        val desiredGain = (targetRms / loudnessRms.coerceAtLeast(1e-5f))
+            .coerceIn(0.5f, 2f)
+        val smoothing = if (desiredGain > loudnessGain) 0.01f else 0.002f
+        loudnessGain += (desiredGain - loudnessGain) * smoothing
+        for (index in 0 until sampleCount) {
+            buffer[index] *= loudnessGain
+        }
+    }
+
+    /** 清理响度跟踪状态，避免上一首歌曲的增益带入下一首。 */
+    private fun resetLoudnessState() {
+        loudnessRms = 0f
+        loudnessGain = 1f
+    }
+
     private fun applyLimiter(buffer: FloatArray, sampleCount: Int) {
         var peak = 0f
         for (i in 0 until sampleCount) {
@@ -335,9 +395,12 @@ class DSPAudioProcessor {
         lock.write {
             graphicGains.fill(0f)
             for (i in peqParameters.indices) peqParameters[i] = PEQParameters()
+            loudnessEnabled = false
+            loudnessTargetDb = -18f
             updateFilterCoefficients()
             for (filters in graphicFilters) for (filter in filters) filter.reset()
             for (filters in peqFilters) for (filter in filters) filter.reset()
+            resetLoudnessState()
             fftAnalyzer.reset()
         }
     }

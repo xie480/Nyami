@@ -32,6 +32,8 @@ const MIN_PEQ_Q = 0.1;
 const MAX_PEQ_Q = 20;
 const MIN_LIMITER_THRESHOLD = 0.5;
 const MAX_LIMITER_THRESHOLD = 1;
+const MIN_LOUDNESS_TARGET_DB = -24;
+const MAX_LOUDNESS_TARGET_DB = -12;
 
 const GRAPHIC_PRESETS: readonly DesktopGraphicPreset[] = [
   'flat',
@@ -89,6 +91,8 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
     peqBands: clonePeqBands(DEFAULT_PEQ_BANDS),
     limiterEnabled: true,
     limiterThreshold: 0.95,
+    loudnessEnabled: false,
+    loudnessTargetDb: -18,
     spectrumEnabled: true,
   },
 };
@@ -293,6 +297,16 @@ export function normalizeAudioSettings(value: unknown): DesktopAudioSettings {
       DEFAULT_DESKTOP_SETTINGS.audio.limiterThreshold,
       MIN_LIMITER_THRESHOLD,
       MAX_LIMITER_THRESHOLD,
+    ),
+    loudnessEnabled:
+      typeof record.loudnessEnabled === 'boolean'
+        ? record.loudnessEnabled
+        : DEFAULT_DESKTOP_SETTINGS.audio.loudnessEnabled,
+    loudnessTargetDb: normalizeNumber(
+      record.loudnessTargetDb,
+      DEFAULT_DESKTOP_SETTINGS.audio.loudnessTargetDb,
+      MIN_LOUDNESS_TARGET_DB,
+      MAX_LOUDNESS_TARGET_DB,
     ),
     spectrumEnabled:
       typeof record.spectrumEnabled === 'boolean'

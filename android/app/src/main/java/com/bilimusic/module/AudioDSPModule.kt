@@ -13,6 +13,8 @@ import kotlin.math.sqrt
  * - updatePEQFilter(index: number, type: number, freq: number, gain: number, q: number)
  * - setEnabled(enabled: boolean)
  * - setMode(mode: number)
+ * - setLoudnessEnabled(enabled: boolean)
+ * - setLoudnessTargetDb(targetDb: number)
  * - applyPreset(gains: number[])
  * - getDiagnostics()
  * - reset()
@@ -63,6 +65,20 @@ class AudioDSPModule(reactContext: ReactApplicationContext) :
         val eqMode = if (mode == 0) DSPAudioProcessor.EQMode.GRAPHIC else DSPAudioProcessor.EQMode.PARAMETRIC
         dspProcessor.setMode(eqMode)
         Log.d(TAG, "EQ mode: $eqMode")
+    }
+
+    /** 设置短期 RMS 响度匹配开关。 */
+    @ReactMethod
+    fun setLoudnessEnabled(enabled: Boolean) {
+        dspProcessor.setLoudnessEnabled(enabled)
+        Log.d(TAG, "Loudness matching enabled: $enabled")
+    }
+
+    /** 设置响度匹配目标 dBFS RMS。 */
+    @ReactMethod
+    fun setLoudnessTargetDb(targetDb: Double) {
+        dspProcessor.setLoudnessTargetDb(targetDb.toFloat())
+        Log.d(TAG, "Loudness target: $targetDb dBFS RMS")
     }
 
     @ReactMethod

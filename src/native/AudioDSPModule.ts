@@ -40,6 +40,12 @@ export interface AudioDSPModuleInterface {
   /** 切换 EQ 模式：0=Graphic, 1=PEQ */
   setMode(mode: number): void;
 
+  /** 开关短期 RMS 响度匹配。 */
+  setLoudnessEnabled(enabled: boolean): void;
+
+  /** 设置响度匹配目标 dBFS RMS。 */
+  setLoudnessTargetDb(targetDb: number): void;
+
   /** 应用预设（快捷设置所有频段） */
   applyPreset(gains: number[]): void;
 
@@ -81,6 +87,8 @@ export const audioDSP: AudioDSPModuleInterface = AudioDSPModule ?? {
   setEnabled: () => {},
   setSpectrumEnabled: () => {},
   setMode: () => {},
+  setLoudnessEnabled: () => {},
+  setLoudnessTargetDb: () => {},
   applyPreset: () => {},
   getDiagnostics: async () => ({
     processorAttached: false,

@@ -291,6 +291,8 @@ function defaultSettings() {
     peqBands: Array.from({length: 8}, () => ({enabled: false, type: 'Peak', frequency: 1000, gain: 0, q: 1})),
     limiterEnabled: true,
     limiterThreshold: 0.95,
+    loudnessEnabled: false,
+    loudnessTargetDb: -18,
     spectrumEnabled: true,
   };
 }
@@ -302,6 +304,8 @@ class NyamiDspProcessor extends AudioWorkletProcessor {
     this.graphicFilters = [];
     this.peqFilters = [];
     this.channelCount = 0;
+    this.loudnessRms = 0;
+    this.loudnessGain = 1;
     this.fftBuffer = new Float32Array(FFT_SIZE);
     this.fftOffset = 0;
     this.lastSpectrumAt = 0;
@@ -323,6 +327,7 @@ class NyamiDspProcessor extends AudioWorkletProcessor {
     }
     this.ensureChannels(output.length);
     const frameCount = output[0].length;
+    let blockEnergy = 0;
     for (let frame = 0; frame < frameCount; frame += 1) {
       let mono = 0;
       for (let channel = 0; channel < output.length; channel += 1) {
@@ -340,11 +345,25 @@ class NyamiDspProcessor extends AudioWorkletProcessor {
           }
         }
         output[channel][frame] = sample;
+        blockEnergy += sample * sample;
         mono += sample;
       }
       if (this.settings.spectrumEnabled) {
         this.pushSpectrumSample(mono / output.length);
       }
+    }
+
+    if (this.settings.enabled && this.settings.loudnessEnabled) {
+      this.updateLoudnessGain(
+        Math.sqrt(blockEnergy / Math.max(1, frameCount * output.length)),
+      );
+      for (let channel = 0; channel < output.length; channel += 1) {
+        for (let frame = 0; frame < frameCount; frame += 1) {
+          output[channel][frame] *= this.loudnessGain;
+        }
+      }
+    } else {
+      this.resetLoudness();
     }
 
     // 先扫描整块峰值，再统一衰减，避免逐采样 tanh 改变低电平细节。
@@ -381,6 +400,24 @@ class NyamiDspProcessor extends AudioWorkletProcessor {
     }
     this.channelCount = count;
     this.configureFilters();
+  }
+
+  updateLoudnessGain(blockRms) {
+    if (!Number.isFinite(blockRms) || blockRms < 1e-5) {
+      return;
+    }
+    this.loudnessRms = this.loudnessRms > 0
+      ? this.loudnessRms * 0.995 + blockRms * 0.005
+      : blockRms;
+    const target = Math.pow(10, this.settings.loudnessTargetDb / 20);
+    const desired = Math.min(2, Math.max(0.5, target / Math.max(1e-5, this.loudnessRms)));
+    const smoothing = desired > this.loudnessGain ? 0.01 : 0.002;
+    this.loudnessGain += (desired - this.loudnessGain) * smoothing;
+  }
+
+  resetLoudness() {
+    this.loudnessRms = 0;
+    this.loudnessGain = 1;
   }
 
   configureFilters() {
@@ -445,6 +482,8 @@ function normalizeSettings(value) {
     }),
     limiterEnabled: source.limiterEnabled !== false,
     limiterThreshold: Number(source.limiterThreshold || 0.95),
+    loudnessEnabled: source.loudnessEnabled === true,
+    loudnessTargetDb: Math.min(-12, Math.max(-24, Number(source.loudnessTargetDb || -18))),
     spectrumEnabled: source.spectrumEnabled !== false,
   };
 }

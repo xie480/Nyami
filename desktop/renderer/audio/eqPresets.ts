@@ -80,6 +80,8 @@ export const DEFAULT_DESKTOP_AUDIO_SETTINGS: DesktopAudioSettings = {
   ],
   limiterEnabled: true,
   limiterThreshold: 0.95,
+  loudnessEnabled: false,
+  loudnessTargetDb: -18,
   spectrumEnabled: true,
 };
 

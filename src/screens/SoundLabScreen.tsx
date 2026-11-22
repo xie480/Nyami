@@ -10,6 +10,7 @@ import {
 import {useIsFocused} from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {Header} from '../components/Header';
+import {Slider} from '../components/Slider';
 import {Switch} from '../components/Switch';
 import {GraphicEQ} from '../components/eq/GraphicEQ';
 import {ParametricEQ} from '../components/eq/ParametricEQ';
@@ -345,6 +346,12 @@ export const SoundLabScreen = () => {
   const setMode = useEQStore(state => state.setMode);
   const enabled = useEQStore(state => state.enabled);
   const setEnabled = useEQStore(state => state.setEnabled);
+  const loudnessEnabled = useEQStore(state => state.loudnessEnabled);
+  const setLoudnessEnabled = useEQStore(state => state.setLoudnessEnabled);
+  const loudnessTargetDb = useEQStore(state => state.loudnessTargetDb);
+  const setLoudnessTargetDb = useEQStore(
+    state => state.setLoudnessTargetDb,
+  );
   const activePresetId = useEQStore(state => state.activePresetId);
   const resetToFlat = useEQStore(state => state.resetToFlat);
   const [selectedFilterId, setSelectedFilterId] = useState<number | null>(null);
@@ -407,6 +414,37 @@ export const SoundLabScreen = () => {
             </View>
             <Switch accessibilityLabel="均衡器总开关" value={enabled} onValueChange={setEnabled} />
           </View>
+          <View style={[styles.heroControl, {marginTop: 18}]}>
+            <View style={styles.heroControlCopy}>
+              <Text style={[styles.heroControlTitle, {color: t.colors.text}]}>
+                响度匹配
+              </Text>
+              <Text
+                style={[styles.heroControlHint, {color: t.colors.textHint}]}>
+                {loudnessEnabled
+                  ? `目标 ${loudnessTargetDb.toFixed(1)} dBFS RMS，缓慢跟随`
+                  : '关闭后不改变原音的整体响度'}
+              </Text>
+            </View>
+            <Switch
+              accessibilityLabel="响度匹配"
+              value={loudnessEnabled}
+              onValueChange={setLoudnessEnabled}
+            />
+          </View>
+          <Slider
+            accessibilityLabel="响度匹配目标"
+            accessibilityValueText={`${loudnessTargetDb.toFixed(1)} dBFS RMS`}
+            disabled={!loudnessEnabled}
+            maximumTrackColor={t.colors.divider}
+            maximumValue={-12}
+            minimumTrackColor={t.colors.primary}
+            minimumValue={-24}
+            onValueChange={setLoudnessTargetDb}
+            step={0.5}
+            thumbColor={t.colors.primary}
+            value={loudnessTargetDb}
+          />
         </View>
 
         <View

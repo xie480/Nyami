@@ -436,6 +436,8 @@ export type DesktopAudioSettings = {
   peqBands: DesktopPeqBand[];
   limiterEnabled: boolean;
   limiterThreshold: number;
+  loudnessEnabled: boolean;
+  loudnessTargetDb: number;
   spectrumEnabled: boolean;
 };
 

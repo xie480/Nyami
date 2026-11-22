@@ -220,12 +220,18 @@ interface EQState {
   activePresetId: string | null;
   /** EQ 总开关 */
   enabled: boolean;
+  /** 短期 RMS 响度匹配开关 */
+  loudnessEnabled: boolean;
+  /** 响度匹配目标 dBFS RMS */
+  loudnessTargetDb: number;
   /** PEQ 编辑器中正在编辑的 filter id */
   editingFilterId: number | null;
 
   // Actions
   setMode: (mode: EQMode) => void;
   setEnabled: (enabled: boolean) => void;
+  setLoudnessEnabled: (enabled: boolean) => void;
+  setLoudnessTargetDb: (targetDb: number) => void;
   setGraphicBand: (index: number, value: number) => void;
   setGraphicBands: (bands: GraphicBands) => void;
   addFilter: () => void;
@@ -258,10 +264,16 @@ function syncPEQFilters(filters: PEQFilter[]) {
 
 function syncNativeState(state: EQState) {
   try {
+    const loudnessTargetDb = Math.max(
+      -24,
+      Math.min(-12, Number(state.loudnessTargetDb ?? -18)),
+    );
     audioDSP.updateGraphicEQ(state.graphicBands);
     syncPEQFilters(state.peqFilters);
     audioDSP.setMode(state.mode === 'graphic' ? 0 : 1);
     audioDSP.setEnabled(state.enabled);
+    audioDSP.setLoudnessEnabled(state.loudnessEnabled === true);
+    audioDSP.setLoudnessTargetDb(loudnessTargetDb);
   } catch {}
 }
 
@@ -275,6 +287,8 @@ export const useEQStore = create<EQState>()(
       peqFilters: DEFAULT_PEQ_FILTERS_PRESET.map(f => ({ ...f })),
       activePresetId: 'flat',
       enabled: true,
+      loudnessEnabled: false,
+      loudnessTargetDb: -18,
       editingFilterId: null,
 
       setMode: (mode) => {
@@ -285,6 +299,17 @@ export const useEQStore = create<EQState>()(
       setEnabled: (enabled) => {
         set({ enabled });
         try { audioDSP.setEnabled(enabled); } catch {}
+      },
+
+      setLoudnessEnabled: (loudnessEnabled) => {
+        set({ loudnessEnabled });
+        try { audioDSP.setLoudnessEnabled(loudnessEnabled); } catch {}
+      },
+
+      setLoudnessTargetDb: (loudnessTargetDb) => {
+        const target = Math.max(-24, Math.min(-12, loudnessTargetDb));
+        set({ loudnessTargetDb: target });
+        try { audioDSP.setLoudnessTargetDb(target); } catch {}
       },
 
       setGraphicBand: (index, value) => {
@@ -364,10 +389,14 @@ export const useEQStore = create<EQState>()(
           graphicBands: [...FLAT_BANDS] as GraphicBands,
           activePresetId: 'flat',
           peqFilters: DEFAULT_PEQ_FILTERS_PRESET.map(f => ({ ...f })),
+          loudnessEnabled: false,
+          loudnessTargetDb: -18,
         });
         try {
           audioDSP.reset();
           audioDSP.setMode(0);
+          audioDSP.setLoudnessEnabled(false);
+          audioDSP.setLoudnessTargetDb(-18);
         } catch {}
       },
     }),
