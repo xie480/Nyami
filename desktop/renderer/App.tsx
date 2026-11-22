@@ -157,7 +157,7 @@ const EMPTY_UPDATE: DesktopUpdateInfo = {
   error: null,
 };
 
-/** 阶段 3 桌面端应用根组件，负责导航、认证状态和全局任务通知。 */
+/** 阶段 3 桌面端应用根组件，负责导航、认证状态和全局操作提示。 */
 export function App(): JSX.Element {
   const [route, setRoute] = useState<Route>('library');
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
@@ -178,7 +178,6 @@ export function App(): JSX.Element {
     mode: null,
   });
   const [notices, setNotices] = useState<Notice[]>([]);
-  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [playback, setPlayback] = useState<PlaybackSnapshot>(EMPTY_PLAYBACK);
   const [sync, setSync] = useState<SyncSnapshot>(EMPTY_SYNC);
@@ -202,7 +201,7 @@ export function App(): JSX.Element {
   const authRefreshSequenceRef = useRef(0);
   const playbackWindowRef = useRef<PlaybackQueueWindow | null>(null);
 
-  /** 追加全局任务通知，并保留最近的通知历史。 */
+  /** 追加全局操作提示，并保留最近的提示历史。 */
   const pushNotice = useCallback((tone: NoticeTone, message: string): void => {
     const id = ++noticeSequenceRef.current;
     setNotices(current => [...current, {id, tone, message}].slice(-12));
@@ -1219,37 +1218,6 @@ export function App(): JSX.Element {
                         : '关闭网页登录'}
                     </button>
                   ) : null}
-                  <div className="task-center-wrap">
-                    <button
-                      aria-expanded={taskCenterOpen}
-                      aria-label="打开任务通知"
-                      className="icon-button notification-button"
-                      onClick={() => setTaskCenterOpen(current => !current)}
-                      title="任务通知"
-                      type="button">
-                      <Icon name="bell" size={18} />
-                      {notices.length ? (
-                        <span className="notification-count">
-                          {notices.length}
-                        </span>
-                      ) : null}
-                    </button>
-                    {taskCenterOpen ? (
-                      <TaskCenter
-                        notices={notices}
-                        onCancelSync={() => {
-                          void window.nyamiDesktop.sync.cancel().then(setSync);
-                        }}
-                        onDismiss={id =>
-                          setNotices(current =>
-                            current.filter(notice => notice.id !== id),
-                          )
-                        }
-                        onOpenSettings={() => setRoute('settings')}
-                        sync={sync}
-                      />
-                    ) : null}
-                  </div>
                 </div>
               </header>
 
@@ -2245,7 +2213,7 @@ function SettingsPage({
         <label className="setting-row">
           <span>
             <strong>启动时拉取收藏夹最新视频</strong>
-            <small>重新启动时增量检查收藏夹，仍可在任务通知中手动同步。</small>
+            <small>重新启动时增量检查收藏夹，需要更新时可在本页手动同步。</small>
           </span>
           <input
             checked={preferences.autoRefreshFavoritesOnLaunch}
@@ -2454,8 +2422,8 @@ function SettingsPage({
           ) : null}
           <small>
             {updateInfo.source
-              ? '更新源由 NYAMI_UPDATE_URL 配置；下载和安装由用户手动确认。'
-              : '未配置更新源时仍可使用当前版本，发布环境可通过 NYAMI_UPDATE_URL 接入 latest.json。'}
+              ? '更新源来自 Nyami GitHub Releases；可用 NYAMI_UPDATE_URL 覆盖。'
+              : '更新源地址无效时仍可使用当前版本，请检查 NYAMI_UPDATE_URL。'}
           </small>
         </div>
       </section>
@@ -3495,7 +3463,7 @@ function PlayerPlaceholder({
                   </button>
                   <button
                     aria-label="移除队列项目"
-                    className="task-dismiss"
+                    className="queue-item-remove"
                     onClick={() => onRemove(item.id)}
                     type="button">
                     <Icon name="x" size={13} />
@@ -3537,89 +3505,6 @@ function PlayerArtworkImage({src}: {src: string | null}): JSX.Element {
       onError={() => setFailed(true)}
       src={src}
     />
-  );
-}
-
-/** 渲染全局任务通知下拉面板。 */
-function TaskCenter({
-  notices,
-  onCancelSync,
-  onDismiss,
-  onOpenSettings,
-  sync,
-}: {
-  notices: Notice[];
-  onCancelSync: () => void;
-  onDismiss: (id: number) => void;
-  onOpenSettings: () => void;
-  sync: SyncSnapshot;
-}): JSX.Element {
-  return (
-    <div className="task-center" role="status">
-      <div className="task-center-header">
-        <strong>任务通知</strong>
-        <span>{notices.length ? `${notices.length} 条` : '暂无'}</span>
-      </div>
-      <div className="task-item sync-task">
-        <span className="task-item-icon">
-          <Icon name="refresh" size={15} />
-        </span>
-        <span className="sync-task-copy">
-          <strong>{sync.message ?? '收藏同步未启动'}</strong>
-          {sync.state === 'running' ? (
-            <small>
-              {sync.phase === 'favorites'
-                ? `${sync.processedVideos}/${sync.totalVideos} 个视频`
-                : `${sync.completed}/${sync.total} 个收藏夹`}
-            </small>
-          ) : null}
-          {sync.error ? <small>{sync.error}</small> : null}
-        </span>
-        {sync.state === 'running' ? (
-          <button className="task-action" onClick={onCancelSync} type="button">
-            取消
-          </button>
-        ) : (
-          <button
-            className="task-action"
-            onClick={onOpenSettings}
-            type="button">
-            {sync.state === 'failed' ? '去设置重试' : '去设置同步'}
-          </button>
-        )}
-      </div>
-      {notices.length ? (
-        notices
-          .slice()
-          .reverse()
-          .map(notice => (
-            <div className={`task-item ${notice.tone}`} key={notice.id}>
-              <span className="task-item-icon">
-                <Icon
-                  name={
-                    notice.tone === 'error'
-                      ? 'alert'
-                      : notice.tone === 'success'
-                      ? 'check'
-                      : 'sparkles'
-                  }
-                  size={15}
-                />
-              </span>
-              <span>{notice.message}</span>
-              <button
-                aria-label="移除通知"
-                className="task-dismiss"
-                onClick={() => onDismiss(notice.id)}
-                type="button">
-                <Icon name="x" size={13} />
-              </button>
-            </div>
-          ))
-      ) : (
-        <div className="task-empty">登录、搜索和同步状态会显示在这里。</div>
-      )}
-    </div>
   );
 }
 

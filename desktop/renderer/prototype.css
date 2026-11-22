@@ -1658,45 +1658,6 @@
   display: none;
 }
 
-.prototype-app .task-center {
-  border-color: var(--prototype-line);
-  border-radius: 12px;
-  background: rgba(255, 254, 251, 0.98);
-  box-shadow: 0 18px 42px rgba(72, 56, 39, 0.14);
-  color: var(--prototype-ink-2);
-}
-
-.prototype-app .task-center-header,
-.prototype-app .task-item {
-  border-color: var(--prototype-line);
-}
-
-.prototype-app .task-center-header strong,
-.prototype-app .sync-task-copy strong {
-  color: var(--prototype-ink);
-}
-
-.prototype-app .task-item {
-  display: flex;
-  align-items: center;
-}
-
-.prototype-app .task-empty,
-.prototype-app .task-center-header span,
-.prototype-app .sync-task-copy small {
-  color: var(--prototype-muted);
-}
-
-.prototype-app .notification-button {
-  position: relative;
-}
-
-.prototype-app .notification-count {
-  border-color: var(--prototype-paper);
-  background: var(--prototype-accent);
-  color: #fff;
-}
-
 .prototype-section-head-meta {
   display: flex;
   align-items: center;
