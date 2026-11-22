@@ -1,0 +1,49 @@
+name: 发布 Nyami Windows 桌面端
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop release
+        run: npm run desktop:package
+
+      - name: Publish GitHub Release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $package = Get-Content desktop/package.json -Raw | ConvertFrom-Json
+          $expectedTag = "v$($package.version)"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Git tag $env:GITHUB_REF_NAME does not match desktop version $expectedTag"
+          }
+          $assets = @(Get-ChildItem release/desktop -File | Where-Object {
+            $_.Name -match '\.(exe|blockmap)$' -or
+            $_.Name -in @('latest.json', 'SHA256SUMS.txt')
+          } | ForEach-Object { $_.FullName })
+          if ($assets.Count -lt 4) {
+            throw 'Release directory does not contain the expected update assets'
+          }
+          gh release create $env:GITHUB_REF_NAME $assets `
+            --title "Nyami $($package.version)" `
+            --generate-notes

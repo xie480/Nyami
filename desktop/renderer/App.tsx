@@ -418,9 +418,18 @@ export function App(): JSX.Element {
       pushNotice('info', '请先从内容卡片选择一首歌曲');
       return;
     }
+    if (
+      playback.state === 'loading' ||
+      playback.diagnostic?.retrying === true
+    ) {
+      return;
+    }
     try {
+      const audioState = await audioAdapterRef.current?.getState();
+      const shouldPause =
+        playback.state === 'playing' || audioState === 'playing';
       const next =
-        playback.state === 'playing'
+        shouldPause
           ? await window.nyamiDesktop.playback.pause()
           : await window.nyamiDesktop.playback.play();
       setPlayback(next);
@@ -430,7 +439,12 @@ export function App(): JSX.Element {
     } catch (error) {
       pushNotice('error', getErrorMessage(error, '播放失败'));
     }
-  }, [playback.state, playback.trackId, pushNotice]);
+  }, [
+    playback.diagnostic?.retrying,
+    playback.state,
+    playback.trackId,
+    pushNotice,
+  ]);
 
   /** 从内容卡片创建队列项目并立即播放。 */
   const playVideo = useCallback(
@@ -3280,6 +3294,8 @@ function PlayerPlaceholder({
   onVolume: (volume: number) => void;
 }): JSX.Element {
   const isPlaying = playback.state === 'playing';
+  const isLoading =
+    playback.state === 'loading' || playback.diagnostic?.retrying === true;
   const [queueOpen, setQueueOpen] = useState(false);
   const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null);
 
@@ -3334,12 +3350,17 @@ function PlayerPlaceholder({
             <Icon name="arrow-left" size={17} />
           </button>
           <button
-            aria-label={isPlaying ? '暂停' : '播放'}
-            className="player-main-button"
+            aria-label={isLoading ? '加载中' : isPlaying ? '暂停' : '播放'}
+            className={`player-main-button${isLoading ? ' is-loading' : ''}`}
+            disabled={isLoading}
             onClick={isPlaying ? onPause : onPlay}
-            title={isPlaying ? '暂停' : '播放'}
+            title={isLoading ? '加载中' : isPlaying ? '暂停' : '播放'}
             type="button">
-            <Icon name={isPlaying ? 'pause' : 'play'} size={18} />
+            <Icon
+              className={isLoading ? 'player-loading-icon' : undefined}
+              name={isLoading ? 'loader' : isPlaying ? 'pause' : 'play'}
+              size={18}
+            />
           </button>
           <button
             aria-label="下一首"

@@ -72,7 +72,7 @@ export class ElectronAudioPlayerAdapter
     });
     this.bind('canplay', () => this.emitProgress('canplay'));
     this.bind('playing', () => this.emitSimple('playing'));
-    this.bind('pause', () => this.emitSimple('pause'));
+    this.bind('pause', () => this.emitPauseIfStillPaused());
     this.bind('waiting', () => this.emitSimple('waiting'));
     this.bind('stalled', () => this.emitSimple('stalled'));
     this.bind('timeupdate', () => this.emitProgress('timeupdate'));
@@ -289,6 +289,14 @@ export class ElectronAudioPlayerAdapter
     };
     this.report(event);
     this.listeners.forEach(listener => listener(event));
+  }
+
+  /** 只上报当前媒体确实处于暂停状态的事件，过滤切换资源时延迟到达的旧事件。 */
+  private emitPauseIfStillPaused(): void {
+    if (!this.audio.paused) {
+      return;
+    }
+    this.emitSimple('pause');
   }
 
   /** 上报媒体进度事件。 */

@@ -11,6 +11,9 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 export const DEFAULT_UPDATE_SOURCE =
   'https://github.com/xie480/Nyami/releases/latest/download/latest.json';
 
+const DEFAULT_SOURCE_NOT_PUBLISHED_MESSAGE =
+  'Nyami GitHub Releases 尚未发布桌面端安装包';
+
 type UpdateManifest = {
   version: string;
   releaseDate?: string;
@@ -97,6 +100,12 @@ export class UpdateService {
       const manifestUrl = resolveManifestUrl(this.source);
       const response = await this.fetchManifest(manifestUrl);
       if (!response.ok) {
+        if (
+          response.status === 404 &&
+          this.source === DEFAULT_UPDATE_SOURCE
+        ) {
+          throw new Error(DEFAULT_SOURCE_NOT_PUBLISHED_MESSAGE);
+        }
         throw new Error(`更新源返回 HTTP ${response.status}`);
       }
       const text = await readResponseText(response);

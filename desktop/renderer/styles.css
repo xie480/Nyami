@@ -2013,6 +2013,27 @@ kbd {
   transform: translateY(-1px);
 }
 
+.player-main-button:disabled,
+.player-main-button.is-loading {
+  cursor: wait;
+  opacity: 0.82;
+}
+
+.player-main-button.is-loading:hover {
+  box-shadow: 0 8px 20px rgba(91, 152, 239, 0.28);
+  transform: none;
+}
+
+.player-loading-icon {
+  animation: player-loading-spin 900ms linear infinite;
+}
+
+@keyframes player-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .player-actions {
   display: flex;
   align-items: center;

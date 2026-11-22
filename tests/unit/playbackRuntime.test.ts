@@ -343,6 +343,123 @@ describe('PlaybackRuntime 大队列窗口', () => {
     }
   });
 
+  it('重启后从搜索队列恢复时保留搜索上下文并重新解析音频地址', async () => {
+    const statePath = path.join(
+      os.tmpdir(),
+      `nyami-playback-${randomUUID()}.json`,
+    );
+    const queueItem = {
+      ...createQueueItem('BV-search'),
+      source: 'search' as const,
+    };
+    const context = {
+      kind: 'search' as const,
+      keyword: '测试歌曲',
+      page: 1,
+    };
+    await fs.writeFile(
+      statePath,
+      JSON.stringify({
+        queue: [queueItem],
+        currentTrackId: queueItem.id,
+        mode: 'sequential',
+        context,
+        position: 12,
+        duration: 60,
+        volume: 1,
+      }),
+      'utf8',
+    );
+
+    const resolve = jest.fn().mockResolvedValue({
+      track: queueItem,
+      cid: 1,
+      url: 'https://audio.example.test/BV-search.m4s',
+      backupUrls: [],
+      mimeType: 'audio/mp4',
+      duration: 60,
+      parts: [],
+    });
+    const runtime = createRuntime(statePath, {}, {resolve});
+
+    try {
+      const snapshot = await runtime.play();
+
+      expect(resolve).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bvid: 'BV-search',
+          source: 'search',
+        }),
+        expect.any(AbortSignal),
+        'high',
+      );
+      expect(snapshot).toMatchObject({
+        state: 'loading',
+        trackId: 'BV-search',
+        queueContext: context,
+        position: 12,
+      });
+    } finally {
+      await fs.rm(statePath, {force: true});
+      await fs.rm(`${statePath}.tmp`, {force: true});
+    }
+  });
+
+  it('重启恢复时跳过损坏队列项而保留可用的搜索歌曲', async () => {
+    const statePath = path.join(
+      os.tmpdir(),
+      `nyami-playback-${randomUUID()}.json`,
+    );
+    const resolve = jest.fn().mockResolvedValue({
+      track: createQueueItem('BV-legacy'),
+      cid: 1,
+      url: 'https://audio.example.test/BV-legacy.m4s',
+      backupUrls: [],
+      mimeType: 'audio/mp4',
+      duration: 60,
+      parts: [],
+    });
+    await fs.writeFile(
+      statePath,
+      JSON.stringify({
+        queue: [
+          null,
+          {
+            bvid: 'BV-legacy',
+            title: '历史搜索结果',
+            artist: '测试作者',
+            artwork: '',
+            duration: 60,
+          },
+        ],
+        currentTrackId: 'BV-legacy',
+        context: {
+          kind: 'search',
+          keyword: '历史搜索',
+          page: 1,
+        },
+        position: 0,
+        duration: 60,
+        volume: 1,
+      }),
+      'utf8',
+    );
+
+    const runtime = createRuntime(statePath, {}, {resolve});
+
+    try {
+      expect(runtime.getState()).toMatchObject({
+        trackId: 'BV-legacy',
+        queueLength: 1,
+      });
+      await runtime.play();
+      expect(resolve).toHaveBeenCalledTimes(1);
+    } finally {
+      await fs.rm(statePath, {force: true});
+      await fs.rm(`${statePath}.tmp`, {force: true});
+    }
+  });
+
   it('切换到下一首时清零上一首的播放进度', async () => {
     const statePath = path.join(
       os.tmpdir(),

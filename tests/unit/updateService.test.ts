@@ -28,4 +28,24 @@ describe('UpdateService', () => {
       source: DEFAULT_UPDATE_SOURCE,
     });
   });
+
+  it('默认 GitHub Releases 尚未发布时返回明确提示', async () => {
+    const logger = {
+      info: jest.fn(),
+      warn: jest.fn(),
+    } as never;
+    const service = new UpdateService(logger, {
+      fetcher: jest.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+      }) as never,
+    });
+
+    const result = await service.check();
+
+    expect(result).toMatchObject({
+      status: 'error',
+      error: 'Nyami GitHub Releases 尚未发布桌面端安装包',
+    });
+  });
 });

@@ -17,10 +17,12 @@ npm run desktop:release:check
 ### 阶段 7 发布配置
 
 - 桌面端版本号以 `desktop/package.json` 为唯一来源，当前发布版本为 `1.0.0`。
-- 安装包显式使用 `resource/icon.png`，注册 `.nyami` 播放队列文件关联，并启用已有的单实例锁。
+- 安装包显式使用 `resource/icon.ico`，注册 `.nyami` 播放队列文件关联，并启用已有的单实例锁。
 - NSIS 使用 assisted installer 和 x64 目标；覆盖升级不会删除 `%APPDATA%/Nyami/`，卸载只清理安装目录和卸载注册信息。
 - 构建文件过滤 source map、调试日志、测试目录和测试凭证；`desktop-release.mjs --check` 会校验安装包、便携版、SHA-256 和更新清单。
 - 设置页的“检查更新”默认读取 Nyami GitHub Releases 的 `latest.json`：`https://github.com/xie480/Nyami/releases/latest/download/latest.json`。`NYAMI_UPDATE_URL` 可以覆盖默认地址，也可以配置为包含 `latest.json` 的 HTTPS 目录；本机开发允许 `http://localhost`。
+- `.github/workflows/release-desktop.yml` 会在推送匹配桌面版本的 `v*` 标签后构建 Windows x64 安装包，并把 `latest.json`、安装包、便携版、blockmap 和校验和上传到 GitHub Release；发布 Release 后上述默认更新源即可正常读取。
+- GitHub 仓库尚未发布桌面 Release 时，检查更新会提示“Nyami GitHub Releases 尚未发布桌面端安装包”，不会把原因误报成更新地址未配置。
 - 当前更新流程只检查清单并打开已校验的下载地址，用户手动运行安装包完成升级。清单中的 `blockmapUrl` 为后续 `electron-updater` 增量下载保留入口。
 
 ### 代码签名

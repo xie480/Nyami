@@ -1080,7 +1080,9 @@ export class PlaybackRuntime {
     try {
       const raw = readFileSync(this.options.statePath, 'utf8');
       const parsed = JSON.parse(raw) as Partial<PersistedPlaybackState>;
-      const queue = normalizeQueueItems(parsed.queue ?? []);
+      const queue = normalizeQueueItems(
+        Array.isArray(parsed.queue) ? parsed.queue : [],
+      );
       if (queue.length === 0) {
         return;
       }
@@ -1196,8 +1198,15 @@ function normalizeQueueItems(items: PlaybackQueueItem[]): PlaybackQueueItem[] {
   const normalized: PlaybackQueueItem[] = [];
   const seen = new Set<string>();
   for (const item of items) {
-    const bvid = item.bvid.trim();
-    const id = item.id.trim() || bvid;
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const bvid = typeof item.bvid === 'string'
+      ? item.bvid.trim()
+      : typeof item.id === 'string'
+        ? item.id.trim()
+        : '';
+    const id = typeof item.id === 'string' ? item.id.trim() || bvid : bvid;
     if (!bvid || !id || seen.has(id)) {
       continue;
     }
@@ -1207,9 +1216,14 @@ function normalizeQueueItems(items: PlaybackQueueItem[]): PlaybackQueueItem[] {
       bvid,
       ...(item.cid !== undefined ? {cid: item.cid} : {}),
       ...(item.page !== undefined ? {page: item.page} : {}),
-      title: item.title.trim() || bvid,
-      artist: item.artist.trim() || '未知 UP 主',
-      artwork: normalizeBiliAssetUrl(item.artwork),
+      title: typeof item.title === 'string' ? item.title.trim() || bvid : bvid,
+      artist:
+        typeof item.artist === 'string'
+          ? item.artist.trim() || '未知 UP 主'
+          : '未知 UP 主',
+      artwork: normalizeBiliAssetUrl(
+        typeof item.artwork === 'string' ? item.artwork : undefined,
+      ),
       duration: clampNumber(item.duration, 0, 86400),
       ...(item.source ? {source: item.source} : {}),
     });

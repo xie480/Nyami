@@ -240,4 +240,25 @@ describe('ElectronAudioPlayerAdapter', () => {
       globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
     }
   });
+
+  it('忽略资源切换后延迟到达且媒体已恢复播放的旧暂停事件', async () => {
+    const {audio, emit} = createAudioStub();
+    const report = jest.fn();
+    const adapter = new ElectronAudioPlayerAdapter(audio, report);
+
+    await adapter.setup();
+    adapter.loadSource({
+      trackId: 'BV2',
+      url: 'https://audio.example.test/BV2.m4s',
+      cached: false,
+      revision: 2,
+    });
+    audio.paused = false;
+
+    emit('pause');
+
+    expect(report).not.toHaveBeenCalledWith(
+      expect.objectContaining({type: 'pause'}),
+    );
+  });
 });
