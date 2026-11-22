@@ -3447,6 +3447,109 @@
   }
 }
 
+/* 标签筛选紧凑布局：把输入、模式和标签 chips 收进有限宽度的控制组。 */
+.prototype-app .prototype-tag-filter-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(300px, 420px));
+  align-items: start;
+  gap: 10px;
+  width: min(100%, 860px);
+}
+
+.prototype-app .prototype-tag-filter-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 8px 10px;
+}
+
+.prototype-app .prototype-tag-filter-section-head {
+  grid-column: 1 / -1;
+  gap: 6px;
+  min-height: 18px;
+}
+
+.prototype-app .prototype-tag-filter-section-head strong {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.prototype-app .prototype-tag-filter-section-head small {
+  overflow: hidden;
+  font-size: 9px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prototype-app .prototype-tag-filter-section .prototype-tag-filter-editor {
+  display: flex;
+  width: auto;
+  min-width: 0;
+  gap: 5px;
+}
+
+.prototype-app .prototype-tag-filter-section.is-blacklist
+  .prototype-tag-filter-editor {
+  grid-column: 1 / -1;
+}
+
+.prototype-app .prototype-tag-filter-section .prototype-tag-filter-editor input {
+  width: auto;
+  min-width: 0;
+  min-height: 28px;
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 5px 8px;
+}
+
+.prototype-app .prototype-tag-filter-section .prototype-tag-filter-editor button {
+  min-height: 28px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 5px 8px;
+}
+
+.prototype-app .prototype-tag-filter-section .prototype-mode-switch {
+  grid-column: 2;
+  justify-self: end;
+}
+
+.prototype-app .prototype-tag-filter-section .prototype-mode-switch button {
+  min-height: 28px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 6px 8px;
+}
+
+.prototype-app .prototype-tag-filter-section .prototype-tag-filter-chips {
+  grid-column: 1 / -1;
+  min-height: 20px;
+  max-height: 44px;
+  overflow-y: auto;
+  gap: 4px;
+}
+
+.prototype-app .prototype-tag-filter-section .prototype-tag-filter-chips
+  .prototype-filter-chip {
+  font-size: 10px;
+  line-height: 1.1;
+  padding: 5px 7px;
+}
+
+@media (max-width: 920px) {
+  .prototype-app .prototype-tag-filter-layout {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+}
+
 @media (max-width: 640px) {
   .prototype-app .prototype-library-actions {
     justify-content: flex-start;

@@ -50,6 +50,7 @@ export type PrototypeRoute =
 type PrototypeNoticeTone = 'info' | 'success' | 'error';
 
 const SEARCH_TAG_FILTER_STORAGE_KEY = 'nyami-search-tag-filter-v1';
+const DEFAULT_SEARCH_KEYWORD = '音乐';
 
 type PrototypePageProps = {
   route: PrototypeRoute;
@@ -207,6 +208,9 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
   const {onNotice} = props;
   const [query, setQuery] = useState(props.searchQuery);
   const [activeQuery, setActiveQuery] = useState(props.searchQuery.trim());
+  const [searchRequested, setSearchRequested] = useState(
+    Boolean(props.searchQuery.trim()),
+  );
   const [sort, setSort] = useState('综合排序');
   const [dateFilter, setDateFilter] = useState('全部日期');
   const [startDate, setStartDate] = useState('');
@@ -221,6 +225,7 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
     DEFAULT_SEARCH_TAG_FILTER,
   );
   const [result, setResult] = useState<DesktopPage<DesktopVideo> | null>(null);
+  const [searchRevision, setSearchRevision] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [requestError, setRequestError] = useState('');
@@ -297,8 +302,8 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
 
   const loadPage = useCallback(
     async (page: number, append: boolean): Promise<void> => {
-      const normalized = activeQuery.trim();
-      if (!normalized || loadingRef.current) {
+      const normalized = activeQuery.trim() || DEFAULT_SEARCH_KEYWORD;
+      if (loadingRef.current) {
         return;
       }
       cancelActiveRequest();
@@ -353,10 +358,11 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
   useEffect(() => {
     setQuery(props.searchQuery);
     setActiveQuery(props.searchQuery.trim());
+    setSearchRequested(Boolean(props.searchQuery.trim()));
   }, [props.searchQuery]);
 
   useEffect(() => {
-    if (!activeQuery) {
+    if (!searchRequested) {
       setResult(null);
       cancelActiveRequest();
       return;
@@ -369,7 +375,14 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
       setLoading(false);
       setLoadingMore(false);
     };
-  }, [activeQuery, cancelActiveRequest, getSearchOptions, loadPage]);
+  }, [
+    activeQuery,
+    cancelActiveRequest,
+    getSearchOptions,
+    loadPage,
+    searchRevision,
+    searchRequested,
+  ]);
 
   useEffect(() => {
     const node = sentinelRef.current;
@@ -394,6 +407,8 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
+    setSearchRequested(true);
+    setSearchRevision(current => current + 1);
     setActiveQuery(query.trim());
   };
 
@@ -605,7 +620,7 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
                 false,
                 {
                   kind: 'search',
-                  keyword: activeQuery,
+                  keyword: activeQuery || DEFAULT_SEARCH_KEYWORD,
                   page: result?.page ?? 1,
                 },
                 index,
@@ -624,7 +639,11 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
         </div>
       ) : null}
       {!filteredItems.length && !loading ? (
-        <SearchEmptyState hasQuery={Boolean(activeQuery)} query={activeQuery} />
+        <SearchEmptyState
+          hasQuery={Boolean(activeQuery)}
+          hasSearched={searchRequested}
+          query={activeQuery}
+        />
       ) : null}
       {loading && !result?.items.length ? (
         <SearchLoadingState />
@@ -636,9 +655,11 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
 /** 搜索页的空状态，用图形和上下文文案区分未搜索与无结果。 */
 function SearchEmptyState({
   hasQuery,
+  hasSearched,
   query,
 }: {
   hasQuery: boolean;
+  hasSearched: boolean;
   query: string;
 }): JSX.Element {
   return (
@@ -652,11 +673,19 @@ function SearchEmptyState({
         <circle cx="77" cy="70" r="7" />
         <path d="m82 75 8 8" />
       </svg>
-      <strong>{hasQuery ? `没有找到“${query}”` : '让声音先从一个关键词开始'}</strong>
+      <strong>
+        {!hasSearched
+          ? '让声音先从一个关键词开始'
+          : hasQuery
+          ? `没有找到“${query}”`
+          : '没有符合当前筛选条件的结果'}
+      </strong>
       <span>
-        {hasQuery
+        {!hasSearched
+          ? '输入歌名、UP 主或专辑名，开始探索 Bilibili'
+          : hasQuery
           ? '换个关键词，或放宽筛选条件试试'
-          : '输入歌名、UP 主或专辑名，开始探索 Bilibili'}
+          : '调整排序、日期、时长或标签条件后重试'}
       </span>
     </div>
   );
@@ -892,10 +921,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const syncActive =
-    loading ||
-    refreshing ||
-    props.sync.state === 'running';
+  const syncActive = refreshing || props.sync.state === 'running';
 
   const persistVisibleSourceKeys = (next: string[]): void => {
     setVisibleSourceKeys(next);
@@ -1057,7 +1083,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
         getDisplayedSyncStatus(source.syncStatus, syncActive),
       )}`,
       count: source.mediaCount,
-      cover: source.cover || coverSummerUrl,
+      cover: source.cover,
     }),
   );
 
