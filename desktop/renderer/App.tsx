@@ -46,9 +46,6 @@ import {
   saveDesktopUserPreferences,
   type DesktopUserPreferences,
 } from './preferences';
-import {
-  getImportedSourcesStorageKey,
-} from '../shared/libraryFilters';
 
 type Route = PrototypeRoute;
 type NoticeTone = 'info' | 'success' | 'error';
@@ -758,25 +755,6 @@ export function App(): JSX.Element {
     return unsubscribe;
   }, []);
 
-  /** 仅在设置开启且账号已有本地索引时自动执行增量同步。 */
-  const autoSyncUidRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!auth.loggedIn || !auth.uid || !settings?.autoSyncIndex) {
-      autoSyncUidRef.current = null;
-      return;
-    }
-    if (autoSyncUidRef.current === auth.uid) {
-      return;
-    }
-    autoSyncUidRef.current = auth.uid;
-    void window.nyamiDesktop.sync
-      .start({force: false, automatic: true})
-      .then(setSync)
-      .catch(error => {
-        pushNotice('error', getErrorMessage(error, '收藏同步启动失败'));
-      });
-  }, [auth.loggedIn, auth.uid, pushNotice, settings?.autoSyncIndex]);
-
   /** 登录弹窗打开后自动生成首张二维码。 */
   useEffect(() => {
     if (loginOpen && !auth.loggedIn && !qrImageDataUrl && !qrBusy) {
@@ -982,17 +960,7 @@ export function App(): JSX.Element {
                             current.filter(notice => notice.id !== id),
                           )
                         }
-                        onStartSync={request => {
-                          void window.nyamiDesktop.sync
-                            .start(request)
-                            .then(setSync)
-                            .catch(error => {
-                              pushNotice(
-                                'error',
-                                getErrorMessage(error, '同步启动失败'),
-                              );
-                            });
-                        }}
+                        onOpenSettings={() => setRoute('settings')}
                         sync={sync}
                       />
                     ) : null}
@@ -1019,6 +987,9 @@ export function App(): JSX.Element {
                     onClearCache={() => void clearCache()}
                     onExportLogs={() => void exportLogs()}
                     onLogin={() => setLoginOpen(true)}
+                    onCancelSync={() => {
+                      void window.nyamiDesktop.sync.cancel().then(setSync);
+                    }}
                     onStartSync={request => {
                       void window.nyamiDesktop.sync
                         .start(request)
@@ -1825,6 +1796,7 @@ function SettingsPage({
   cacheSummary,
   onClearCache,
   onCheckForUpdates,
+  onCancelSync,
   onExportLogs,
   onLogin,
   onLogout,
@@ -1846,6 +1818,7 @@ function SettingsPage({
   cacheSummary: CacheSummary | null;
   onClearCache: () => void;
   onCheckForUpdates: () => void;
+  onCancelSync: () => void;
   onExportLogs: () => void;
   onLogin: () => void;
   onLogout: () => void;
@@ -1943,17 +1916,6 @@ function SettingsPage({
             <h3>收藏索引</h3>
           </div>
         </div>
-        <label className="setting-row">
-          <span>
-            <strong>登录后自动同步收藏索引</strong>
-            <small>默认关闭；新账号首次同步必须在任务通知中手动执行。</small>
-          </span>
-          <input
-            checked={settings?.autoSyncIndex ?? false}
-            onChange={event => onUpdate({autoSyncIndex: event.target.checked})}
-            type="checkbox"
-          />
-        </label>
         <div className="settings-actions-row settings-index-sync-row">
           <span>
             <strong>全局收藏夹索引</strong>
@@ -1963,23 +1925,23 @@ function SettingsPage({
                   ? `已处理 ${sync.processedVideos.toLocaleString()}/${sync.totalVideos.toLocaleString()} 个视频`
                   : sync.message ?? '正在同步收藏夹索引…'
                 : sync.state === 'completed'
-                ? `已同步 ${sync.processedVideos} 个视频`
-                : '先同步全局索引，音乐库才能读取最新内容。'}
+                ? `已同步 ${sync.processedVideos.toLocaleString()} 个视频，索引已保存在本地`
+                : '已同步索引会在启动后直接读取；需要更新时请在下方勾选收藏夹。'}
             </small>
           </span>
-          <button
-            className="secondary-button"
-            disabled={!auth.loggedIn || sync.state === 'running'}
-            onClick={() =>
-              onStartSync({force: sync.state === 'failed'})
-            }
-            type="button">
-            <Icon name="refresh" size={16} />
-            {sync.state === 'running' ? '同步中…' : '立即同步'}
-          </button>
+          {sync.state === 'running' ? (
+            <button
+              className="secondary-button"
+              onClick={onCancelSync}
+              type="button">
+              <Icon name="x" size={16} />
+              取消同步
+            </button>
+          ) : null}
         </div>
         <FavoriteIndexManager
           auth={auth}
+          onCancelSync={onCancelSync}
           onDeleteSourceIndexes={onDeleteSourceIndexes}
           onNotice={onNotice}
           onStartSync={onStartSync}
@@ -2220,18 +2182,20 @@ function SettingsPage({
  */
 function FavoriteIndexManager({
   auth,
+  onCancelSync,
   onDeleteSourceIndexes,
   onNotice,
   onStartSync,
   sync,
 }: {
   auth: AuthStatus;
+  onCancelSync: () => void;
   onDeleteSourceIndexes: (sourceKeys: readonly string[]) => Promise<void>;
   onNotice: (tone: NoticeTone, message: string) => void;
   onStartSync: (request?: SyncStartRequest) => void;
   sync: SyncSnapshot;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [sources, setSources] = useState<FavoriteSourceSummary[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [loadState, setLoadState] = useState<AsyncState>('idle');
@@ -2293,8 +2257,19 @@ function FavoriteIndexManager({
       setSources([]);
       setSelectedKeys([]);
       setLoadState('idle');
+      return;
     }
-  }, [auth.loggedIn, cancelActiveRequest]);
+    setOpen(true);
+    setSources([]);
+    setSelectedKeys([]);
+    setLoadState('idle');
+  }, [auth.loggedIn, auth.uid, cancelActiveRequest]);
+
+  useEffect(() => {
+    if (open && auth.loggedIn && auth.uid && loadState === 'idle') {
+      void loadSources();
+    }
+  }, [auth.loggedIn, auth.uid, loadSources, loadState, open]);
 
   useEffect(() => {
     if (open && sync.state === 'completed') {
@@ -2315,9 +2290,6 @@ function FavoriteIndexManager({
   const syncedCount = sources.filter(
     source => source.syncStatus === 'success',
   ).length;
-  const librarySourceKeys = readLibraryImportedSourceKeys(auth.uid, sources);
-  const canSyncLibrarySources =
-    loadState === 'success' && librarySourceKeys.length > 0;
 
   /** 切换一个来源的选择状态。 */
   const toggleSource = (sourceKey: string): void => {
@@ -2353,19 +2325,6 @@ function FavoriteIndexManager({
     } finally {
       setDeleting(false);
     }
-  };
-
-  /** 直接同步音乐库当前导入的收藏夹，并同步更新选择状态。 */
-  const syncLibrarySources = (): void => {
-    if (
-      !canSyncLibrarySources ||
-      deleting ||
-      sync.state === 'running'
-    ) {
-      return;
-    }
-    setSelectedKeys(librarySourceKeys);
-    onStartSync({sourceKeys: [...librarySourceKeys]});
   };
 
   return (
@@ -2495,19 +2454,15 @@ function FavoriteIndexManager({
             </div>
           ) : null}
           <div className="favorite-index-manager-actions">
-            <button
-              className="secondary-button"
-              disabled={
-                !canSyncLibrarySources ||
-                deleting ||
-                sync.state === 'running'
-              }
-              onClick={syncLibrarySources}
-              title="仅同步音乐库当前导入的收藏夹"
-              type="button">
-              <Icon name="refresh" size={15} />
-              仅同步音乐库导入
-            </button>
+            {sync.state === 'running' ? (
+              <button
+                className="secondary-button"
+                onClick={onCancelSync}
+                type="button">
+                <Icon name="x" size={15} />
+                取消同步
+              </button>
+            ) : null}
             <button
               className="secondary-button"
               disabled={
@@ -2516,11 +2471,14 @@ function FavoriteIndexManager({
                 sync.state === 'running'
               }
               onClick={() =>
-                onStartSync({sourceKeys: [...selectedKeys]})
+                onStartSync({
+                  force: sync.state === 'failed',
+                  sourceKeys: [...selectedKeys],
+                })
               }
               type="button">
               <Icon name="refresh" size={15} />
-              仅同步选中
+              {sync.state === 'failed' ? '重试选中' : '同步选中'}
             </button>
             <button
               className="danger-button"
@@ -2539,42 +2497,6 @@ function FavoriteIndexManager({
       ) : null}
     </div>
   );
-}
-
-/** 读取音乐库当前导入的来源，并限制在本次远端目录内。 */
-function readLibraryImportedSourceKeys(
-  uid: string | null,
-  sources: readonly FavoriteSourceSummary[],
-): string[] {
-  if (!uid || !sources.length) {
-    return [];
-  }
-  let storedRaw: string | null;
-  try {
-    storedRaw = window.localStorage.getItem(getImportedSourcesStorageKey(uid));
-  } catch {
-    return [];
-  }
-  if (storedRaw === null) {
-    return sources.map(source => source.sourceKey);
-  }
-  try {
-    const parsed: unknown = JSON.parse(storedRaw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    const available = new Set(sources.map(source => source.sourceKey));
-    return Array.from(
-      new Set(
-        parsed.filter(
-          (value): value is string =>
-            typeof value === 'string' && available.has(value),
-        ),
-      ),
-    );
-  } catch {
-    return [];
-  }
 }
 
 /** 将收藏来源同步状态转换成设置页可读文案。 */
@@ -3305,13 +3227,13 @@ function TaskCenter({
   notices,
   onCancelSync,
   onDismiss,
-  onStartSync,
+  onOpenSettings,
   sync,
 }: {
   notices: Notice[];
   onCancelSync: () => void;
   onDismiss: (id: number) => void;
-  onStartSync: (request?: SyncStartRequest) => void;
+  onOpenSettings: () => void;
   sync: SyncSnapshot;
 }): JSX.Element {
   return (
@@ -3342,11 +3264,9 @@ function TaskCenter({
         ) : (
           <button
             className="task-action"
-            onClick={() =>
-              onStartSync({force: sync.state === 'failed'})
-            }
+            onClick={onOpenSettings}
             type="button">
-            {sync.state === 'failed' ? '重试' : '同步'}
+            {sync.state === 'failed' ? '去设置重试' : '去设置同步'}
           </button>
         )}
       </div>

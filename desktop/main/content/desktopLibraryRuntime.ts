@@ -149,13 +149,36 @@ export class DesktopLibraryRuntime {
         const requested = new Set(
           (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
         );
-        const remoteSources = await this.buildSourceCatalog(
-          uid,
-          signal,
-          localSources,
-          requested,
+        let remoteSources: FavoriteSourceSummary[];
+        try {
+          remoteSources = await this.buildSourceCatalog(
+            uid,
+            signal,
+            localSources,
+            requested,
+          );
+        } catch (error) {
+          if (signal.aborted) {
+            throw error;
+          }
+          this.logger.warn('library.source-catalog-fallback-local', {
+            uid,
+            error,
+          });
+          return Array.from(localSources.values()).filter(
+            source => !requested.size || requested.has(source.sourceKey),
+          );
+        }
+        const remoteKeys = new Set(
+          remoteSources.map(source => source.sourceKey),
         );
-        return remoteSources
+        const mergedSources = [
+          ...remoteSources,
+          ...Array.from(localSources.values()).filter(
+            source => !remoteKeys.has(source.sourceKey),
+          ),
+        ];
+        return mergedSources
           .filter(source => !requested.size || requested.has(source.sourceKey))
           .map(source => {
             const local = localSources.get(source.sourceKey);

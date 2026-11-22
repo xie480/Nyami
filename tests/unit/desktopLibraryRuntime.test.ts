@@ -74,6 +74,42 @@ describe('DesktopLibraryRuntime 来源目录读取', () => {
     expect(fixture.api.getFavoriteVideos).not.toHaveBeenCalled();
   });
 
+  it('远端目录暂时不可用时仍展示已持久化的本地索引来源', async () => {
+    const fixture = createRuntimeFixture();
+    fixture.repository.getSourceSummaries.mockReturnValue([
+      {
+        sourceKey: 'ownedFavorite:7',
+        kind: 'owned',
+        remoteId: 7,
+        ownerMid: 1,
+        ownerName: '',
+        title: '已同步收藏夹',
+        cover: 'https://i0.hdslb.com/local.jpg',
+        mediaCount: 12,
+        description: '',
+        syncStatus: 'success',
+        lastSyncedAt: 1,
+      },
+    ]);
+    fixture.api.getFavoriteFolders.mockRejectedValue(
+      new Error('Bilibili 暂时不可用'),
+    );
+
+    const sources = await fixture.runtime.getSourceSummaries('1');
+
+    expect(sources).toMatchObject([
+      expect.objectContaining({
+        sourceKey: 'ownedFavorite:7',
+        syncStatus: 'success',
+        mediaCount: 12,
+      }),
+    ]);
+    expect(fixture.logger.warn).toHaveBeenCalledWith(
+      'library.source-catalog-fallback-local',
+      expect.anything(),
+    );
+  });
+
   it('读取单个来源时才补齐缺失封面', async () => {
     const fixture = createRuntimeFixture();
     fixture.api.getCollectedPlaylists.mockResolvedValue({

@@ -61,8 +61,12 @@ export class SyncRuntime {
     return () => this.listeners.delete(listener);
   }
 
-  /** 启动一次全量或断点同步；重复启动只返回当前任务快照。 */
+  /** 启动已勾选来源的断点同步；没有来源时拒绝启动全量任务。 */
   start(request: SyncStartRequest = {}): Promise<SyncSnapshot> {
+    const sourceKeys = normalizeSyncSourceKeys(request.sourceKeys);
+    if (!sourceKeys.length) {
+      return Promise.reject(new Error('请先勾选收藏夹后再同步'));
+    }
     if (this.snapshot.state === 'running') {
       return Promise.resolve(this.clone());
     }
@@ -74,7 +78,7 @@ export class SyncRuntime {
       taskId,
       phase: 'catalog',
       startedAt,
-      message: request.force ? '正在准备全量同步' : '正在准备收藏同步',
+      message: '正在准备所选收藏同步',
     };
     this.controller = new AbortController();
     this.emit();
@@ -82,7 +86,7 @@ export class SyncRuntime {
       taskId,
       request.force === true,
       request.automatic === true,
-      request.sourceKeys,
+      sourceKeys,
     ).finally(() => {
       this.runningPromise = null;
       this.controller = null;
@@ -142,7 +146,7 @@ export class SyncRuntime {
       this.snapshot = {
         ...this.snapshot,
         uid: status.uid,
-        message: force ? '正在执行全量收藏同步' : '正在同步收藏目录',
+        message: force ? '正在刷新所选收藏索引' : '正在同步所选收藏目录',
       };
       this.emit();
       const controller = this.controller;
@@ -253,5 +257,18 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && (
     error.name === 'AbortError' ||
     error.message.includes('已取消')
+  );
+}
+
+/** 规范化同步来源键，确保任务只能从明确勾选的收藏夹启动。 */
+function normalizeSyncSourceKeys(
+  sourceKeys: readonly string[] | undefined,
+): string[] {
+  return Array.from(
+    new Set(
+      (sourceKeys ?? [])
+        .map(sourceKey => sourceKey.trim())
+        .filter(Boolean),
+    ),
   );
 }
