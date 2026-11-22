@@ -151,6 +151,8 @@ export interface PageResult<T> {
   hasMore: boolean;
   /** 原始返回的记录数（在过滤失效视频前） */
   rawCount: number;
+  /** 来源接口返回的收藏夹真实总数；列表接口缺失时为空。 */
+  remoteVideoCount?: number;
   /** 来源接口首屏响应可携带的简介；缺失时由调用方说明 B 站未提供简介。 */
   description?: string;
 }

@@ -145,4 +145,115 @@ describe('共享收藏同步任务', () => {
     expect(fetchPage).not.toHaveBeenCalled();
     expect(result.skippedTasks).toBe(1);
   });
+
+  it('使用分页响应中的远端总量更新进度和收藏夹元数据', async () => {
+    const repository = createRepository();
+    const page = async (
+      pageNumber: number,
+    ): Promise<PageResult<FavoriteVideo>> => ({
+      list: [makeVideo(`BV${pageNumber}`)],
+      hasMore: pageNumber < 3,
+      rawCount: 1,
+      remoteVideoCount: 3,
+    });
+
+    const result = await new FavoriteSyncTask(repository).run(
+      [
+        {
+          playlistId: 'folder-1',
+          title: '收藏夹',
+          remoteVideoCount: 1,
+          fetchPage: page,
+        },
+      ],
+      {force: true},
+    );
+
+    expect(result.totalVideos).toBe(3);
+    expect(
+      await repository.getPlaylistMeta('folder-1'),
+    ).toMatchObject({remoteVideoCount: 3});
+  });
+
+  it('全量扫描按分页批次并发拉取，但按页顺序写入', async () => {
+    const repository = createRepository();
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+    const page = async (
+      pageNumber: number,
+    ): Promise<PageResult<FavoriteVideo>> => {
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      await new Promise(resolve => setTimeout(resolve, 1));
+      activeRequests -= 1;
+      return {
+        list: [makeVideo(`BV${pageNumber}`)],
+        hasMore: pageNumber < 4,
+        rawCount: 1,
+      };
+    };
+
+    await new FavoriteSyncTask(repository).run(
+      [
+        {
+          playlistId: 'folder-1',
+          title: '收藏夹',
+          remoteVideoCount: 4,
+          fetchPage: page,
+        },
+      ],
+      {force: true, pageConcurrency: 2},
+    );
+
+    expect(maxActiveRequests).toBe(2);
+    expect(repository.pages).toEqual([
+      'folder-1:page_1',
+      'folder-1:page_2',
+      'folder-1:page_3',
+      'folder-1:page_4',
+    ]);
+  });
+
+  it('增量扫描保持逐页请求，避免提前拉取无关分页', async () => {
+    const repository = createRepository();
+    await repository.upsertPlaylistMeta({
+      playlistId: 'folder-1',
+      title: '收藏夹',
+      remoteVideoCount: 1,
+      playlistSyncStatus: 'success',
+    });
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+    const page = async (
+      pageNumber: number,
+    ): Promise<PageResult<FavoriteVideo>> => {
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      await new Promise(resolve => setTimeout(resolve, 1));
+      activeRequests -= 1;
+      return {
+        list: [makeVideo(`BV${pageNumber}`)],
+        hasMore: pageNumber < 2,
+        rawCount: 1,
+      };
+    };
+
+    await new FavoriteSyncTask(repository).run(
+      [
+        {
+          playlistId: 'folder-1',
+          title: '收藏夹',
+          remoteVideoCount: 2,
+          fetchPage: page,
+        },
+      ],
+      {pageConcurrency: 3},
+    );
+
+    expect(maxActiveRequests).toBe(1);
+    expect(repository.pages).toEqual([
+      'folder-1:page_1',
+      'folder-1:page_2',
+    ]);
+  });
 });

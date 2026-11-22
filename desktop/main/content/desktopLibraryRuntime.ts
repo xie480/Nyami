@@ -9,7 +9,10 @@ import {
 } from '../../../packages/core/src';
 import {FavoriteSyncTask} from '../../../packages/core/src/favorites/syncTask';
 import type {CredentialStore} from '../auth/credentialStore';
-import {DESKTOP_SYNC_PLAYLIST_CONCURRENCY} from '../constants';
+import {
+  DESKTOP_SYNC_PAGE_CONCURRENCY,
+  DESKTOP_SYNC_PLAYLIST_CONCURRENCY,
+} from '../constants';
 import type {AppLogger} from '../logging/appLogger';
 import {normalizeBiliAssetUrl} from '../security/urlPolicy';
 import {DesktopLibraryRepository} from '../storage/desktopLibraryRepository';
@@ -74,6 +77,7 @@ export class DesktopLibraryRuntime {
     return task.run(targets, {
       force: options.force,
       concurrency: DESKTOP_SYNC_PLAYLIST_CONCURRENCY,
+      pageConcurrency: DESKTOP_SYNC_PAGE_CONCURRENCY,
       signal: options.signal,
       onProgress: options.onFavoriteProgress,
     });
@@ -128,11 +132,18 @@ export class DesktopLibraryRuntime {
         );
         return remoteSources
           .filter(source => !requested.size || requested.has(source.sourceKey))
-          .map(source => ({
-            ...source,
-            syncStatus: localSources.get(source.sourceKey)?.syncStatus ?? 'idle',
-            lastSyncedAt: localSources.get(source.sourceKey)?.lastSyncedAt ?? null,
-          }));
+          .map(source => {
+            const local = localSources.get(source.sourceKey);
+            return {
+              ...source,
+              mediaCount:
+                local?.syncStatus === 'success'
+                  ? local.mediaCount
+                  : source.mediaCount,
+              syncStatus: local?.syncStatus ?? 'idle',
+              lastSyncedAt: local?.lastSyncedAt ?? null,
+            };
+          });
       },
     );
   }
@@ -289,6 +300,10 @@ export class DesktopLibraryRuntime {
             hasMore:
               response.has_more === true || medias.length === FAVORITE_PAGE_SIZE,
             rawCount: medias.length,
+            remoteVideoCount: Math.max(
+              0,
+              response.info?.media_count ?? folder.media_count,
+            ),
             description: response.info?.intro?.trim() ?? '',
           };
         },
@@ -338,6 +353,10 @@ export class DesktopLibraryRuntime {
             hasMore:
               response.has_more === true || medias.length === FAVORITE_PAGE_SIZE,
             rawCount: medias.length,
+            remoteVideoCount: Math.max(
+              0,
+              response.info?.media_count ?? source.mediaCount,
+            ),
             description: response.info?.intro?.trim() ?? source.description,
           };
         }
@@ -360,6 +379,10 @@ export class DesktopLibraryRuntime {
               ? page * pageSize < response.page.total
               : archives.length === FAVORITE_PAGE_SIZE,
           rawCount: archives.length,
+          remoteVideoCount: Math.max(
+            0,
+            response.page?.total ?? source.mediaCount,
+          ),
           description:
             response.meta?.description?.trim() ??
             response.meta?.intro?.trim() ??
@@ -477,7 +500,7 @@ export class DesktopLibraryRuntime {
         1,
         FAVORITE_PAGE_SIZE,
         signal,
-        'index',
+        'background',
       );
       const media = (response.medias ?? []).find(
         item => item.attr === 0 && Boolean(item.cover?.trim()),

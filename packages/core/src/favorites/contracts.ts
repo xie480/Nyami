@@ -89,6 +89,8 @@ export type FavoriteSyncProgress = {
 export type FavoriteSyncTaskOptions = {
   force?: boolean;
   concurrency?: number;
+  /** 全量或断点扫描时，每个收藏夹同时拉取的分页数量。 */
+  pageConcurrency?: number;
   signal?: AbortSignal;
   onProgress?: (progress: FavoriteSyncProgress) => void;
 };

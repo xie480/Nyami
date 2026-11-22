@@ -1928,7 +1928,9 @@ function SettingsPage({
             <strong>全局收藏夹索引</strong>
             <small>
               {sync.state === 'running'
-                ? sync.message ?? '正在同步收藏夹索引…'
+                ? sync.phase === 'favorites'
+                  ? `已处理 ${sync.processedVideos.toLocaleString()}/${sync.totalVideos.toLocaleString()} 个视频`
+                  : sync.message ?? '正在同步收藏夹索引…'
                 : sync.state === 'completed'
                 ? `已同步 ${sync.processedVideos} 个视频`
                 : '先同步全局索引，音乐库才能读取最新内容。'}

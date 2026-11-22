@@ -32,6 +32,9 @@ export class FavoriteSyncTask {
       failedTasks: 0,
     };
     const processedByTarget = new Array<number>(targets.length).fill(0);
+    const remoteCountByTarget = targets.map(target =>
+      Math.max(0, target.remoteVideoCount),
+    );
     const failures: string[] = [];
     let nextTargetIndex = 0;
     const concurrency = Math.max(
@@ -52,6 +55,17 @@ export class FavoriteSyncTask {
         0,
       );
     };
+    const updateRemoteCount = (targetIndex: number, value: number): void => {
+      const normalized = Math.max(0, Math.floor(value));
+      if (remoteCountByTarget[targetIndex] === normalized) {
+        return;
+      }
+      remoteCountByTarget[targetIndex] = normalized;
+      progress.totalVideos = remoteCountByTarget.reduce(
+        (total, count) => total + count,
+        0,
+      );
+    };
 
     report();
     const worker = async (): Promise<void> => {
@@ -68,6 +82,7 @@ export class FavoriteSyncTask {
             options,
             targetIndex,
             updateProcessed,
+            updateRemoteCount,
             report,
           );
           if (result.skipped) {
@@ -111,6 +126,7 @@ export class FavoriteSyncTask {
     options: FavoriteSyncTaskOptions,
     targetIndex: number,
     updateProcessed: (targetIndex: number, value: number) => void,
+    updateRemoteCount: (targetIndex: number, value: number) => void,
     report: () => void,
   ): Promise<{skipped: boolean}> {
     const force = options.force === true;
@@ -168,39 +184,77 @@ export class FavoriteSyncTask {
     // 断点从中间页恢复时不能软删除前面尚未重新读取的关系。
     const fullScan = force || page === 1;
     let incrementalDone = false;
+    let remoteVideoCount = Math.max(0, target.remoteVideoCount);
+    const pageConcurrency = fullScan && !incrementalMode
+      ? Math.max(1, Math.floor(options.pageConcurrency ?? 1))
+      : 1;
 
     try {
       while (hasMore && !options.signal?.aborted) {
-        const pageResult = await target.fetchPage(page, options.signal);
-        pageResult.list.forEach(video => remoteVideoIds.add(video.bvid));
-        const writeResult = await this.repository.syncPlaylistVideosPage(
-          target.playlistId,
-          pageResult.list,
-          {
-            force,
-            cursor: `page_${page}`,
-            previousSyncedCount: syncedCount,
-            fullScanCount: fullScan ? remoteVideoIds.size : undefined,
-          },
+        const batchStartPage = page;
+        const pageResults = await Promise.all(
+          Array.from({length: pageConcurrency}, (_item, offset) =>
+            target.fetchPage(batchStartPage + offset, options.signal),
+          ),
         );
-        syncedCount = writeResult.syncedCount;
-        updateProcessed(targetIndex, syncedCount);
-        report();
-        if (incrementalMode && pageResult.list.length > 0) {
-          const pageBvids = new Set(pageResult.list.map(video => video.bvid));
-          const existingOnPage = Array.from(pageBvids).filter(bvid =>
-            writeResult.existingBvids.has(bvid),
+        for (const [offset, pageResult] of pageResults.entries()) {
+          if (!hasMore || options.signal?.aborted) {
+            break;
+          }
+          const currentPage = batchStartPage + offset;
+          if (pageResult.remoteVideoCount !== undefined) {
+            const nextRemoteVideoCount = Math.max(
+              0,
+              Math.floor(pageResult.remoteVideoCount),
+            );
+            if (nextRemoteVideoCount !== remoteVideoCount) {
+              remoteVideoCount = nextRemoteVideoCount;
+              updateRemoteCount(targetIndex, remoteVideoCount);
+              await this.repository.upsertPlaylistMeta({
+                playlistId: target.playlistId,
+                title: target.title,
+                remoteVideoCount,
+                playlistSyncStatus: 'syncing',
+                needResync: force || meta?.needResync || false,
+                kind: target.kind,
+                ownerMid: target.ownerMid,
+                ownerName: target.ownerName,
+                cover: target.cover,
+                description: target.description,
+                remoteRevision: target.remoteRevision,
+              });
+            }
+          }
+          pageResult.list.forEach(video => remoteVideoIds.add(video.bvid));
+          const writeResult = await this.repository.syncPlaylistVideosPage(
+            target.playlistId,
+            pageResult.list,
+            {
+              force,
+              cursor: `page_${currentPage}`,
+              previousSyncedCount: syncedCount,
+              fullScanCount: fullScan ? remoteVideoIds.size : undefined,
+            },
           );
-          incrementalDone = page === 1
-            ? existingOnPage.length === pageBvids.size
-            : existingOnPage.length > 0;
-        }
-        hasMore = !incrementalDone && (
-          pageResult.hasMore || pageResult.rawCount === 20
-        );
-        page += 1;
-        if (pageResult.list.length === 0 && !pageResult.hasMore) {
-          hasMore = false;
+          syncedCount = writeResult.syncedCount;
+          updateProcessed(targetIndex, syncedCount);
+          report();
+          if (incrementalMode && pageResult.list.length > 0) {
+            const pageBvids = new Set(pageResult.list.map(video => video.bvid));
+            const existingOnPage = Array.from(pageBvids).filter(bvid =>
+              writeResult.existingBvids.has(bvid),
+            );
+            incrementalDone = currentPage === 1
+              ? existingOnPage.length === pageBvids.size
+              : existingOnPage.length > 0;
+          }
+          hasMore = !incrementalDone && (
+            pageResult.hasMore || pageResult.rawCount === 20
+          );
+          page = currentPage + 1;
+          if (pageResult.list.length === 0 && !pageResult.hasMore) {
+            hasMore = false;
+          }
         }
       }
 
@@ -209,7 +263,7 @@ export class FavoriteSyncTask {
         await this.repository.upsertPlaylistMeta({
           playlistId: target.playlistId,
           title: target.title,
-          remoteVideoCount: target.remoteVideoCount,
+          remoteVideoCount,
           playlistSyncStatus: 'idle',
         });
         return {skipped: false};
@@ -231,7 +285,7 @@ export class FavoriteSyncTask {
         await this.repository.upsertPlaylistMeta({
           playlistId: target.playlistId,
           title: target.title,
-          remoteVideoCount: target.remoteVideoCount,
+          remoteVideoCount,
           playlistSyncStatus: 'idle',
           kind: target.kind,
           ownerMid: target.ownerMid,
@@ -246,7 +300,7 @@ export class FavoriteSyncTask {
       await this.repository.upsertPlaylistMeta({
         playlistId: target.playlistId,
         title: target.title,
-        remoteVideoCount: target.remoteVideoCount,
+        remoteVideoCount,
         playlistSyncStatus: 'failed',
         kind: target.kind,
         ownerMid: target.ownerMid,
