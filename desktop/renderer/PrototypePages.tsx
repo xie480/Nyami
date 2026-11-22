@@ -82,6 +82,7 @@ type PrototypePageProps = {
   onPause: () => void;
   onPrevious: () => void;
   onNext: () => void;
+  onQueueReachEnd: () => void;
   onSeek: (position: number) => void;
   onVolume: (volume: number) => void;
   onModeChange: (mode: PlaybackQueueMode) => void;
@@ -817,12 +818,14 @@ export type PrototypeSelectOption = {
 export function PrototypeSelect({
   ariaLabel,
   className,
+  iconOnly = false,
   onChange,
   options,
   value,
 }: {
   ariaLabel: string;
   className?: string;
+  iconOnly?: boolean;
   onChange: (value: string) => void;
   options: PrototypeSelectOption[];
   value: string;
@@ -877,8 +880,8 @@ export function PrototypeSelect({
           }
         }}
         type="button">
-        <span>{selected?.label ?? ''}</span>
-        <Icon name="chevron-down" size={13} />
+        {!iconOnly ? <span>{selected?.label ?? ''}</span> : null}
+        {!iconOnly ? <Icon name="chevron-down" size={13} /> : null}
       </button>
       {open ? (
         <div className="prototype-select-options" role="listbox">
@@ -1823,11 +1826,6 @@ function SoundLabPage(props: PrototypePageProps): JSX.Element {
 export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
   const {onNext, onPause, onPlay, onPrevious, onRouteChange, playback} = props;
   const [queueOpen, setQueueOpen] = useState(false);
-  const [isReady, setIsReady] = useState(false);
-  const [paletteIndex, setPaletteIndex] = useState(0);
-  const [coverPalette, setCoverPalette] = useState<ImmersivePalette>(
-    IMMERSIVE_PALETTES[0],
-  );
   const fallback = toDesktopVideo(MOCK_TRACKS[0]);
   const track = props.playback.trackId
     ? {
@@ -1841,26 +1839,11 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
         tags: fallback.tags,
       }
     : fallback;
-  const palette = [
-    coverPalette[paletteIndex % coverPalette.length],
-    coverPalette[(paletteIndex + 1) % coverPalette.length],
-    coverPalette[(paletteIndex + 2) % coverPalette.length],
-  ] as const;
   const immersiveStyle = {
-    '--immersive-a': palette[0],
-    '--immersive-b': palette[1],
-    '--immersive-c': palette[2],
-    '--immersive-text': getReadableTextColor(palette[1]),
-    '--immersive-muted': getReadableMutedColor(palette[1]),
-    '--immersive-control-bg':
-      getReadableTextColor(palette[1]) === '#fffaf4'
-        ? 'rgba(31, 18, 27, 0.72)'
-        : 'rgba(255, 255, 255, 0.72)',
-    '--immersive-control-border':
-      getReadableTextColor(palette[1]) === '#fffaf4'
-        ? 'rgba(255, 255, 255, 0.3)'
-        : 'rgba(47, 37, 30, 0.24)',
-    backgroundImage: `linear-gradient(120deg, ${palette[0]}e8, ${palette[1]}dd 52%, ${palette[2]}e8), url(${track.cover})`,
+    '--immersive-text': '#fffaf4',
+    '--immersive-muted': 'rgba(255, 250, 244, 0.66)',
+    '--immersive-control-bg': 'rgba(31, 18, 27, 0.72)',
+    '--immersive-control-border': 'rgba(255, 255, 255, 0.3)',
   } as CSSProperties;
 
   /** 退出沉浸式播放器并返回音乐库。 */
@@ -1870,86 +1853,7 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
 
   useEffect(() => {
     setQueueOpen(false);
-    setPaletteIndex(0);
-    setIsReady(false);
-    const frame = window.requestAnimationFrame(() => setIsReady(true));
-    return () => window.cancelAnimationFrame(frame);
   }, [track.bvid]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const image = new Image();
-    image.crossOrigin = 'anonymous';
-    image.onload = () => {
-      if (cancelled) {
-        return;
-      }
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = 18;
-        canvas.height = 18;
-        const context = canvas.getContext('2d');
-        if (!context) {
-          return;
-        }
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        const pixels = context.getImageData(
-          0,
-          0,
-          canvas.width,
-          canvas.height,
-        ).data;
-        const regions = [
-          [0, 6],
-          [6, 12],
-          [12, 18],
-        ] as const;
-        const colors = regions.map(([start, end]) => {
-          let red = 0;
-          let green = 0;
-          let blue = 0;
-          let count = 0;
-          for (let y = 0; y < canvas.height; y += 1) {
-            for (let x = start; x < end; x += 1) {
-              const offset = (y * canvas.width + x) * 4;
-              const alpha = pixels[offset + 3] / 255;
-              red += pixels[offset] * alpha;
-              green += pixels[offset + 1] * alpha;
-              blue += pixels[offset + 2] * alpha;
-              count += alpha;
-            }
-          }
-          return toPaletteHex(
-            count ? [red / count, green / count, blue / count] : [40, 24, 36],
-          );
-        });
-        setCoverPalette([colors[0], colors[1], colors[2]]);
-      } catch {
-        setCoverPalette(IMMERSIVE_PALETTES[0]);
-      }
-    };
-    image.onerror = () => {
-      if (!cancelled) {
-        setCoverPalette(IMMERSIVE_PALETTES[0]);
-      }
-    };
-    image.src = track.cover;
-    return () => {
-      cancelled = true;
-      image.onload = null;
-      image.onerror = null;
-    };
-  }, [track.cover]);
-
-  useEffect(() => {
-    const timer = window.setInterval(
-      () => {
-        setPaletteIndex(index => index + 1);
-      },
-      playback.state === 'playing' ? 4200 : 9000,
-    );
-    return () => window.clearInterval(timer);
-  }, [playback.state]);
 
   useEffect(() => {
     /** 沉浸式快捷键：ESC 返回音乐库、空格播放、左右键切歌。 */
@@ -1984,9 +1888,7 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
 
   return (
     <div
-      className={`prototype-immersive prototype-immersive-windowed ${
-        isReady ? 'is-ready' : ''
-      }`}
+      className="prototype-immersive prototype-immersive-windowed"
       style={immersiveStyle}>
       <div className="prototype-immersive-backdrop" />
       <header className="prototype-immersive-heading">
@@ -2087,6 +1989,7 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
           <PrototypeSelect
             ariaLabel="睡眠定时器"
             className="prototype-floating-select"
+            iconOnly
             onChange={value =>
               props.onSleepTimer(
                 value === 'active' ? null : value ? Number(value) : null,
@@ -2113,6 +2016,7 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
       {queueOpen ? (
         <PrototypeQueueDrawer
           onClose={() => setQueueOpen(false)}
+          onQueueReachEnd={props.onQueueReachEnd}
           onRemoveTrack={props.onRemoveTrack}
           onSelectTrack={props.onSelectTrack}
           playback={props.playback}
@@ -2122,49 +2026,16 @@ export function PrototypeImmersivePage(props: PrototypePageProps): JSX.Element {
   );
 }
 
-type ImmersivePalette = readonly [string, string, string];
-
-const IMMERSIVE_PALETTES: ReadonlyArray<ImmersivePalette> = [
-  ['#2b1421', '#6d263d', '#df715c'],
-  ['#17243b', '#315b77', '#d48667'],
-  ['#241b38', '#82536d', '#e3a778'],
-  ['#1e2f2a', '#4b745e', '#d4a26b'],
-];
-
-/** 将封面采样出的 RGB 平均色转换为背景可用的 HEX 色值。 */
-function toPaletteHex(rgb: readonly [number, number, number]): string {
-  return `#${rgb
-    .map(value => Math.max(0, Math.min(255, Math.round(value))))
-    .map(value => value.toString(16).padStart(2, '0'))
-    .join('')}`;
-}
-
-/** 根据封面主色选择可读的浅色或深色文字。 */
-function getReadableTextColor(hex: string): string {
-  const value = hex.replace('#', '');
-  const red = Number.parseInt(value.slice(0, 2), 16) / 255;
-  const green = Number.parseInt(value.slice(2, 4), 16) / 255;
-  const blue = Number.parseInt(value.slice(4, 6), 16) / 255;
-  return 0.2126 * red + 0.7152 * green + 0.0722 * blue > 0.58
-    ? '#2f251e'
-    : '#fffaf4';
-}
-
-/** 生成与主文字同方向的低对比度辅助色。 */
-function getReadableMutedColor(hex: string): string {
-  return getReadableTextColor(hex) === '#fffaf4'
-    ? 'rgba(255, 250, 244, 0.66)'
-    : 'rgba(47, 37, 30, 0.66)';
-}
-
 /** 将现有播放器队列绘制为沉浸式页面可复用的侧栏抽屉。 */
 export function PrototypeQueueDrawer({
   onClose,
+  onQueueReachEnd,
   onRemoveTrack,
   onSelectTrack,
   playback,
 }: {
   onClose?: () => void;
+  onQueueReachEnd?: () => void;
   onRemoveTrack: (trackId: string) => void;
   onSelectTrack: (trackId: string) => void;
   playback: PlaybackSnapshot;
@@ -2177,7 +2048,17 @@ export function PrototypeQueueDrawer({
           onClose?.();
         }
       }}>
-      <aside className="prototype-queue-drawer">
+      <aside
+        className="prototype-queue-drawer"
+        onScroll={event => {
+          const target = event.currentTarget;
+          if (
+            target.scrollTop + target.clientHeight >=
+            target.scrollHeight - 96
+          ) {
+            onQueueReachEnd?.();
+          }
+        }}>
         <div className="prototype-queue-head">
           <div>
             <div className="prototype-meta">NOW / QUEUE</div>
@@ -2202,7 +2083,12 @@ export function PrototypeQueueDrawer({
               }
               key={item.id}>
               <span>{String(index + 1).padStart(2, '0')}</span>
-              <button onClick={() => onSelectTrack(item.id)} type="button">
+              <button
+                aria-current={
+                  item.id === playback.trackId ? 'true' : undefined
+                }
+                onClick={() => onSelectTrack(item.id)}
+                type="button">
                 <strong>{item.title}</strong>
                 <small>{item.artist}</small>
               </button>

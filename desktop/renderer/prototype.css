@@ -1255,6 +1255,23 @@
   background: var(--prototype-surface);
   box-shadow: -20px 0 48px rgba(72, 56, 39, 0.16);
   padding: 28px 26px;
+  scrollbar-color: var(--prototype-accent) transparent;
+  scrollbar-width: thin;
+}
+
+.prototype-queue-drawer::-webkit-scrollbar {
+  width: 9px;
+}
+
+.prototype-queue-drawer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.prototype-queue-drawer::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--prototype-accent);
+  background-clip: padding-box;
 }
 
 .prototype-queue-head {
@@ -1324,8 +1341,15 @@
 }
 
 .prototype-queue-item.is-current {
-  border-color: rgba(200, 76, 49, 0.3);
+  border-color: rgba(200, 76, 49, 0.52);
   background: var(--prototype-accent-soft);
+  box-shadow: inset 3px 0 0 var(--prototype-accent),
+    0 0 0 1px rgba(200, 76, 49, 0.1);
+}
+
+.prototype-queue-item.is-current strong {
+  color: var(--prototype-accent);
+  font-weight: 600;
 }
 
 .prototype-queue-item > button {
@@ -2044,7 +2068,7 @@
   position: fixed;
   z-index: 120;
   inset: 0;
-  background: rgba(59, 47, 38, 0.12);
+  background: transparent;
 }
 
 .prototype-app .queue-panel {
@@ -2074,7 +2098,7 @@
 
 .prototype-immersive {
   overflow: hidden;
-  background-color: var(--immersive-b, #3c1d31);
+  background: #3c1d31;
   background-position: center;
   background-size: cover;
   color: #fffaf4;
@@ -2909,7 +2933,6 @@
 }
 
 .prototype-app .prototype-floating-player > button:focus-visible,
-.prototype-app .prototype-floating-sleep:focus-within,
 .prototype-app .prototype-floating-sleep select:focus-visible,
 .prototype-app .prototype-floating-track input:focus-visible {
   outline: 2px solid #fffaf4;
@@ -3349,11 +3372,6 @@
 
 /* -------- 2026-11-22 收藏来源、标签筛选和自绘下拉菜单 -------- */
 .prototype-app .prototype-immersive {
-  opacity: 0;
-  transition: opacity 160ms ease;
-}
-
-.prototype-app .prototype-immersive.is-ready {
   opacity: 1;
 }
 
@@ -3536,10 +3554,16 @@
 }
 
 .prototype-app .prototype-floating-select {
-  min-width: 76px;
+  width: 28px;
+  min-width: 28px;
 }
 
 .prototype-app .prototype-floating-select .prototype-select-trigger {
+  display: grid;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  place-items: center;
   min-height: 24px;
   border-color: transparent;
   background: transparent;
@@ -3549,9 +3573,11 @@
 
 .prototype-app .prototype-floating-select .prototype-select-trigger:hover,
 .prototype-app .prototype-floating-select .prototype-select-trigger:focus-visible {
-  border-color: currentColor;
-  background: rgba(255, 255, 255, 0.12);
+  border-color: transparent;
+  background: transparent;
   color: inherit;
+  outline: 0;
+  box-shadow: none;
 }
 
 .prototype-app .settings-quality-select .prototype-select-options {
@@ -3561,8 +3587,7 @@
 
 .prototype-app .prototype-floating-player > button:hover,
 .prototype-app .prototype-floating-player > button:focus-visible,
-.prototype-app .prototype-floating-track:focus-within,
-.prototype-app .prototype-floating-sleep:focus-within {
+.prototype-app .prototype-floating-track:focus-within {
   background: rgba(255, 255, 255, 0.16);
   outline: 2px solid rgba(255, 250, 244, 0.78);
   outline-offset: 2px;
@@ -3570,6 +3595,13 @@
 
 .prototype-app .prototype-floating-player > button:focus-visible {
   box-shadow: 0 0 0 4px rgba(200, 76, 49, 0.34);
+}
+
+.prototype-app .prototype-floating-sleep,
+.prototype-app .prototype-floating-sleep:focus-within {
+  background: transparent;
+  outline: 0;
+  box-shadow: none;
 }
 
 @media (max-width: 920px) {

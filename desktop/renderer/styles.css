@@ -2220,6 +2220,24 @@ kbd {
   background: var(--surface-strong);
   box-shadow: var(--shadow);
   padding: 10px;
+  scrollbar-color: var(--accent) transparent;
+  scrollbar-width: thin;
+}
+
+.queue-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.queue-panel::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.queue-panel::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--accent);
+  background-clip: padding-box;
 }
 
 .queue-panel-header,
@@ -2243,12 +2261,19 @@ kbd {
 
 .queue-item {
   min-width: 0;
+  border: 1px solid transparent;
   border-radius: 8px;
   padding: 6px 4px;
 }
 
 .queue-item.active {
-  background: rgba(132, 184, 255, 0.1);
+  border-color: rgba(132, 184, 255, 0.46);
+  background: linear-gradient(
+    90deg,
+    rgba(132, 184, 255, 0.2),
+    rgba(132, 184, 255, 0.07)
+  );
+  box-shadow: inset 3px 0 0 var(--accent), 0 0 0 1px rgba(132, 184, 255, 0.08);
 }
 
 .queue-item:hover {
@@ -2284,6 +2309,11 @@ kbd {
 .queue-item-play strong {
   color: var(--text-soft);
   font-size: 11px;
+}
+
+.queue-item.active .queue-item-play strong {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .queue-item-play small {

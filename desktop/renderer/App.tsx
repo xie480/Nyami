@@ -329,7 +329,10 @@ export function App(): JSX.Element {
 
   /** 在播放窗口接近尾部时追加下一批项目，保持超大收藏夹连续播放。 */
   const appendPlaybackWindow = useCallback(
-    async (snapshot: PlaybackSnapshot): Promise<void> => {
+    async (
+      snapshot: PlaybackSnapshot,
+      force = false,
+    ): Promise<void> => {
       const pending = playbackWindowRef.current;
       if (
         !pending ||
@@ -343,7 +346,7 @@ export function App(): JSX.Element {
       }
       const remaining = snapshot.queue.length - snapshot.queueIndex - 1;
       if (
-        remaining > PLAYBACK_QUEUE_PREFETCH_THRESHOLD ||
+        (!force && remaining > PLAYBACK_QUEUE_PREFETCH_THRESHOLD) ||
         pending.nextIndex >= pending.items.length
       ) {
         return;
@@ -384,6 +387,11 @@ export function App(): JSX.Element {
     },
     [pushNotice],
   );
+
+  /** 在播放列表滚动到底部时主动请求下一批队列项目。 */
+  const requestPlaybackWindowAppend = useCallback((): void => {
+    void appendPlaybackWindow(playback, true);
+  }, [appendPlaybackWindow, playback]);
 
   /** 执行播放器的播放/暂停控制。 */
   const togglePlayback = useCallback(async (): Promise<void> => {
@@ -964,6 +972,7 @@ export function App(): JSX.Element {
       void window.nyamiDesktop.playback.skipPrevious().then(setPlayback);
     },
     onRemoveTrack: removePlaybackItem,
+    onQueueReachEnd: requestPlaybackWindowAppend,
     onRouteChange: setRoute,
     onSelectFolder: (folderId: number) => {
       setSelectedFolderId(folderId);
@@ -1158,6 +1167,7 @@ export function App(): JSX.Element {
                 }
                 onRemove={removePlaybackItem}
                 onReorder={reorderPlaybackQueue}
+                onQueueReachEnd={requestPlaybackWindowAppend}
                 onSeek={seekPlayback}
                 onSelectTrack={playQueueTrack}
                 onOpenPlayback={() => setRoute('immersive-windowed')}
@@ -2412,6 +2422,7 @@ function FavoriteIndexManager({
   const syncedCount = sources.filter(
     source => source.syncStatus === 'success',
   ).length;
+  const syncActive = sync.state === 'running';
 
   /** 切换一个来源的选择状态。 */
   const toggleSource = (sourceKey: string): void => {
@@ -2564,12 +2575,25 @@ function FavoriteIndexManager({
                     <strong title={source.title}>{source.title}</strong>
                     <small>
                       {source.mediaCount.toLocaleString()} 首 ·{' '}
-                      {getFavoriteIndexStatusLabel(source.syncStatus)}
+                      {getFavoriteIndexStatusLabel(
+                        getDisplayedFavoriteIndexStatus(
+                          source.syncStatus,
+                          syncActive,
+                        ),
+                      )}
                     </small>
                   </span>
                   <span
-                    className={`favorite-index-status-dot is-${source.syncStatus}`}
-                    title={getFavoriteIndexStatusLabel(source.syncStatus)}
+                    className={`favorite-index-status-dot is-${getDisplayedFavoriteIndexStatus(
+                      source.syncStatus,
+                      syncActive,
+                    )}`}
+                    title={getFavoriteIndexStatusLabel(
+                      getDisplayedFavoriteIndexStatus(
+                        source.syncStatus,
+                        syncActive,
+                      ),
+                    )}
                   />
                 </label>
               ))}
@@ -2636,6 +2660,17 @@ function getFavoriteIndexStatusLabel(
     default:
       return '未同步';
   }
+}
+
+/** 仅在同步任务运行时展示同步中，避免持久化旧状态误导用户。 */
+function getDisplayedFavoriteIndexStatus(
+  status: FavoriteSourceSummary['syncStatus'],
+  syncActive: boolean,
+): FavoriteSourceSummary['syncStatus'] {
+  if (!syncActive && (status === 'syncing' || status === 'running')) {
+    return 'idle';
+  }
+  return status;
 }
 
 /** 设置页顶部的账号状态卡片，集中提供登录、续期和退出操作。 */
@@ -3098,6 +3133,7 @@ function PlayerPlaceholder({
   onPlay,
   onPrevious,
   onRemove,
+  onQueueReachEnd,
   onReorder,
   onSeek,
   onSelectTrack,
@@ -3111,6 +3147,7 @@ function PlayerPlaceholder({
   onPlay: () => void;
   onPrevious: () => void;
   onRemove: (trackId: string) => void;
+  onQueueReachEnd: () => void;
   onReorder: (trackIds: string[]) => void;
   onSeek: (position: number) => void;
   onSelectTrack: (trackId: string) => void;
@@ -3270,7 +3307,18 @@ function PlayerPlaceholder({
               setQueueOpen(false);
             }
           }}>
-          <div className="queue-panel" role="dialog">
+          <div
+            className="queue-panel"
+            onScroll={event => {
+              const target = event.currentTarget;
+              if (
+                target.scrollTop + target.clientHeight >=
+                target.scrollHeight - 96
+              ) {
+                onQueueReachEnd();
+              }
+            }}
+            role="dialog">
             <div className="queue-panel-header">
               <strong>播放队列</strong>
               <span>{playback.queueLength} 首</span>
@@ -3291,6 +3339,9 @@ function PlayerPlaceholder({
                   onDragStart={() => setDraggedTrackId(item.id)}>
                   <span className="queue-drag-handle">⋮⋮</span>
                   <button
+                    aria-current={
+                      item.id === playback.trackId ? 'true' : undefined
+                    }
                     className="queue-item-play"
                     onClick={() => onSelectTrack(item.id)}
                     type="button">
