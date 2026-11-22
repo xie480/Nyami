@@ -83,7 +83,8 @@ export class BiliContentRuntime {
       userAgent: config.userAgent,
       referer: config.referer,
       timeoutMs: config.httpTimeout,
-      retries: 2,
+      // 与 Android 端相同，限流错误使用完整的指数退避重试预算。
+      retries: config.retry.maxAttempts,
       retryDelayMs: config.retry.delayMs,
       totalTimeoutMs: config.retry.totalTimeoutMs,
       credentials: credentialPort,

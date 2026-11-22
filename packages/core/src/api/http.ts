@@ -116,6 +116,10 @@ export class FetchBiliHttpClient implements BiliHttpPort {
         lastError = error;
         const normalized = normalizeError(error);
         const shouldRetry = this.shouldRetry(normalized, attempt, retries, deadline);
+        const isRateLimit = normalized instanceof RateLimitError;
+        if (isRateLimit) {
+          this.rateLimiter.reportError(true);
+        }
         if (!shouldRetry) {
           if (normalized instanceof AuthRequiredError) {
             this.options.onAuthRequired?.();
@@ -123,8 +127,12 @@ export class FetchBiliHttpClient implements BiliHttpPort {
           throw normalized;
         }
 
-        this.rateLimiter.reportError(normalized instanceof RateLimitError);
-        await this.waitBeforeRetry(attempt, deadline, requestOptions.signal);
+        await this.waitBeforeRetry(
+          attempt,
+          deadline,
+          requestOptions.signal,
+          isRateLimit,
+        );
       }
     }
 
@@ -248,9 +256,13 @@ export class FetchBiliHttpClient implements BiliHttpPort {
     attempt: number,
     deadline: number,
     signal?: AbortSignal,
+    isRateLimit = false,
   ): Promise<void> {
+    const retryMultiplier = isRateLimit ? 2 ** attempt : attempt + 1;
     const delay = Math.min(
-      this.retryDelayMs * (attempt + 1),
+      isRateLimit
+        ? Math.min(this.retryDelayMs * retryMultiplier, 30_000)
+        : this.retryDelayMs * retryMultiplier,
       Math.max(0, deadline - Date.now()),
     );
     if (delay <= 0) {

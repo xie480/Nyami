@@ -6,6 +6,7 @@ import {
   type FavoriteSyncProgress,
   type FavoriteSyncTarget,
   type FavoriteVideo,
+  type PageResult,
 } from '../../../packages/core/src';
 import {FavoriteSyncTask} from '../../../packages/core/src/favorites/syncTask';
 import type {CredentialStore} from '../auth/credentialStore';
@@ -27,6 +28,9 @@ import {getFavoriteSourceKey} from '../../shared/libraryFilters';
 
 const FAVORITE_PAGE_SIZE = 20;
 
+/** Android 端收藏分页缓存时长，避免短时间重复刷新同一来源。 */
+const SYNC_PAGE_CACHE_TTL_MS = 5 * 60 * 1000;
+
 /** Bilibili 导入来源目录接口的单页大小。 */
 const IMPORTED_CATALOG_PAGE_SIZE = 50;
 
@@ -41,12 +45,21 @@ type LibrarySyncOptions = {
   onFavoriteProgress?: (progress: FavoriteSyncProgress) => void;
 };
 
+type CachedSyncPage = {
+  expiresAt: number;
+  result: PageResult<FavoriteVideo>;
+};
+
 /**
  * 桌面端轻量收藏索引运行时。
  * 该类同步当前账号可访问的收藏来源，并把本地索引读取交给 SQLite。
  */
 export class DesktopLibraryRuntime {
   private readonly pendingRequests = new Map<string, AbortController>();
+
+  private readonly syncPageCache = new Map<string, CachedSyncPage>();
+
+  private syncTail: Promise<void> = Promise.resolve();
 
   /**
    * 创建桌面收藏索引运行时。
@@ -67,25 +80,28 @@ export class DesktopLibraryRuntime {
     uid: string,
     options: LibrarySyncOptions = {},
   ): Promise<FavoriteSyncProgress> {
-    await this.assertCurrentAccount(uid);
-    this.repository.switchAccount(uid);
-    options.onPhase?.('catalog', 0);
-    const targets = await this.buildSyncTargets(
-      uid,
-      options.signal,
-      options.sourceKeys,
-    );
-    options.onPhase?.('favorites', targets.length);
-    const task = new FavoriteSyncTask(
-      this.repository,
-      DESKTOP_SYNC_PLAYLIST_CONCURRENCY,
-    );
-    return task.run(targets, {
-      force: options.force,
-      concurrency: DESKTOP_SYNC_PLAYLIST_CONCURRENCY,
-      pageConcurrency: DESKTOP_SYNC_PAGE_CONCURRENCY,
-      signal: options.signal,
-      onProgress: options.onFavoriteProgress,
+    return this.withSyncMutex(options.signal, async () => {
+      await this.assertCurrentAccount(uid);
+      this.repository.switchAccount(uid);
+      options.onPhase?.('catalog', 0);
+      const targets = await this.buildSyncTargets(
+        uid,
+        options.signal,
+        options.sourceKeys,
+        options.force === true,
+      );
+      options.onPhase?.('favorites', targets.length);
+      const task = new FavoriteSyncTask(
+        this.repository,
+        DESKTOP_SYNC_PLAYLIST_CONCURRENCY,
+      );
+      return task.run(targets, {
+        force: options.force,
+        concurrency: DESKTOP_SYNC_PLAYLIST_CONCURRENCY,
+        pageConcurrency: DESKTOP_SYNC_PAGE_CONCURRENCY,
+        signal: options.signal,
+        onProgress: options.onFavoriteProgress,
+      });
     });
   }
 
@@ -99,8 +115,10 @@ export class DesktopLibraryRuntime {
     }
     if (nextUid) {
       this.repository.switchAccount(nextUid);
+      this.syncPageCache.clear();
       return;
     }
+    this.syncPageCache.clear();
     this.repository.clearAccount(previousUid ?? undefined);
   }
 
@@ -303,6 +321,7 @@ export class DesktopLibraryRuntime {
     uid: string,
     signal?: AbortSignal,
     sourceKeys?: readonly string[],
+    force = false,
   ): Promise<FavoriteSyncTarget[]> {
     const folderResponse = await this.api.getFavoriteFolders(
       uid,
@@ -320,35 +339,56 @@ export class DesktopLibraryRuntime {
         ownerMid: folder.mid,
         ownerName: '',
         cover: normalizeBiliAssetUrl(folder.cover ?? ''),
-        fetchPage: async (page: number, pageSignal?: AbortSignal) => {
-          const response = await this.api.getFavoriteVideos(
-            folder.id,
+        fetchPage: (page: number, pageSignal?: AbortSignal) =>
+          this.getCachedSyncPage(
+            uid,
+            `ownedFavorite:${folder.id}`,
             page,
-            FAVORITE_PAGE_SIZE,
+            force,
             pageSignal,
-            'index',
-          );
-          const medias = response.medias ?? [];
-          return {
-            list: medias
-              .filter(media => media.attr === 0)
-              .map(trimFavoriteVideo),
-            hasMore:
-              response.has_more === true || medias.length === FAVORITE_PAGE_SIZE,
-            rawCount: medias.length,
-            remoteVideoCount: Math.max(
-              0,
-              response.info?.media_count ?? folder.media_count,
-            ),
-            description: response.info?.intro?.trim() ?? '',
-          };
-        },
+            async () => {
+              const response = await this.api.getFavoriteVideos(
+                folder.id,
+                page,
+                FAVORITE_PAGE_SIZE,
+                pageSignal,
+                'index',
+              );
+              const medias = response.medias ?? [];
+              return {
+                list: medias
+                  .filter(media => media.attr === 0)
+                  .map(trimFavoriteVideo),
+                hasMore:
+                  response.has_more === true || medias.length === FAVORITE_PAGE_SIZE,
+                rawCount: medias.length,
+                remoteVideoCount: Math.max(
+                  0,
+                  response.info?.media_count ?? folder.media_count,
+                ),
+                description: response.info?.intro?.trim() ?? '',
+              };
+            },
+          ),
       }));
-    const importedTargets = await this.buildImportedSyncTargets(uid, signal);
-    const allTargets = [...ownedTargets, ...importedTargets];
     const requested = new Set(
       (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
     );
+    const requestedImported = new Set(
+      Array.from(requested).filter(sourceKey => {
+        const target = parseFavoriteSourceTarget(sourceKey);
+        return target !== null && target.kind !== 'owned';
+      }),
+    );
+    const importedTargets = requested.size && !requestedImported.size
+      ? []
+      : await this.buildImportedSyncTargets(
+          uid,
+          signal,
+          force,
+          requestedImported,
+        );
+    const allTargets = [...ownedTargets, ...importedTargets];
     return requested.size
       ? allTargets.filter(target => requested.has(target.playlistId))
       : allTargets;
@@ -358,8 +398,14 @@ export class DesktopLibraryRuntime {
   private async buildImportedSyncTargets(
     uid: string,
     signal?: AbortSignal,
+    force = false,
+    requestedSourceKeys = new Set<string>(),
   ): Promise<FavoriteSyncTarget[]> {
-    const sources = await this.loadImportedCatalog(uid, signal);
+    const sources = await this.loadImportedCatalog(
+      uid,
+      signal,
+      requestedSourceKeys,
+    );
     return sources.map(source => ({
       playlistId: source.sourceKey,
       title: source.title,
@@ -369,62 +415,70 @@ export class DesktopLibraryRuntime {
       ownerName: source.ownerName,
       cover: source.cover,
       description: source.description,
-      fetchPage: async (page: number, pageSignal?: AbortSignal) => {
-        if (source.kind === 'collectedFavorite') {
-          const response = await this.api.getFavoriteVideos(
-            source.remoteId,
-            page,
-            FAVORITE_PAGE_SIZE,
-            pageSignal,
-            'index',
-          );
-          const medias = response.medias ?? [];
-          return {
-            list: medias
-              .filter(media => media.attr === 0)
-              .map(media => ({
-                ...trimFavoriteVideo(media),
-                sourceKeys: [source.sourceKey],
-              })),
-            hasMore:
-              response.has_more === true || medias.length === FAVORITE_PAGE_SIZE,
-            rawCount: medias.length,
-            remoteVideoCount: Math.max(
-              0,
-              response.info?.media_count ?? source.mediaCount,
-            ),
-            description: response.info?.intro?.trim() ?? source.description,
-          };
-        }
-        const response = await this.api.getSeasonArchives(
-          source.ownerMid,
-          source.remoteId,
+      fetchPage: (page: number, pageSignal?: AbortSignal) =>
+        this.getCachedSyncPage(
+          uid,
+          source.sourceKey,
           page,
-          FAVORITE_PAGE_SIZE,
+          force,
           pageSignal,
-          'index',
-        );
-        const archives = response.archives ?? [];
-        const pageSize = response.page?.page_size ?? FAVORITE_PAGE_SIZE;
-        return {
-          list: archives
-            .map(archive => toSeasonFavoriteVideo(archive, source.sourceKey))
-            .filter((video): video is FavoriteVideo => video !== null),
-          hasMore:
-            response.page?.total !== undefined
-              ? page * pageSize < response.page.total
-              : archives.length === FAVORITE_PAGE_SIZE,
-          rawCount: archives.length,
-          remoteVideoCount: Math.max(
-            0,
-            response.page?.total ?? source.mediaCount,
-          ),
-          description:
-            response.meta?.description?.trim() ??
-            response.meta?.intro?.trim() ??
-            source.description,
-        };
-      },
+          async () => {
+            if (source.kind === 'collectedFavorite') {
+              const response = await this.api.getFavoriteVideos(
+                source.remoteId,
+                page,
+                FAVORITE_PAGE_SIZE,
+                pageSignal,
+                'index',
+              );
+              const medias = response.medias ?? [];
+              return {
+                list: medias
+                  .filter(media => media.attr === 0)
+                  .map(media => ({
+                    ...trimFavoriteVideo(media),
+                    sourceKeys: [source.sourceKey],
+                  })),
+                hasMore:
+                  response.has_more === true || medias.length === FAVORITE_PAGE_SIZE,
+                rawCount: medias.length,
+                remoteVideoCount: Math.max(
+                  0,
+                  response.info?.media_count ?? source.mediaCount,
+                ),
+                description: response.info?.intro?.trim() ?? source.description,
+              };
+            }
+            const response = await this.api.getSeasonArchives(
+              source.ownerMid,
+              source.remoteId,
+              page,
+              FAVORITE_PAGE_SIZE,
+              pageSignal,
+              'index',
+            );
+            const archives = response.archives ?? [];
+            const pageSize = response.page?.page_size ?? FAVORITE_PAGE_SIZE;
+            return {
+              list: archives
+                .map(archive => toSeasonFavoriteVideo(archive, source.sourceKey))
+                .filter((video): video is FavoriteVideo => video !== null),
+              hasMore:
+                response.page?.total !== undefined
+                  ? page * pageSize < response.page.total
+                  : archives.length === FAVORITE_PAGE_SIZE,
+              rawCount: archives.length,
+              remoteVideoCount: Math.max(
+                0,
+                response.page?.total ?? source.mediaCount,
+              ),
+              description:
+                response.meta?.description?.trim() ??
+                response.meta?.intro?.trim() ??
+                source.description,
+            };
+          },
+        ),
     }));
   }
 
@@ -673,6 +727,78 @@ export class DesktopLibraryRuntime {
     };
   }
 
+  /** 复用 Android 端的分页缓存，强制同步时绕过旧缓存并写入新快照。 */
+  private async getCachedSyncPage(
+    uid: string,
+    sourceKey: string,
+    page: number,
+    force: boolean,
+    signal: AbortSignal | undefined,
+    loader: () => Promise<PageResult<FavoriteVideo>>,
+  ): Promise<PageResult<FavoriteVideo>> {
+    const cacheKey = `${uid}:${sourceKey}:${page}`;
+    const cached = this.syncPageCache.get(cacheKey);
+    if (!force && cached && cached.expiresAt > Date.now()) {
+      return clonePageResult(cached.result);
+    }
+    if (force) {
+      this.syncPageCache.delete(cacheKey);
+    }
+    const result = await loader();
+    if (!signal?.aborted) {
+      this.syncPageCache.set(cacheKey, {
+        expiresAt: Date.now() + SYNC_PAGE_CACHE_TTL_MS,
+        result: clonePageResult(result),
+      });
+    }
+    return result;
+  }
+
+  /** 串行化所有索引同步入口，避免手动刷新与后台同步叠加请求。 */
+  private async withSyncMutex<T>(
+    signal: AbortSignal | undefined,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    if (signal?.aborted) {
+      throw createAbortError('收藏同步已取消');
+    }
+    const previous = this.syncTail;
+    let release!: () => void;
+    const current = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    this.syncTail = previous.then(() => current);
+
+    let abortListener: (() => void) | undefined;
+    const abortPromise = signal
+      ? new Promise<never>((_resolve, reject) => {
+          abortListener = () => reject(createAbortError('收藏同步已取消'));
+          signal.addEventListener('abort', abortListener, {once: true});
+        })
+      : null;
+    try {
+      await (abortPromise
+        ? Promise.race([previous, abortPromise])
+        : previous);
+    } catch (error) {
+      release();
+      throw error;
+    } finally {
+      if (abortListener) {
+        signal?.removeEventListener('abort', abortListener);
+      }
+    }
+    if (signal?.aborted) {
+      release();
+      throw createAbortError('收藏同步已取消');
+    }
+    try {
+      return await work();
+    } finally {
+      release();
+    }
+  }
+
   /** 校验调用方仍持有目标账号，避免账号切换期间写错本地数据。 */
   private async assertCurrentAccount(uid: string): Promise<void> {
     const status = await this.credentials.getStatus();
@@ -711,6 +837,16 @@ function createAbortError(message: string): Error {
   const error = new Error(message);
   error.name = 'AbortError';
   return error;
+}
+
+/** 复制收藏分页结果，避免缓存快照被同步写入过程意外修改。 */
+function clonePageResult(
+  result: PageResult<FavoriteVideo>,
+): PageResult<FavoriteVideo> {
+  return {
+    ...result,
+    list: [...result.list],
+  };
 }
 
 /** 生成导入来源分页签名，用于识别接口重复返回同一页。 */

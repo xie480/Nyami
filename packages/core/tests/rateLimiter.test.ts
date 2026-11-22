@@ -29,4 +29,23 @@ describe('AdaptiveRateLimiter', () => {
     await Promise.all([indexFirst, indexSecond, normal]);
     expect(order).toEqual(['normal', 'index-first', 'index-second']);
   });
+
+  it('低速时继续排队等待，不因等待超过十秒提前抛出限流错误', async () => {
+    jest.useFakeTimers();
+    const limiter = new AdaptiveRateLimiter(0.1, 1);
+
+    await limiter.acquire('index');
+    const pending = limiter.acquire('index');
+
+    await jest.advanceTimersByTimeAsync(9_999);
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    await jest.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toBeUndefined();
+  });
 });

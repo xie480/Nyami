@@ -1,4 +1,3 @@
-import {RateLimitError} from './errors';
 import type {RequestPriority} from '../../../platform-contracts/src';
 
 type Waiter = {
@@ -30,6 +29,10 @@ export class AdaptiveRateLimiter {
 
   private lastRefill = Date.now();
 
+  private successCount = 0;
+
+  private readonly successThreshold = 10;
+
   private waitQueue: Waiter[] = [];
 
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -57,11 +60,6 @@ export class AdaptiveRateLimiter {
     if (this.tokens >= 1) {
       this.tokens -= 1;
       return;
-    }
-
-    const waitMs = ((1 - this.tokens) / this.currentRate) * 1000;
-    if (waitMs > 10_000) {
-      throw new RateLimitError('限流：请稍后再试');
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -112,7 +110,12 @@ export class AdaptiveRateLimiter {
 
   /** 上报一次成功请求，逐步恢复到最大速率。 */
   reportSuccess(): void {
-    this.currentRate = Math.min(this.maxRate, this.currentRate + 0.05);
+    this.successCount += 1;
+    if (this.successCount < this.successThreshold) {
+      return;
+    }
+    this.currentRate = Math.min(this.maxRate, this.currentRate + 0.5);
+    this.successCount = 0;
   }
 
   /** 上报限流错误，降低当前速率。 */
@@ -120,6 +123,7 @@ export class AdaptiveRateLimiter {
     if (isRateLimit) {
       this.currentRate = Math.max(this.minRate, this.currentRate * 0.5);
       this.tokens = 0;
+      this.successCount = 0;
     }
   }
 

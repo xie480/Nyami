@@ -3,6 +3,8 @@
  * 认证协议与音频请求头集中管理，后续抽取共享核心时可直接复用。
  */
 
+import {config} from '../../packages/core/src/config';
+
 export const DESKTOP_APP_ID = 'com.nyami.desktop';
 
 export const DESKTOP_USER_AGENT =
@@ -78,14 +80,15 @@ export const BILIBILI_IMAGE_HOST_SUFFIXES = [
 
 export const AUDIO_REQUEST_LOG_LIMIT = 40;
 
-/** PC 端收藏夹同步的并发工作数，利用桌面网络和多核资源缩短批量索引时间。 */
-export const DESKTOP_SYNC_PLAYLIST_CONCURRENCY = 10;
+/** PC 端收藏夹同步并发数，与 Android 端保持一致，避免多个来源同时触发风控。 */
+export const DESKTOP_SYNC_PLAYLIST_CONCURRENCY =
+  config.favoriteSync.playlistConcurrency;
 
-/** PC 端单个收藏夹批量拉取的分页并发数；增量扫描仍保持逐页探测。 */
-export const DESKTOP_SYNC_PAGE_CONCURRENCY = 2;
+/** PC 端单个收藏夹按页顺序拉取，与 Android 端的断点和增量语义一致。 */
+export const DESKTOP_SYNC_PAGE_CONCURRENCY = 1;
 
-/** PC 端索引请求的自适应限流上限，收到 412/429 后由共享限流器自动退避。 */
-export const DESKTOP_INDEX_RATE_LIMIT = 8;
+/** PC 端索引请求的自适应限流上限，与 Android 端共享核心配置一致。 */
+export const DESKTOP_INDEX_RATE_LIMIT = config.rateLimit.perSecond;
 
-/** PC 端索引请求启动时允许的令牌突发数。 */
-export const DESKTOP_INDEX_RATE_BURST = 4;
+/** PC 端索引请求启动时允许的令牌突发数，与 Android 端一致。 */
+export const DESKTOP_INDEX_RATE_BURST = config.rateLimit.burstSize;

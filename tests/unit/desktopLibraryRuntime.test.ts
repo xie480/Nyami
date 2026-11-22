@@ -23,6 +23,17 @@ function createRuntimeFixture(): RuntimeFixture {
     switchAccount: jest.fn(),
     getSourceSummaries: jest.fn().mockReturnValue([]),
     getSourceVideos: jest.fn().mockReturnValue({items: [], total: 0}),
+    getPlaylistMeta: jest.fn().mockResolvedValue(null),
+    upsertPlaylistMeta: jest.fn().mockResolvedValue(undefined),
+    createSyncJob: jest.fn().mockResolvedValue('job-1'),
+    syncPlaylistVideosPage: jest.fn().mockResolvedValue({
+      existingBvids: new Set<string>(),
+      videosToUpsert: [],
+      syncedCount: 0,
+    }),
+    finishSyncJob: jest.fn().mockResolvedValue(undefined),
+    markPlaylistSyncSuccess: jest.fn().mockResolvedValue(undefined),
+    softDeleteMissingVideos: jest.fn().mockResolvedValue(undefined),
   };
   const credentials = {
     getStatus: jest.fn().mockResolvedValue({
@@ -163,6 +174,104 @@ describe('DesktopLibraryRuntime 来源目录读取', () => {
       20,
       expect.any(AbortSignal),
       'normal',
+    );
+  });
+
+  it('仅同步自有收藏夹时不会额外读取全部外部收藏目录', async () => {
+    const fixture = createRuntimeFixture();
+    fixture.api.getFavoriteFolders.mockResolvedValue({
+      list: [
+        {
+          id: 7,
+          mid: 1,
+          title: '自有收藏夹',
+          media_count: 0,
+        },
+      ],
+    });
+    fixture.api.getFavoriteVideos.mockResolvedValue({
+      medias: [],
+      has_more: false,
+    });
+
+    await fixture.runtime.synchronize('1', {
+      sourceKeys: ['ownedFavorite:7'],
+    });
+
+    expect(fixture.api.getCollectedPlaylists).not.toHaveBeenCalled();
+    expect(fixture.repository.markPlaylistSyncSuccess).toHaveBeenCalledWith(
+      'ownedFavorite:7',
+    );
+  });
+
+  it('同步写入失败后重试会复用五分钟内的分页快照', async () => {
+    const fixture = createRuntimeFixture();
+    let meta: Record<string, unknown> | null = null;
+    let writeAttempts = 0;
+    fixture.repository.getPlaylistMeta.mockImplementation(async () => meta);
+    fixture.repository.upsertPlaylistMeta.mockImplementation(async data => {
+      meta = {
+        playlistId: data.playlistId,
+        title: data.title,
+        remoteVideoCount: data.remoteVideoCount,
+        localSyncedCount: 0,
+        syncCursor: null,
+        playlistSyncStatus: data.playlistSyncStatus ?? 'idle',
+        needResync: data.needResync ?? false,
+      };
+    });
+    fixture.repository.syncPlaylistVideosPage.mockImplementation(async () => {
+      if (writeAttempts++ === 0) {
+        throw new Error('数据库写入失败');
+      }
+      return {
+        existingBvids: new Set<string>(),
+        videosToUpsert: [],
+        syncedCount: 1,
+      };
+    });
+    fixture.api.getFavoriteFolders.mockResolvedValue({
+      list: [
+        {
+          id: 7,
+          mid: 1,
+          title: '自有收藏夹',
+          media_count: 1,
+        },
+      ],
+    });
+    fixture.api.getFavoriteVideos.mockResolvedValue({
+      info: {media_count: 1},
+      medias: [
+        {
+          aid: 1,
+          bvid: 'BV1cache',
+          title: '缓存测试',
+          cover: '//i0.hdslb.com/cache.jpg',
+          duration: 60,
+          page: 1,
+          pubdate: 1,
+          fav_time: 1,
+          attr: 0,
+          upper: {mid: 1, name: 'UP 主'},
+        },
+      ],
+      has_more: false,
+    });
+
+    await expect(
+      fixture.runtime.synchronize('1', {
+        force: true,
+        sourceKeys: ['ownedFavorite:7'],
+      }),
+    ).rejects.toThrow('有 1 个收藏夹同步失败');
+    await fixture.runtime.synchronize('1', {
+      sourceKeys: ['ownedFavorite:7'],
+    });
+
+    expect(fixture.api.getFavoriteVideos).toHaveBeenCalledTimes(1);
+    expect(fixture.repository.markPlaylistSyncSuccess).toHaveBeenCalledWith(
+      'ownedFavorite:7',
     );
   });
 });
