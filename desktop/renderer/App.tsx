@@ -54,6 +54,10 @@ import {
   applyDesktopSettingsPatch,
   mergeDesktopSettingsPatches,
 } from './settingsState';
+import {
+  bindDesktopMediaSession,
+  updateDesktopMediaSession,
+} from './mediaSession';
 
 type Route = PrototypeRoute;
 type NoticeTone = 'info' | 'success' | 'error';
@@ -188,6 +192,7 @@ export function App(): JSX.Element {
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const audioAdapterRef = useRef<ElectronAudioPlayerAdapter | null>(null);
+  const playbackRef = useRef(playback);
   const settingsRef = useRef<DesktopSettings | null>(null);
   const pendingSettingsPatchRef = useRef<DesktopSettingsPatch>({});
   const settingsPersistTimerRef = useRef<number | null>(null);
@@ -801,6 +806,67 @@ export function App(): JSX.Element {
       audioAdapterRef.current = null;
     };
   }, []);
+
+  /** 注册 Windows 系统媒体控制，并复用主进程播放状态接口。 */
+  useEffect(() => {
+    const disposeMediaSession = bindDesktopMediaSession({
+      getSnapshot: () => playbackRef.current,
+      onPlay: () => {
+        void window.nyamiDesktop.playback
+          .play()
+          .then(setPlayback)
+          .catch(error => {
+            pushNotice('error', getErrorMessage(error, '系统播放控制失败'));
+          });
+      },
+      onPause: () => {
+        void window.nyamiDesktop.playback
+          .pause()
+          .then(setPlayback)
+          .catch(error => {
+            pushNotice('error', getErrorMessage(error, '系统暂停控制失败'));
+          });
+      },
+      onStop: () => {
+        void window.nyamiDesktop.playback
+          .stop()
+          .then(setPlayback)
+          .catch(error => {
+            pushNotice('error', getErrorMessage(error, '系统停止控制失败'));
+          });
+      },
+      onNext: () => {
+        void window.nyamiDesktop.playback
+          .skipNext()
+          .then(setPlayback)
+          .catch(error => {
+            pushNotice('error', getErrorMessage(error, '系统下一首控制失败'));
+          });
+      },
+      onPrevious: () => {
+        void window.nyamiDesktop.playback
+          .skipPrevious()
+          .then(setPlayback)
+          .catch(error => {
+            pushNotice('error', getErrorMessage(error, '系统上一首控制失败'));
+          });
+      },
+      onSeek: position => {
+        void window.nyamiDesktop.playback
+          .seek({position})
+          .then(setPlayback)
+          .catch(error => {
+            pushNotice('error', getErrorMessage(error, '系统进度控制失败'));
+          });
+      },
+    });
+    return disposeMediaSession;
+  }, [pushNotice]);
+
+  /** 播放状态变化后更新系统媒体元数据、状态和进度。 */
+  useEffect(() => {
+    updateDesktopMediaSession(playback);
+  }, [playback]);
 
   /** 设置变化后把完整音频参数快照发送到 AudioWorklet。 */
   useEffect(() => {
