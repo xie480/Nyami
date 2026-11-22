@@ -5,7 +5,8 @@ const WORKLET_PROCESSOR_NAME = 'nyami-dsp-processor';
 const WORKLET_FFT_SIZE = 1024;
 const WORKLET_DISPLAY_BIN_COUNT = 128;
 const WORKLET_GROUP_SIZE = 4;
-const WORKLET_UPDATE_INTERVAL_MS = 1000 / 30;
+const WORKLET_SPECTRUM_FPS = 15;
+const WORKLET_UPDATE_INTERVAL_MS = 1000 / WORKLET_SPECTRUM_FPS;
 
 type SpectrumListener = (values: number[]) => void;
 
@@ -334,6 +335,17 @@ class NyamiDspProcessor extends AudioWorkletProcessor {
     }
     this.ensureChannels(output.length);
     const frameCount = output[0].length;
+    if (!this.settings.enabled && !this.settings.spectrumEnabled) {
+      for (let channel = 0; channel < output.length; channel += 1) {
+        const source = input[channel] || input[0];
+        for (let frame = 0; frame < frameCount; frame += 1) {
+          const sample = source && source[frame] ? source[frame] : 0;
+          output[channel][frame] = Math.min(1, Math.max(-1, sample));
+        }
+      }
+      this.resetLoudness();
+      return true;
+    }
     let blockEnergy = 0;
     for (let frame = 0; frame < frameCount; frame += 1) {
       let mono = 0;

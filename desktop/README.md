@@ -20,7 +20,7 @@ npm run desktop:release:check
 - 安装包显式使用 `resource/icon.png`，注册 `.nyami` 播放队列文件关联，并启用已有的单实例锁。
 - NSIS 使用 assisted installer 和 x64 目标；覆盖升级不会删除 `%APPDATA%/Nyami/`，卸载只清理安装目录和卸载注册信息。
 - 构建文件过滤 source map、调试日志、测试目录和测试凭证；`desktop-release.mjs --check` 会校验安装包、便携版、SHA-256 和更新清单。
-- 设置页的“检查更新”读取 `NYAMI_UPDATE_URL`。该变量可以是 `latest.json` 地址，也可以是包含 `latest.json` 的 HTTPS 目录；本机开发允许 `http://localhost`。
+- 设置页的“检查更新”默认读取 Nyami GitHub Releases 的 `latest.json`：`https://github.com/xie480/Nyami/releases/latest/download/latest.json`。`NYAMI_UPDATE_URL` 可以覆盖默认地址，也可以配置为包含 `latest.json` 的 HTTPS 目录；本机开发允许 `http://localhost`。
 - 当前更新流程只检查清单并打开已校验的下载地址，用户手动运行安装包完成升级。清单中的 `blockmapUrl` 为后续 `electron-updater` 增量下载保留入口。
 
 ### 代码签名
@@ -38,10 +38,10 @@ npm run desktop:release:check
 
 ## 阶段 3 账户、搜索与基础桌面 UI
 
-- Renderer 使用侧边栏、主内容区、右侧任务通知和底部播放器占位组成桌面布局，支持深色、浅色、玻璃和跟随系统主题。
+- Renderer 使用侧边栏、主内容区和底部播放器占位组成桌面布局，支持深色、浅色、玻璃和跟随系统主题。
 - 认证入口支持二维码登录、受控网页登录、Cookie 续期、登录状态、账号资料和退出登录；完整 Cookie 与 refresh token 仍只在主进程处理。
 - 内容入口支持公开首页、发现、站内搜索、收藏夹目录和收藏视频分页；未登录可以浏览公开内容，收藏夹在登录后解锁。
-- 搜索、发现和收藏视频请求都带 `requestId`，支持取消、分页、加载、空状态、错误重试和任务通知，不阻塞 Renderer 主窗口。
+- 搜索、发现和收藏视频请求都带 `requestId`，支持取消、分页、加载、空状态、错误重试和短时操作提示，不阻塞 Renderer 主窗口。
 - `Ctrl+K` 聚焦搜索；内容卡片可以立即播放或加入队列，底部播放器支持上一首、播放/暂停、下一首、进度、音量、随机/顺序模式和睡眠定时器。
 
 阶段 3 的主进程实现位于 `desktop/main/auth/` 与 `desktop/main/content/`，跨进程契约位于 `desktop/shared/types.ts`，Preload 只暴露白名单 API。

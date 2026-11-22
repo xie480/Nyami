@@ -7,6 +7,10 @@ const MAX_MANIFEST_BYTES = 1024 * 1024;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 
+/** Nyami GitHub Releases 发布脚本生成的最新版本清单地址。 */
+export const DEFAULT_UPDATE_SOURCE =
+  'https://github.com/xie480/Nyami/releases/latest/download/latest.json';
+
 type UpdateManifest = {
   version: string;
   releaseDate?: string;
@@ -27,7 +31,8 @@ export type UpdateServiceOptions = {
 
 /**
  * 桌面端手动更新检查服务。
- * 更新源通过 NYAMI_UPDATE_URL 或构造参数配置，Renderer 只接收脱敏清单。
+ * 更新源默认使用 Nyami GitHub Releases，也可通过 NYAMI_UPDATE_URL 或构造参数覆盖；
+ * Renderer 只接收脱敏清单。
  */
 export class UpdateService {
   private readonly source: string | null;
@@ -49,7 +54,7 @@ export class UpdateService {
     options: UpdateServiceOptions = {},
   ) {
     this.source = normalizeSource(
-      options.source ?? process.env.NYAMI_UPDATE_URL ?? null,
+      options.source ?? process.env.NYAMI_UPDATE_URL ?? DEFAULT_UPDATE_SOURCE,
     );
     this.currentVersion = options.currentVersion ?? app.getVersion();
     this.timeoutMs = options.timeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS;

@@ -34,8 +34,8 @@ import {normalizeBiliAssetUrl} from '../security/urlPolicy';
 const FADE_IN_MS = 180;
 const FADE_OUT_MS = 120;
 const MAX_RETRY_COUNT = 2;
-/** Renderer 的 timeupdate 以约 30fps 进入状态层，保证进度条连续而不过度占用 IPC。 */
-const PROGRESS_EVENT_INTERVAL_MS = 33;
+/** 进度条由 Renderer 音频元素逐帧驱动，状态层只需约 10fps 同步给 IPC 和其他视图。 */
+const PROGRESS_EVENT_INTERVAL_MS = 100;
 
 const DEFAULT_PLAYBACK_SNAPSHOT: PlaybackSnapshot = {
   state: 'idle',
