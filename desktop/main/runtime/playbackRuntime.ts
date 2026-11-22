@@ -106,6 +106,8 @@ export class PlaybackRuntime {
 
   private currentSource: PlaybackSource | null = null;
 
+  private bypassCacheOnce = false;
+
   private queueSessionKey: string | null = null;
 
   private operationController: AbortController | null = null;
@@ -176,6 +178,7 @@ export class PlaybackRuntime {
     const controller = new AbortController();
     this.operationController = controller;
     this.currentSource = null;
+    this.bypassCacheOnce = false;
     this.retryCount = 0;
     this.snapshot.duration = initialItem.duration;
     this.snapshot.cached = false;
@@ -393,6 +396,7 @@ export class PlaybackRuntime {
       });
     }
     this.currentSource = null;
+    this.bypassCacheOnce = false;
     this.snapshot = this.snapshotFromQueue('stopped');
     this.snapshot.position = 0;
     await this.persistState();
@@ -669,7 +673,11 @@ export class PlaybackRuntime {
     this.snapshot.diagnostic = null;
     this.emitState();
     const cacheRequest = this.toCacheRequest(track);
-    const cached = await this.options.cache.get(cacheRequest);
+    const bypassCache = this.bypassCacheOnce;
+    this.bypassCacheOnce = false;
+    const cached = bypassCache
+      ? null
+      : await this.options.cache.get(cacheRequest);
     if (cached && this.queueController.isCurrent(revision)) {
       this.currentSource = {
         trackId: track.id,
@@ -761,6 +769,22 @@ export class PlaybackRuntime {
         kind,
         false,
       );
+    }
+    if (this.currentSource?.cached) {
+      this.bypassCacheOnce = true;
+      const currentTrack = this.queueController.getSnapshot().queue.find(
+        item => item.id === this.snapshot.trackId,
+      );
+      if (currentTrack) {
+        void this.options.cache
+          .remove(this.toCacheRequest(currentTrack))
+          .catch(error => {
+            this.options.logger.warn('audio.cache-invalid-remove-failed', {
+              trackId: this.snapshot.trackId,
+              error,
+            });
+          });
+      }
     }
     this.retryCount += 1;
     const trackId = this.snapshot.trackId;

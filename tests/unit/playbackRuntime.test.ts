@@ -29,7 +29,17 @@ function createQueueItem(id: string) {
   };
 }
 
-function createRuntime(statePath: string): PlaybackRuntime {
+function createRuntime(
+  statePath: string,
+  cacheOverrides: Record<string, unknown> = {},
+): PlaybackRuntime {
+  const cache = {
+    get: jest.fn().mockResolvedValue(null),
+    download: jest.fn().mockResolvedValue(undefined),
+    evict: jest.fn().mockResolvedValue(undefined),
+    remove: jest.fn().mockResolvedValue(undefined),
+  };
+  Object.assign(cache, cacheOverrides);
   return new PlaybackRuntime({
     resolver: {
       resolve: jest.fn().mockResolvedValue({
@@ -42,11 +52,7 @@ function createRuntime(statePath: string): PlaybackRuntime {
         parts: [],
       }),
     } as never,
-    cache: {
-      get: jest.fn().mockResolvedValue(null),
-      download: jest.fn().mockResolvedValue(undefined),
-      evict: jest.fn().mockResolvedValue(undefined),
-    } as never,
+    cache: cache as never,
     logger: {
       warn: jest.fn(),
     } as never,
@@ -143,6 +149,48 @@ describe('PlaybackRuntime 大队列窗口', () => {
           position: 23,
         },
       });
+    } finally {
+      await fs.rm(statePath, {force: true});
+      await fs.rm(`${statePath}.tmp`, {force: true});
+    }
+  });
+
+  it('缓存音频源加载失败后删除缓存并回退到新的远程地址', async () => {
+    const statePath = path.join(
+      os.tmpdir(),
+      `nyami-playback-${randomUUID()}.json`,
+    );
+    const remove = jest.fn().mockResolvedValue(undefined);
+    const runtime = createRuntime(statePath, {
+      get: jest.fn().mockResolvedValue({key: 'broken-cache'}),
+      remove,
+    });
+    const sources: string[] = [];
+    runtime.subscribe(event => {
+      if (event.type === 'source') {
+        sources.push(event.source.url);
+      }
+    });
+
+    try {
+      await runtime.loadQueue({
+        items: [createQueueItem('BV1')],
+        autoplay: true,
+        expandParts: false,
+      });
+      const recovered = await runtime.reportAudioEvent({
+        type: 'error',
+        trackId: 'BV1',
+        code: 4,
+        message: '媒体源不受支持或地址已过期',
+      });
+
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(recovered.cached).toBe(false);
+      expect(sources).toEqual([
+        'nyami-cache://audio/broken-cache',
+        'https://audio.example.test/BV1.m4s',
+      ]);
     } finally {
       await fs.rm(statePath, {force: true});
       await fs.rm(`${statePath}.tmp`, {force: true});

@@ -3074,7 +3074,11 @@
   width: 100%;
   height: 18px !important;
   margin: 0;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
   appearance: none;
+  -webkit-appearance: none;
   background: transparent !important;
   cursor: pointer;
 }
@@ -3088,8 +3092,11 @@
   width: 15px;
   height: 15px;
   appearance: none;
+  -webkit-appearance: none !important;
   border: 0;
   background: transparent;
+  box-shadow: none;
+  opacity: 0 !important;
 }
 
 .prototype-app .smooth-progress-native::-moz-range-track {
@@ -3102,6 +3109,8 @@
   height: 15px;
   border: 0;
   background: transparent;
+  box-shadow: none;
+  opacity: 0 !important;
 }
 
 .prototype-app input[type='checkbox'] {
