@@ -1023,10 +1023,16 @@ export class PlaybackRuntime {
       if (queue.length === 0) {
         return;
       }
-      const currentTrackId =
+      const requestedCurrentTrackId =
         typeof parsed.currentTrackId === 'string'
           ? parsed.currentTrackId
           : queue[0].id;
+      const restoredTrack = queue.find(
+        item =>
+          item.id === requestedCurrentTrackId ||
+          item.bvid === requestedCurrentTrackId,
+      ) ?? queue[0];
+      const currentTrackId = restoredTrack.id;
       this.queueController.replaceQueue(
         queue,
         currentTrackId,
