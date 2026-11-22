@@ -21,6 +21,7 @@ export function trimFolder(folder: BiliFolder): FavoriteFolder {
     mid: folder.mid,
     title: folder.title,
     mediaCount: folder.media_count,
+    cover: folder.cover,
   };
 }
 

@@ -600,6 +600,7 @@ export type FavoriteFolderSummary = {
   fid: number;
   title: string;
   mediaCount: number;
+  cover: string;
 };
 
 export type FavoriteSourceKind =

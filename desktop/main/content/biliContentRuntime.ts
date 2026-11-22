@@ -254,6 +254,7 @@ export class BiliContentRuntime {
             fid: normalized.fid,
             title: normalized.title,
             mediaCount: normalized.mediaCount,
+            cover: normalizeBiliAssetUrl(normalized.cover),
           };
         });
       },

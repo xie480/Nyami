@@ -11,6 +11,8 @@ export interface BiliFolder {
   mid: number;
   title: string;
   media_count: number;
+  /** 部分收藏夹接口会直接返回封面地址。 */
+  cover?: string;
   /** 查询指定稿件时，1 表示该稿件已在此收藏夹。 */
   fav_state?: number;
 }

@@ -112,12 +112,16 @@ export class DesktopLibraryRuntime {
       async signal => {
         await this.assertCurrentAccount(uid);
         this.repository.switchAccount(uid);
-        const remoteSources = await this.buildSourceCatalog(uid, signal);
         const localSources = new Map(
           this.repository.getSourceSummaries(uid).map(source => [
             source.sourceKey,
             source,
           ]),
+        );
+        const remoteSources = await this.buildSourceCatalog(
+          uid,
+          signal,
+          localSources,
         );
         const requested = new Set(
           (sourceKeys ?? []).map(value => value.trim()).filter(Boolean),
@@ -268,6 +272,7 @@ export class DesktopLibraryRuntime {
         kind: 'owned' as const,
         ownerMid: folder.mid,
         ownerName: '',
+        cover: normalizeBiliAssetUrl(folder.cover ?? ''),
         fetchPage: async (page: number, pageSignal?: AbortSignal) => {
           const response = await this.api.getFavoriteVideos(
             folder.id,
@@ -407,6 +412,7 @@ export class DesktopLibraryRuntime {
   private async buildSourceCatalog(
     uid: string,
     signal?: AbortSignal,
+    localSources = new Map<string, FavoriteSourceSummary>(),
   ): Promise<FavoriteSourceSummary[]> {
     const folderResponse = await this.api.getFavoriteFolders(
       uid,
@@ -423,13 +429,69 @@ export class DesktopLibraryRuntime {
         ownerMid: Number(folder.mid ?? uid),
         ownerName: '',
         title: folder.title,
-        cover: '',
+        cover: normalizeBiliAssetUrl(folder.cover ?? ''),
         mediaCount: Math.max(0, folder.media_count),
         description: '',
         syncStatus: 'idle' as const,
         lastSyncedAt: null,
       }));
-    return [...owned, ...(await this.loadImportedCatalog(uid, signal))];
+    const imported = await this.loadImportedCatalog(uid, signal);
+    const sources = [...owned, ...imported];
+    return Promise.all(
+      sources.map(async source => {
+        const localCover = localSources.get(source.sourceKey)?.cover ?? '';
+        const cover =
+          normalizeBiliAssetUrl(source.cover) ||
+          normalizeBiliAssetUrl(localCover) ||
+          (await this.fetchSourceCover(source, signal));
+        return {...source, cover};
+      }),
+    );
+  }
+
+  /** 从来源第一页视频中补齐收藏夹封面，兼容目录接口不返回 cover 的情况。 */
+  private async fetchSourceCover(
+    source: FavoriteSourceSummary,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (signal?.aborted) {
+      return '';
+    }
+    try {
+      if (source.kind === 'subscribedSeason') {
+        const response = await this.api.getSeasonArchives(
+          source.ownerMid,
+          source.remoteId,
+          1,
+          FAVORITE_PAGE_SIZE,
+          signal,
+          'index',
+        );
+        const archive = (response.archives ?? []).find(
+          item => Boolean(item.pic?.trim() || item.cover?.trim()),
+        );
+        return normalizeBiliAssetUrl(archive?.pic ?? archive?.cover);
+      }
+      const response = await this.api.getFavoriteVideos(
+        source.remoteId,
+        1,
+        FAVORITE_PAGE_SIZE,
+        signal,
+        'index',
+      );
+      const media = (response.medias ?? []).find(
+        item => item.attr === 0 && Boolean(item.cover?.trim()),
+      );
+      return normalizeBiliAssetUrl(media?.cover);
+    } catch (error) {
+      if (!signal?.aborted) {
+        this.logger.warn('library.source-cover-failed', {
+          sourceKey: source.sourceKey,
+          error,
+        });
+      }
+      return '';
+    }
   }
 
   /** 校验调用方仍持有目标账号，避免账号切换期间写错本地数据。 */

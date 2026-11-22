@@ -13,6 +13,7 @@ import type {
   FavoriteSourceKind,
   FavoriteSourceSummary,
 } from '../../shared/types';
+import {normalizeBiliAssetUrl} from '../security/urlPolicy';
 import {SqliteDatabase, type SqliteValue} from './sqliteDatabase';
 
 type PlaylistMetaInput = {
@@ -435,7 +436,7 @@ export class DesktopLibraryRepository implements FavoriteRepository {
       ownerMid: row.owner_mid,
       ownerName: row.owner_name,
       title: row.title,
-      cover: row.resolved_cover ?? row.cover,
+      cover: normalizeBiliAssetUrl(row.resolved_cover ?? row.cover),
       mediaCount: row.remote_video_count,
       description: row.description,
       syncStatus: normalizeSyncStatus(row.sync_status),
