@@ -36,6 +36,7 @@ import type {
   UserProfile,
 } from '../shared/types';
 import {ElectronAudioPlayerAdapter} from './audio/electronAudioPlayer';
+import {AudioSettingsPanel} from './audio/AudioSettingsPanel';
 import {
   PrototypeImmersivePage,
   PrototypePage,
@@ -1985,6 +1986,9 @@ function SettingsPage({
         onRenew={onRenew}
         profile={profile}
       />
+      {settings ? (
+        <AudioSettingsPanel onUpdate={onUpdate} settings={settings.audio} />
+      ) : null}
       <section className="settings-card">
         <div className="panel-heading">
           <div>
