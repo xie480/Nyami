@@ -22,7 +22,7 @@
 
 | 平台 | Release 入口 | 说明 |
 | --- | --- | --- |
-| Windows 桌面端 | [NYAMI PC v1.0.0](https://github.com/xie480/Nyami/releases/tag/desktop-v1.0.0) | Windows x64 NSIS 安装包，双击即可安装 |
+| Windows 桌面端 | [NYAMI PC v1.0.1](https://github.com/xie480/Nyami/releases/tag/desktop-v1.0.1) | Windows x64 NSIS 安装包，双击即可安装 |
 | Android | [Nyami Android v2.0.3](https://github.com/xie480/Nyami/releases/tag/v2.0.3) | 当前 Android 发布版本 |
 
 > Android 端的 UI 重构工程仍在进行中，移动端界面和交互会继续迭代。
