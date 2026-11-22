@@ -249,15 +249,17 @@ describe('PlaybackRuntime 大队列窗口', () => {
       `nyami-playback-${randomUUID()}.json`,
     );
     const runtime = createRuntime(statePath, {}, {
-      resolve: jest.fn().mockImplementation(async (track: ReturnType<typeof createQueueItem>) => ({
-        track,
-        cid: 1,
-        url: `https://audio.example.test/${track.id}.m4s`,
-        backupUrls: [],
-        mimeType: 'audio/mp4',
-        duration: track.duration,
-        parts: [],
-      })),
+      resolve: jest.fn().mockImplementation(
+        async (track: ReturnType<typeof createQueueItem>) => ({
+          track,
+          cid: 1,
+          url: `https://audio.example.test/${track.id}.m4s`,
+          backupUrls: [],
+          mimeType: 'audio/mp4',
+          duration: track.duration,
+          parts: [],
+        }),
+      ),
     });
     const commands: Array<{type: string; position?: number}> = [];
     runtime.subscribe(event => {
@@ -286,6 +288,27 @@ describe('PlaybackRuntime 大队列窗口', () => {
       expect(
         commands.filter(command => command.type === 'seek'),
       ).toHaveLength(0);
+
+      // 切歌后的旧媒体事件可能被 Renderer 误标记为新曲，不能把旧进度写回主进程。
+      await runtime.reportAudioEvent({
+        type: 'timeupdate',
+        trackId: 'BV2',
+        position: 25,
+        duration: 60,
+      });
+      expect(runtime.getState().position).toBe(0);
+
+      await runtime.reportAudioEvent({
+        type: 'playing',
+        trackId: 'BV2',
+      });
+      await runtime.reportAudioEvent({
+        type: 'timeupdate',
+        trackId: 'BV2',
+        position: 3,
+        duration: 60,
+      });
+      expect(runtime.getState().position).toBe(3);
     } finally {
       await fs.rm(statePath, {force: true});
       await fs.rm(`${statePath}.tmp`, {force: true});

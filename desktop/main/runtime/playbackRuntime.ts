@@ -106,6 +106,8 @@ export class PlaybackRuntime {
 
   private currentSource: PlaybackSource | null = null;
 
+  private ignoreTimeupdateUntilPlaying = false;
+
   private bypassCacheOnce = false;
 
   private queueSessionKey: string | null = null;
@@ -152,6 +154,8 @@ export class PlaybackRuntime {
   /** 替换队列，按需展开多 P，并开始指定项目。 */
   async loadQueue(request: PlaybackQueueRequest): Promise<PlaybackSnapshot> {
     const items = normalizeQueueItems(request.items);
+    const hadPreviousPlayback =
+      this.snapshot.trackId !== null || this.currentSource !== null;
     this.abortCurrentOperation();
     this.queueSessionKey = normalizeQueueSessionKey(request.queueKey);
     this.snapshot.position = 0;
@@ -159,6 +163,7 @@ export class PlaybackRuntime {
     if (items.length === 0) {
       this.queueController.replaceQueue([]);
       this.currentSource = null;
+      this.ignoreTimeupdateUntilPlaying = false;
       this.snapshot = this.snapshotFromQueue('idle');
       await this.persistState();
       this.emitState();
@@ -178,6 +183,7 @@ export class PlaybackRuntime {
     const controller = new AbortController();
     this.operationController = controller;
     this.currentSource = null;
+    this.ignoreTimeupdateUntilPlaying = hadPreviousPlayback;
     this.bypassCacheOnce = false;
     this.retryCount = 0;
     this.snapshot.duration = initialItem.duration;
@@ -338,6 +344,7 @@ export class PlaybackRuntime {
     if (!this.currentSource) {
       return this.activateTrack(this.snapshot.trackId, true, true);
     }
+    this.ignoreTimeupdateUntilPlaying = false;
     this.snapshot = this.snapshotFromQueue('playing');
     this.emitCommand({
       type: 'fade-in',
@@ -396,6 +403,7 @@ export class PlaybackRuntime {
       });
     }
     this.currentSource = null;
+    this.ignoreTimeupdateUntilPlaying = false;
     this.bypassCacheOnce = false;
     this.snapshot = this.snapshotFromQueue('stopped');
     this.snapshot.position = 0;
@@ -483,6 +491,10 @@ export class PlaybackRuntime {
     }
     this.snapshot.networkOnline = net.isOnline();
     if (event.type === 'timeupdate') {
+      // 切歌后旧媒体元素仍可能派发 timeupdate；新来源真正开始播放前忽略它，避免旧进度覆盖清零结果。
+      if (this.ignoreTimeupdateUntilPlaying) {
+        return this.getState();
+      }
       this.snapshot.position = clampNumber(event.position, 0, 86400);
       this.snapshot.duration = clampNumber(
         event.duration ?? this.snapshot.duration,
@@ -506,6 +518,7 @@ export class PlaybackRuntime {
       return this.getState();
     }
     if (event.type === 'playing') {
+      this.ignoreTimeupdateUntilPlaying = false;
       this.snapshot.state = 'playing';
       this.snapshot.error = null;
       this.snapshot.diagnostic = null;
@@ -615,6 +628,7 @@ export class PlaybackRuntime {
     }
     const previousTrackId = this.snapshot.trackId;
     const shouldResume = resumePosition && previousTrackId === trackId;
+    this.ignoreTimeupdateUntilPlaying = true;
     this.abortCurrentOperation();
     const revision = this.queueController.replaceQueue(queue, trackId);
     const controller = new AbortController();
