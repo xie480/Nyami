@@ -10,8 +10,9 @@ type Waiter = {
 };
 
 const PRIORITY_ORDER: Record<RequestPriority, number> = {
-  index: 0,
-  normal: 1,
+  // 用户当前页面的请求必须先于后台收藏索引拿到令牌，避免索引任务拖住搜索和播放。
+  normal: 0,
+  index: 1,
   background: 2,
 };
 
