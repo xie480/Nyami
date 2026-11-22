@@ -473,6 +473,7 @@ function normalizeSettings(value) {
   const source = value && typeof value === 'object' ? value : {};
   const gains = Array.isArray(source.graphicGains) ? source.graphicGains : [];
   const bands = Array.isArray(source.peqBands) ? source.peqBands : [];
+  const loudnessTargetDb = Number(source.loudnessTargetDb);
   return {
     enabled: source.enabled === true,
     mode: source.mode === 'parametric' ? 'parametric' : 'graphic',
@@ -490,7 +491,9 @@ function normalizeSettings(value) {
     limiterEnabled: source.limiterEnabled !== false,
     limiterThreshold: Number(source.limiterThreshold || 0.95),
     loudnessEnabled: source.loudnessEnabled === true,
-    loudnessTargetDb: Math.min(-12, Math.max(-24, Number(source.loudnessTargetDb || -18))),
+    loudnessTargetDb: Number.isFinite(loudnessTargetDb)
+      ? Math.min(-12, Math.max(-24, loudnessTargetDb))
+      : -18,
     spectrumEnabled: source.spectrumEnabled !== false,
   };
 }

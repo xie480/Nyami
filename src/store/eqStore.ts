@@ -264,10 +264,10 @@ function syncPEQFilters(filters: PEQFilter[]) {
 
 function syncNativeState(state: EQState) {
   try {
-    const loudnessTargetDb = Math.max(
-      -24,
-      Math.min(-12, Number(state.loudnessTargetDb ?? -18)),
-    );
+    const rawTargetDb = Number(state.loudnessTargetDb);
+    const loudnessTargetDb = Number.isFinite(rawTargetDb)
+      ? Math.max(-24, Math.min(-12, rawTargetDb))
+      : -18;
     audioDSP.updateGraphicEQ(state.graphicBands);
     syncPEQFilters(state.peqFilters);
     audioDSP.setMode(state.mode === 'graphic' ? 0 : 1);
@@ -307,7 +307,9 @@ export const useEQStore = create<EQState>()(
       },
 
       setLoudnessTargetDb: (loudnessTargetDb) => {
-        const target = Math.max(-24, Math.min(-12, loudnessTargetDb));
+        const target = Number.isFinite(loudnessTargetDb)
+          ? Math.max(-24, Math.min(-12, loudnessTargetDb))
+          : -18;
         set({ loudnessTargetDb: target });
         try { audioDSP.setLoudnessTargetDb(target); } catch {}
       },

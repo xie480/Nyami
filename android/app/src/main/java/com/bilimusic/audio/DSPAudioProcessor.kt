@@ -193,7 +193,11 @@ class DSPAudioProcessor {
     /** 设置响度匹配目标，限制在保守的 -24~-12 dBFS RMS 范围。 */
     fun setLoudnessTargetDb(targetDb: Float) {
         lock.write {
-            loudnessTargetDb = targetDb.coerceIn(-24f, -12f)
+            loudnessTargetDb = if (targetDb.isFinite()) {
+                targetDb.coerceIn(-24f, -12f)
+            } else {
+                -18f
+            }
         }
     }
 
