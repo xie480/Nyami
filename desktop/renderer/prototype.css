@@ -162,13 +162,6 @@
   height: 15px;
 }
 
-.prototype-app .nav-hint {
-  margin-left: auto;
-  color: var(--prototype-muted);
-  font-family: var(--prototype-mono);
-  font-size: 9px;
-}
-
 .prototype-app .sidebar-bottom {
   gap: 9px;
 }
@@ -1503,8 +1496,7 @@
     border-bottom-color: var(--prototype-accent);
   }
 
-  .prototype-app .nav-item svg,
-  .prototype-app .nav-hint {
+  .prototype-app .nav-item svg {
     display: none;
   }
 

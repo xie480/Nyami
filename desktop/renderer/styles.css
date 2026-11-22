@@ -382,11 +382,6 @@ img {
   font-weight: 550;
 }
 
-.nav-hint {
-  color: var(--muted);
-  font-size: 10px;
-}
-
 .sidebar-bottom {
   margin-top: auto;
 }

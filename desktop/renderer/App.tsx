@@ -1253,7 +1253,7 @@ function WindowTitlebar({
 }
 
 /** 渲染桌面端侧边栏导航和账号入口。 */
-function Sidebar({
+export function Sidebar({
   auth,
   profile,
   route,
@@ -1284,9 +1284,6 @@ function Sidebar({
               type="button">
               <Icon name={item.icon} size={18} />
               <span>{item.label}</span>
-              {item.route === 'library' && auth.loggedIn ? (
-                <span className="nav-hint">账号</span>
-              ) : null}
             </button>
           ))}
         </div>
