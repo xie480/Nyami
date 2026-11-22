@@ -46,6 +46,9 @@ export interface AudioDSPModuleInterface {
   /** 设置响度匹配目标 dBFS RMS。 */
   setLoudnessTargetDb(targetDb: number): void;
 
+  /** 切换音轨时清理响度跟踪状态。 */
+  resetLoudness(): void;
+
   /** 应用预设（快捷设置所有频段） */
   applyPreset(gains: number[]): void;
 
@@ -89,6 +92,7 @@ export const audioDSP: AudioDSPModuleInterface = AudioDSPModule ?? {
   setMode: () => {},
   setLoudnessEnabled: () => {},
   setLoudnessTargetDb: () => {},
+  resetLoudness: () => {},
   applyPreset: () => {},
   getDiagnostics: async () => ({
     processorAttached: false,

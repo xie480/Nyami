@@ -76,12 +76,14 @@ export class ElectronAudioPlayerAdapter
   async load(queue: AudioTrackLike[], startIndex = 0): Promise<void> {
     const track = queue[Math.min(Math.max(0, startIndex), queue.length - 1)];
     if (!track) {
+      this.effects.resetLoudness();
       this.audio.removeAttribute('src');
       this.audio.load();
       this.activeTrackId = null;
       return;
     }
     this.activeTrackId = track.id;
+    this.effects.resetLoudness();
     this.audio.src = track.url;
     this.audio.load();
   }
@@ -93,6 +95,7 @@ export class ElectronAudioPlayerAdapter
     }
     this.activeRevision = source.revision;
     this.activeTrackId = source.trackId;
+    this.effects.resetLoudness();
     // 新资源的元数据到达前，部分浏览器会暂时沿用旧时间线；先挂起零点跳转，避免切歌继承旧进度。
     this.pendingSeekPosition = 0;
     this.cancelFade();

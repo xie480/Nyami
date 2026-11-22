@@ -81,6 +81,12 @@ class AudioDSPModule(reactContext: ReactApplicationContext) :
         Log.d(TAG, "Loudness target: $targetDb dBFS RMS")
     }
 
+    /** 切换音轨时清理响度跟踪状态。 */
+    @ReactMethod
+    fun resetLoudness() {
+        dspProcessor.resetLoudness()
+    }
+
     @ReactMethod
     fun applyPreset(gains: ReadableArray) {
         if (gains.size() != 10) return

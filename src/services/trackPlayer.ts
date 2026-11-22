@@ -2118,6 +2118,11 @@ export async function PlaybackService() {
       return;
     }
 
+    // 切歌时清理 RMS 响度跟踪，避免上一首歌的增益残留。
+    try {
+      audioDSP.resetLoudness();
+    } catch {}
+
     const bvid = activeTrack.id as string;
     usePlayerStore.getState().setCurrentBvid(bvid);
     usePlayerStore.getState().setPlaybackError(null);

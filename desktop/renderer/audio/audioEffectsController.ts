@@ -51,6 +51,11 @@ export class AudioEffectsController {
     this.postSettings();
   }
 
+  /** 在切换音轨时清理响度跟踪，避免上一首歌的增益残留。 */
+  resetLoudness(): void {
+    this.worklet?.port.postMessage({type: 'reset-loudness'});
+  }
+
   /** 在用户点击播放后恢复被浏览器挂起的 AudioContext。 */
   async resume(): Promise<void> {
     await this.setup();
@@ -315,6 +320,8 @@ class NyamiDspProcessor extends AudioWorkletProcessor {
       if (event.data && event.data.type === 'settings') {
         this.settings = normalizeSettings(event.data.settings);
         this.configureFilters();
+      } else if (event.data && event.data.type === 'reset-loudness') {
+        this.resetLoudness();
       }
     };
   }

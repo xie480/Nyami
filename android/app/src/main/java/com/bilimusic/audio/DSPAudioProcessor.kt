@@ -197,6 +197,11 @@ class DSPAudioProcessor {
         }
     }
 
+    /** 在切换音轨时清理响度跟踪，避免上一首歌的增益残留。 */
+    fun resetLoudness() {
+        lock.write { resetLoudnessState() }
+    }
+
     /**
      * 更新 Graphic EQ 10 个频段的增益
      *
