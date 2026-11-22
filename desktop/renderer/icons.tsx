@@ -171,12 +171,10 @@ const paths: Record<IconName, JSX.Element> = {
     </>
   ),
   settings: (
-    <path
-      d="M5.842 2.758V.529h3v2.229c.699.22 1.34.591 1.88 1.087l1.932-1.115 1.5 2.598-1.93 1.115a5.017 5.017 0 0 1 0 2.173l1.93 1.114-1.5 2.597-1.93-1.115A4.995 4.995 0 0 1 8.841 12.3v2.23h-3V12.3a4.994 4.994 0 0 1-1.88-1.087L2.03 12.328.53 9.731l1.93-1.114a5.017 5.017 0 0 1 0-2.173L.53 5.329l1.5-2.598 1.93 1.115a4.995 4.995 0 0 1 1.882-1.087zm1.5 7.27c3.334 0 3.334-5 0-5-3.333 0-3.333 5 0 5z"
-      fill="currentColor"
-      fillRule="evenodd"
-      stroke="none"
-    />
+    <>
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
   ),
   sparkles: (
     <>
@@ -215,9 +213,6 @@ const paths: Record<IconName, JSX.Element> = {
 
 /** 渲染统一线性图标，保证导航和控制图标的视觉风格一致。 */
 export function Icon({name, size = 18, ...props}: IconProps): JSX.Element {
-  const viewBox =
-    name === 'settings' ? '0 0 14.683 15.058' : '0 0 24 24';
-
   return (
     <svg
       aria-hidden="true"
@@ -227,7 +222,7 @@ export function Icon({name, size = 18, ...props}: IconProps): JSX.Element {
       strokeLinecap="round"
       strokeLinejoin="round"
       strokeWidth="1.8"
-      viewBox={viewBox}
+      viewBox="0 0 24 24"
       width={size}
       {...props}>
       {paths[name]}
