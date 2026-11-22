@@ -19,6 +19,7 @@ import type {
 import {
   filterVisibleFavoriteIndex,
   filterVisibleFavoriteSources,
+  getImportedSourcesStorageKey,
   getSyncStatusLabel,
 } from '../shared/libraryFilters';
 import {
@@ -929,7 +930,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
     if (props.auth.uid) {
       try {
         window.localStorage.setItem(
-          `nyami-imported-sources-${props.auth.uid}`,
+          getImportedSourcesStorageKey(props.auth.uid),
           JSON.stringify(next),
         );
       } catch {
@@ -966,7 +967,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
         if (disposed) {
           return;
         }
-        const storageKey = `nyami-imported-sources-${uid}`;
+        const storageKey = getImportedSourcesStorageKey(uid);
         const storedRaw = window.localStorage.getItem(storageKey);
         let stored: string[] = [];
         if (storedRaw !== null) {

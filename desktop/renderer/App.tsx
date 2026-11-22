@@ -46,6 +46,9 @@ import {
   saveDesktopUserPreferences,
   type DesktopUserPreferences,
 } from './preferences';
+import {
+  getImportedSourcesStorageKey,
+} from '../shared/libraryFilters';
 
 type Route = PrototypeRoute;
 type NoticeTone = 'info' | 'success' | 'error';
@@ -2312,6 +2315,9 @@ function FavoriteIndexManager({
   const syncedCount = sources.filter(
     source => source.syncStatus === 'success',
   ).length;
+  const librarySourceKeys = readLibraryImportedSourceKeys(auth.uid, sources);
+  const canSyncLibrarySources =
+    loadState === 'success' && librarySourceKeys.length > 0;
 
   /** 切换一个来源的选择状态。 */
   const toggleSource = (sourceKey: string): void => {
@@ -2347,6 +2353,19 @@ function FavoriteIndexManager({
     } finally {
       setDeleting(false);
     }
+  };
+
+  /** 直接同步音乐库当前导入的收藏夹，并同步更新选择状态。 */
+  const syncLibrarySources = (): void => {
+    if (
+      !canSyncLibrarySources ||
+      deleting ||
+      sync.state === 'running'
+    ) {
+      return;
+    }
+    setSelectedKeys(librarySourceKeys);
+    onStartSync({sourceKeys: [...librarySourceKeys]});
   };
 
   return (
@@ -2479,6 +2498,19 @@ function FavoriteIndexManager({
             <button
               className="secondary-button"
               disabled={
+                !canSyncLibrarySources ||
+                deleting ||
+                sync.state === 'running'
+              }
+              onClick={syncLibrarySources}
+              title="仅同步音乐库当前导入的收藏夹"
+              type="button">
+              <Icon name="refresh" size={15} />
+              仅同步音乐库导入
+            </button>
+            <button
+              className="secondary-button"
+              disabled={
                 !selectedKeys.length ||
                 deleting ||
                 sync.state === 'running'
@@ -2507,6 +2539,42 @@ function FavoriteIndexManager({
       ) : null}
     </div>
   );
+}
+
+/** 读取音乐库当前导入的来源，并限制在本次远端目录内。 */
+function readLibraryImportedSourceKeys(
+  uid: string | null,
+  sources: readonly FavoriteSourceSummary[],
+): string[] {
+  if (!uid || !sources.length) {
+    return [];
+  }
+  let storedRaw: string | null;
+  try {
+    storedRaw = window.localStorage.getItem(getImportedSourcesStorageKey(uid));
+  } catch {
+    return [];
+  }
+  if (storedRaw === null) {
+    return sources.map(source => source.sourceKey);
+  }
+  try {
+    const parsed: unknown = JSON.parse(storedRaw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    const available = new Set(sources.map(source => source.sourceKey));
+    return Array.from(
+      new Set(
+        parsed.filter(
+          (value): value is string =>
+            typeof value === 'string' && available.has(value),
+        ),
+      ),
+    );
+  } catch {
+    return [];
+  }
 }
 
 /** 将收藏来源同步状态转换成设置页可读文案。 */

@@ -5,6 +5,13 @@ import type {
   FavoriteSourceSyncStatus,
 } from './types';
 
+const IMPORTED_SOURCE_STORAGE_PREFIX = 'nyami-imported-sources-';
+
+/** 返回音乐库导入来源选择的本地存储键。 */
+export function getImportedSourcesStorageKey(uid: string): string {
+  return `${IMPORTED_SOURCE_STORAGE_PREFIX}${uid}`;
+}
+
 /** 生成跨进程稳定的收藏来源标识。 */
 export function getFavoriteSourceKey(
   kind: FavoriteSourceKind,
