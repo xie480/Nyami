@@ -911,7 +911,9 @@ export class PlaybackRuntime {
         downloadRequest,
         [resolved.url, ...resolved.backupUrls],
       )
-      .then(() => this.options.cache.evict(this.getProtectedCacheKeys()))
+      .then(async () =>
+        this.options.cache.evict(await this.getProtectedCacheKeys()),
+      )
       .catch(error => {
         this.options.logger.warn('audio.cache-background-failed', {
           bvid: request.track.bvid,
@@ -930,17 +932,17 @@ export class PlaybackRuntime {
   }
 
   /** 保留当前队列对应的缓存文件，避免后台淘汰正在使用的音频。 */
-  private getProtectedCacheKeys(): ReadonlySet<string> {
-    const keys = new Set<string>();
-    for (const track of this.queueController.getSnapshot().queue) {
-      keys.add(
-        AudioCacheStore.getKey({
+  private async getProtectedCacheKeys(): Promise<ReadonlySet<string>> {
+    const requests = this.queueController
+      .getSnapshot()
+      .queue.map(track =>
+        this.options.cache.getKeysForRequest({
           track,
           quality: this.getQuality(),
         }),
       );
-    }
-    return keys;
+    const protectedKeyGroups = await Promise.all(requests);
+    return new Set(protectedKeyGroups.flatMap(keys => [...keys]));
   }
 
   /** 清理旧的解析任务。 */

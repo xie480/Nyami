@@ -17,9 +17,9 @@ const AUDIO_CACHE_TARGET_BYTES = Math.floor(AUDIO_CACHE_MAX_BYTES * 0.9);
 export type AudioCacheRequest = {
   track: PlaybackQueueItem;
   quality: string;
-  /** 实际命中的 Bilibili 音轨 ID，仅用于索引留痕，不改变请求档位键。 */
+  /** 实际命中的 Bilibili 音轨 ID，和 codec 一起构成严格缓存身份。 */
   sourceId?: number;
-  /** 实际响应的 MIME 类型，便于定位解码和缓存问题。 */
+  /** 实际音轨的 MIME/codec，和 sourceId 一起构成严格缓存身份。 */
   codec?: string;
 };
 
@@ -38,6 +38,66 @@ export type AudioCacheEntry = {
 };
 
 type AudioCacheIndex = Record<string, AudioCacheEntry>;
+
+/** 返回缓存请求的稳定基础键，不包含会变化的 URL 查询参数。 */
+function getBaseCacheKey(
+  bvid: string,
+  cid: number | undefined,
+  quality: string,
+): string {
+  const normalizedCid = Number.isSafeInteger(cid) ? String(cid) : 'default';
+  return `${encodeURIComponent(bvid)}-${encodeURIComponent(
+    normalizedCid,
+  )}-${encodeURIComponent(quality)}`;
+}
+
+/** 判断请求或索引项是否同时具备实际音轨和编码身份。 */
+function hasAudioIdentity(
+  sourceId: number | undefined,
+  codec: string | undefined,
+): boolean {
+  return Number.isSafeInteger(sourceId) && Boolean(codec);
+}
+
+/** 生成包含实际音轨身份的严格缓存键。 */
+function getStrictCacheKey(
+  bvid: string,
+  cid: number | undefined,
+  quality: string,
+  sourceId: number,
+  codec: string,
+): string {
+  return `${getBaseCacheKey(bvid, cid, quality)}-${encodeURIComponent(
+    String(sourceId),
+  )}-${encodeURIComponent(codec)}`;
+}
+
+/** 判断索引项是否属于当前严格身份格式，而非旧的模糊键。 */
+function isStrictCacheEntry(entry: AudioCacheEntry): boolean {
+  return (
+    hasAudioIdentity(entry.sourceId, entry.codec) &&
+    entry.key ===
+      getStrictCacheKey(
+        entry.bvid,
+        entry.cid,
+        entry.quality,
+        entry.sourceId!,
+        entry.codec!,
+      )
+  );
+}
+
+/** 判断索引项是否属于同一首歌、分 P 和请求音质。 */
+function matchesTrackRequest(
+  entry: AudioCacheEntry,
+  request: AudioCacheRequest,
+): boolean {
+  return (
+    entry.bvid === request.track.bvid &&
+    entry.cid === (request.track.cid ?? 0) &&
+    entry.quality === request.quality
+  );
+}
 
 /**
  * 管理桌面端音频文件、临时下载和索引元数据。
@@ -60,14 +120,22 @@ export class AudioCacheStore {
     this.ready = this.initialize();
   }
 
-  /** 生成稳定的音频缓存键，不包含 URL 查询参数。 */
+  /** 生成包含实际音轨 ID 和 codec 的稳定缓存键。 */
   static getKey(request: AudioCacheRequest): string {
-    const cid = Number.isSafeInteger(request.track.cid)
-      ? String(request.track.cid)
-      : 'default';
-    return `${encodeURIComponent(request.track.bvid)}-${encodeURIComponent(
-      cid,
-    )}-${encodeURIComponent(request.quality)}`;
+    if (!hasAudioIdentity(request.sourceId, request.codec)) {
+      return `${getBaseCacheKey(
+        request.track.bvid,
+        request.track.cid,
+        request.quality,
+      )}-unknown-unknown`;
+    }
+    return getStrictCacheKey(
+      request.track.bvid,
+      request.track.cid,
+      request.quality,
+      request.sourceId!,
+      request.codec!,
+    );
   }
 
   /** 返回缓存文件的自定义协议地址。 */
@@ -78,19 +146,48 @@ export class AudioCacheStore {
   /** 读取并更新缓存命中项的最近访问时间。 */
   async get(request: AudioCacheRequest): Promise<AudioCacheEntry | null> {
     await this.ready;
-    const key = AudioCacheStore.getKey(request);
     const index = await this.readIndex();
-    const entry = index[key];
-    if (!entry || !(await this.fileExists(entry.path))) {
-      if (entry) {
-        delete index[key];
-        await this.writeIndex(index);
+    const candidates = Object.values(index)
+      .filter(entry => {
+        if (!matchesTrackRequest(entry, request) || !isStrictCacheEntry(entry)) {
+          return false;
+        }
+        return hasAudioIdentity(request.sourceId, request.codec)
+          ? entry.key === AudioCacheStore.getKey(request)
+          : true;
+      })
+      .sort((left, right) => right.lastAccess - left.lastAccess);
+    let indexChanged = false;
+    for (const entry of candidates) {
+      if (!(await this.fileExists(entry.path))) {
+        delete index[entry.key];
+        indexChanged = true;
+        continue;
       }
-      return null;
+      entry.lastAccess = Date.now();
+      await this.writeIndex(index);
+      return {...entry};
     }
-    entry.lastAccess = Date.now();
-    await this.writeIndex(index);
-    return {...entry};
+    if (indexChanged) {
+      await this.writeIndex(index);
+    }
+    return null;
+  }
+
+  /** 返回同一请求档位对应的全部严格缓存键，供淘汰保护使用。 */
+  async getKeysForRequest(
+    request: AudioCacheRequest,
+  ): Promise<ReadonlySet<string>> {
+    await this.ready;
+    const index = await this.readIndex();
+    return new Set(
+      Object.values(index)
+        .filter(
+          entry =>
+            matchesTrackRequest(entry, request) && isStrictCacheEntry(entry),
+        )
+        .map(entry => entry.key),
+    );
   }
 
   /** 根据协议键解析缓存文件，供 nyami-cache 协议处理器使用。 */
@@ -123,6 +220,9 @@ export class AudioCacheStore {
     signal?: AbortSignal,
   ): Promise<AudioCacheEntry> {
     await this.ready;
+    if (!hasAudioIdentity(request.sourceId, request.codec)) {
+      throw new Error('严格缓存写入缺少实际音轨身份');
+    }
     const key = AudioCacheStore.getKey(request);
     const existing = await this.get(request);
     if (existing) {
@@ -146,12 +246,24 @@ export class AudioCacheStore {
   /** 删除单个音频缓存及其索引项。 */
   async remove(request: AudioCacheRequest): Promise<void> {
     await this.ready;
-    const key = AudioCacheStore.getKey(request);
     const index = await this.readIndex();
-    const entry = index[key];
-    delete index[key];
-    if (entry) {
-      await fs.rm(entry.path, {force: true});
+    const strictIdentity = hasAudioIdentity(request.sourceId, request.codec);
+    const keys = Object.values(index)
+      .filter(entry => {
+        if (!matchesTrackRequest(entry, request)) {
+          return false;
+        }
+        return strictIdentity
+          ? entry.key === AudioCacheStore.getKey(request)
+          : true;
+      })
+      .map(entry => entry.key);
+    for (const key of keys) {
+      const entry = index[key];
+      delete index[key];
+      if (entry) {
+        await fs.rm(entry.path, {force: true});
+      }
     }
     await this.writeIndex(index);
   }

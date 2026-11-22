@@ -35,21 +35,63 @@ class AudioCache {
   }
   private getMeta = (): MetaMap => storage.getJSON<MetaMap>(META_KEY) || {};
   private setMeta = (m: MetaMap) => storage.setJSON(META_KEY, m);
-  private key = (b: string, q: Quality) => `${b}:${q}`;
+  /** 生成包含实际音轨身份的严格缓存键。 */
+  private key = (
+    b: string,
+    q: Quality,
+    sourceId?: number,
+    mimeType?: string,
+  ) =>
+    `${b}:${q}:${sourceId == null ? 'unknown' : sourceId}:${
+      mimeType ? encodeURIComponent(mimeType) : 'unknown'
+    }`;
 
-  async has(bvid: string, quality: Quality): Promise<string | null> {
+  /** 判断缓存项是否包含完整的实际音轨身份。 */
+  private hasIdentity = (item: CacheItem): boolean =>
+    Number.isSafeInteger(item.sourceId) && Boolean(item.mimeType);
+
+  /** 判断缓存项是否属于当前请求且键符合严格身份格式。 */
+  private matchesStrictKey = (key: string, item: CacheItem): boolean =>
+    this.hasIdentity(item) &&
+    key === this.key(item.bvid, item.quality, item.sourceId, item.mimeType);
+
+  async has(
+    bvid: string,
+    quality: Quality,
+    sourceId?: number,
+    mimeType?: string,
+  ): Promise<string | null> {
     await this.ready;
     const meta = this.getMeta();
-    const item = meta[this.key(bvid, quality)];
-    if (!item) return null;
-    if (!(await RNFS.exists(item.path))) {
-      delete meta[this.key(bvid, quality)];
+    const hasRequestedIdentity =
+      Number.isSafeInteger(sourceId) && Boolean(mimeType);
+    const candidates = Object.entries(meta)
+      .filter(([key, item]) => {
+        if (
+          item.bvid !== bvid ||
+          item.quality !== quality ||
+          !this.matchesStrictKey(key, item)
+        ) {
+          return false;
+        }
+        return hasRequestedIdentity
+          ? key === this.key(bvid, quality, sourceId, mimeType)
+          : true;
+      })
+      .sort(([, left], [, right]) => right.lastAccess - left.lastAccess);
+    for (const [key, item] of candidates) {
+      if (!(await RNFS.exists(item.path))) {
+        delete meta[key];
+        continue;
+      }
+      item.lastAccess = Date.now();
       this.setMeta(meta);
-      return null;
+      return item.path;
     }
-    item.lastAccess = Date.now();
-    this.setMeta(meta);
-    return item.path;
+    if (candidates.length > 0) {
+      this.setMeta(meta);
+    }
+    return null;
   }
 
   async download(
@@ -61,7 +103,10 @@ class AudioCache {
     mimeType?: string,
   ): Promise<string> {
     await this.ready;
-    const cacheKey = this.key(bvid, quality);
+    if (!Number.isSafeInteger(sourceId) || !mimeType) {
+      throw new Error('严格缓存写入缺少实际音轨身份');
+    }
+    const cacheKey = this.key(bvid, quality, sourceId, mimeType);
 
     // 防止同一音频并发下载导致重复写入文件或缓存冲突
     if (this.downloading.has(cacheKey)) {
@@ -69,11 +114,12 @@ class AudioCache {
     }
 
     // 检查是否已有缓存
-    const existing = await this.has(bvid, quality);
+    const existing = await this.has(bvid, quality, sourceId, mimeType);
     if (existing) return existing;
 
     const downloadPromise = (async () => {
-      const filePath = `${CACHE_DIR}/${bvid}_${quality}.m4a`;
+      const safeName = cacheKey.replace(/[^A-Za-z0-9._-]/g, '_');
+      const filePath = `${CACHE_DIR}/${safeName}.m4a`;
       try {
         const result = await RNFS.downloadFile({
           fromUrl: streamUrl,
@@ -132,18 +178,19 @@ class AudioCache {
     await this.ready;
     const meta = this.getMeta();
     const cacheIdentity = cid == null ? bvid : `${bvid}-${cid}`;
-    const key = this.key(cacheIdentity, quality);
-    const item = meta[key];
-    if (!item) {
-      return;
-    }
-    delete meta[key];
-    try {
-      if (await RNFS.exists(item.path)) {
-        await RNFS.unlink(item.path);
+    const entries = Object.entries(meta).filter(
+      ([, item]) =>
+        item.bvid === cacheIdentity && item.quality === quality,
+    );
+    for (const [key, item] of entries) {
+      delete meta[key];
+      try {
+        if (await RNFS.exists(item.path)) {
+          await RNFS.unlink(item.path);
+        }
+      } catch (error) {
+        LoggerService.error('audioCache', 'remove', '移除失败音频缓存失败:', error);
       }
-    } catch (error) {
-      LoggerService.error('audioCache', 'remove', '移除失败音频缓存失败:', error);
     }
     this.setMeta(meta);
   }
