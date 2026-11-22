@@ -1361,6 +1361,8 @@ index afa6b0f..27f331d 100644
 +
 +        // 构建自定义 AudioSink，注入我们的 AudioProcessor
 +        val customAudioSink = DefaultAudioSink.Builder()
++            // Keep the ExoPlayer DSP path in Float32 when supported.
++            .setEnableFloatOutput(true)
 +            .setAudioProcessors(arrayOf(eqProcessor as AudioProcessor))
 +            .build()
 +
