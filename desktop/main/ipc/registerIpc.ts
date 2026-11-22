@@ -89,6 +89,10 @@ export function registerIpcHandlers(
       } catch (error) {
         if (isAbortError(error)) {
           dependencies.logger.debug('ipc.handler-cancelled', {channel});
+          const cancelledResponse = getCancelledContentResponse(channel, args);
+          if (cancelledResponse !== undefined) {
+            return cancelledResponse;
+          }
         } else {
           dependencies.logger.error('ipc.handler-failed', {
             channel,
@@ -396,6 +400,40 @@ function isAbortError(error: unknown): boolean {
     error instanceof Error &&
     (error.name === 'AbortError' || error.message.includes('请求已取消'))
   );
+}
+
+/** 为已取消的内容请求返回空结果，避免 Renderer 将用户取消当成异常。 */
+function getCancelledContentResponse(
+  channel: string,
+  args: readonly unknown[],
+): unknown | undefined {
+  if (!channel.startsWith('content:') || channel === 'content:cancel') {
+    return undefined;
+  }
+  if (
+    channel === 'content:get-favorite-folders' ||
+    channel === 'content:get-favorite-sources' ||
+    channel === 'content:get-favorite-index' ||
+    channel === 'content:refresh-favorite-sources'
+  ) {
+    return [];
+  }
+  if (channel === 'content:get-home') {
+    return {featured: [], popular: []};
+  }
+  const request = args[0];
+  const page =
+    request &&
+    typeof request === 'object' &&
+    typeof (request as {page?: unknown}).page === 'number'
+      ? Math.max(1, Math.floor((request as {page: number}).page))
+      : 1;
+  return {
+    items: [],
+    page,
+    hasMore: false,
+    total: null,
+  };
 }
 
 /** 读取 Renderer 自绘窗口边框所需的当前窗口状态。 */
