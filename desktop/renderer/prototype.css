@@ -3124,6 +3124,148 @@
   color: var(--prototype-muted);
 }
 
+.prototype-app .favorite-index-manager {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  border-top: 1px solid var(--prototype-line);
+  padding-top: 14px;
+}
+
+.prototype-app .favorite-index-manager-head,
+.prototype-app .favorite-index-manager-toolbar,
+.prototype-app .favorite-index-manager-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prototype-app .favorite-index-manager-head > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.prototype-app .favorite-index-manager-head strong {
+  color: var(--prototype-ink);
+}
+
+.prototype-app .favorite-index-manager-head small,
+.prototype-app .favorite-index-manager-toolbar,
+.prototype-app .favorite-index-manager-empty {
+  color: var(--prototype-muted);
+  font-size: 11px;
+}
+
+.prototype-app .favorite-index-toggle-icon {
+  transition: transform 160ms ease;
+}
+
+.prototype-app .favorite-index-toggle-icon.is-open {
+  transform: rotate(180deg);
+}
+
+.prototype-app .favorite-index-manager-body {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--prototype-line);
+  background: var(--prototype-paper);
+  padding: 12px;
+}
+
+.prototype-app .favorite-index-manager-toolbar > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prototype-app .favorite-index-source-list {
+  display: grid;
+  max-height: 300px;
+  overflow: auto;
+  gap: 5px;
+  padding-right: 3px;
+}
+
+.prototype-app .favorite-index-source-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid transparent;
+  padding: 8px 9px;
+  cursor: pointer;
+}
+
+.prototype-app .favorite-index-source-row:hover,
+.prototype-app .favorite-index-source-row.is-selected {
+  border-color: var(--prototype-line);
+  background: var(--prototype-surface);
+}
+
+.prototype-app .favorite-index-source-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.prototype-app .favorite-index-source-copy strong,
+.prototype-app .favorite-index-source-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prototype-app .favorite-index-source-copy strong {
+  color: var(--prototype-ink);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.prototype-app .favorite-index-source-copy small {
+  color: var(--prototype-muted);
+  font-size: 10px;
+}
+
+.prototype-app .favorite-index-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--prototype-muted);
+}
+
+.prototype-app .favorite-index-status-dot.is-success {
+  background: #568e66;
+}
+
+.prototype-app .favorite-index-status-dot.is-syncing,
+.prototype-app .favorite-index-status-dot.is-running {
+  background: var(--prototype-accent);
+  box-shadow: 0 0 0 4px rgba(200, 76, 49, 0.12);
+}
+
+.prototype-app .favorite-index-status-dot.is-failed {
+  background: #b14d42;
+}
+
+.prototype-app .favorite-index-manager-empty {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px dashed var(--prototype-line);
+  background: var(--prototype-surface);
+  padding: 12px;
+}
+
+.prototype-app .favorite-index-manager-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 .prototype-app .player-progress-row {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }

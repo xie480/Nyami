@@ -447,6 +447,35 @@ export class DesktopLibraryRepository implements FavoriteRepository {
     }));
   }
 
+  /** 删除当前账号指定来源的本地视频关系、同步任务和来源元数据。 */
+  deletePlaylistIndexes(sourceKeys: readonly string[]): void {
+    const normalizedKeys = Array.from(
+      new Set(sourceKeys.map(value => value.trim()).filter(Boolean)),
+    );
+    if (!normalizedKeys.length) {
+      return;
+    }
+    const placeholders = normalizedKeys.map(() => '?').join(', ');
+    const uid = this.requireUid();
+    this.database.transaction(() => {
+      this.database.run(
+        `DELETE FROM video_meta
+         WHERE uid = ? AND playlist_id IN (${placeholders})`,
+        [uid, ...normalizedKeys],
+      );
+      this.database.run(
+        `DELETE FROM sync_job
+         WHERE uid = ? AND playlist_id IN (${placeholders})`,
+        [uid, ...normalizedKeys],
+      );
+      this.database.run(
+        `DELETE FROM playlist_meta
+         WHERE uid = ? AND playlist_id IN (${placeholders})`,
+        [uid, ...normalizedKeys],
+      );
+    });
+  }
+
   /** 按来源分页读取本地已同步视频，供收藏夹详情页使用。 */
   getSourceVideos(
     uid: string,

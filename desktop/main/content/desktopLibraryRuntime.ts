@@ -30,7 +30,7 @@ const FAVORITE_PAGE_SIZE = 20;
 type LibrarySyncOptions = {
   force?: boolean;
   signal?: AbortSignal;
-  sourceKeys?: string[];
+  sourceKeys?: readonly string[];
   onPhase?: (phase: 'catalog' | 'favorites', total: number) => void;
   onFavoriteProgress?: (progress: FavoriteSyncProgress) => void;
 };
@@ -221,6 +221,25 @@ export class DesktopLibraryRuntime {
           sourceKeys: normalizedKeys,
         });
         return this.getSourceSummaries(uid, normalizedKeys);
+      },
+    );
+  }
+
+  /** 删除当前账号指定收藏来源的本地索引，不修改 Bilibili 远端收藏关系。 */
+  async deleteSourceIndexes(
+    uid: string,
+    sourceKeys: readonly string[],
+    requestId?: string,
+  ): Promise<void> {
+    await this.withRequest(
+      requestId ?? `delete-source-indexes:${uid}`,
+      async signal => {
+        await this.assertCurrentAccount(uid);
+        if (signal.aborted) {
+          throw createAbortError('删除收藏索引已取消');
+        }
+        this.repository.switchAccount(uid);
+        this.repository.deletePlaylistIndexes(sourceKeys);
       },
     );
   }
@@ -548,6 +567,13 @@ export class DesktopLibraryRuntime {
       }
     }
   }
+}
+
+/** 创建可被 IPC 取消处理识别的请求异常。 */
+function createAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
 }
 
 /** 将本地收藏视频转换为安全的桌面内容卡片。 */

@@ -82,6 +82,7 @@ export class SyncRuntime {
       taskId,
       request.force === true,
       request.automatic === true,
+      request.sourceKeys,
     ).finally(() => {
       this.runningPromise = null;
       this.controller = null;
@@ -121,6 +122,7 @@ export class SyncRuntime {
     taskId: string,
     force: boolean,
     automatic: boolean,
+    sourceKeys?: readonly string[],
   ): Promise<void> {
     let status: AuthStatus;
     try {
@@ -149,6 +151,7 @@ export class SyncRuntime {
       }
       await this.library.synchronize(status.uid, {
         force,
+        sourceKeys,
         signal: controller.signal,
         onPhase: (phase, total) => {
           this.updatePhase(phase, total);

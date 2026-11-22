@@ -154,6 +154,8 @@ const api: NyamiDesktopApi = {
       ipcRenderer.invoke(CHANNELS.content.getFavoriteSourceVideos, request),
     refreshFavoriteSources: (request: FavoriteSourceRequest) =>
       ipcRenderer.invoke(CHANNELS.content.refreshFavoriteSources, request),
+    deleteFavoriteSourceIndexes: (request: FavoriteSourceRequest) =>
+      ipcRenderer.invoke(CHANNELS.content.deleteFavoriteSourceIndexes, request),
     getFavoriteVideos: (request: FavoriteVideoContentRequest) =>
       ipcRenderer.invoke(CHANNELS.content.getFavoriteVideos, request),
     searchFavorites: (request: FavoriteSearchContentRequest) =>

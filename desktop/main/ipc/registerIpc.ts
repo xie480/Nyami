@@ -291,6 +291,17 @@ export function registerIpcHandlers(
       request.requestId,
     );
   });
+  register(
+    IPC_CHANNELS.content.deleteFavoriteSourceIndexes,
+    (_event, request) => {
+      assertFavoriteSourceRequest(request);
+      return dependencies.libraryRuntime.deleteSourceIndexes(
+        request.uid,
+        request.sourceKeys ?? [],
+        request.requestId,
+      );
+    },
+  );
   register(IPC_CHANNELS.content.getFavoriteVideos, (_event, request) => {
     assertFavoriteVideoContentRequest(request);
     return dependencies.contentRuntime.getFavoriteVideos(request);
@@ -417,6 +428,9 @@ function getCancelledContentResponse(
     channel === 'content:refresh-favorite-sources'
   ) {
     return [];
+  }
+  if (channel === 'content:delete-favorite-source-indexes') {
+    return undefined;
   }
   if (channel === 'content:get-home') {
     return {featured: [], popular: []};
@@ -666,6 +680,20 @@ function assertSyncStartRequest(
   }
   if (value.force !== undefined && typeof value.force !== 'boolean') {
     throw new Error('同步全量参数无效');
+  }
+  if (value.automatic !== undefined && typeof value.automatic !== 'boolean') {
+    throw new Error('同步自动参数无效');
+  }
+  if (value.sourceKeys !== undefined) {
+    if (
+      !Array.isArray(value.sourceKeys) ||
+      value.sourceKeys.length > 500 ||
+      value.sourceKeys.some(
+        sourceKey => !isBoundedString(sourceKey, 160) || !sourceKey.trim(),
+      )
+    ) {
+      throw new Error('同步收藏来源参数无效');
+    }
   }
 }
 

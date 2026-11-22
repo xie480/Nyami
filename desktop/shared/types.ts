@@ -51,6 +51,7 @@ export const IPC_CHANNELS = {
     getFavoriteIndex: 'content:get-favorite-index',
     getFavoriteSourceVideos: 'content:get-favorite-source-videos',
     refreshFavoriteSources: 'content:refresh-favorite-sources',
+    deleteFavoriteSourceIndexes: 'content:delete-favorite-source-indexes',
     getFavoriteVideos: 'content:get-favorite-videos',
     searchFavorites: 'content:search-favorites',
     cancel: 'content:cancel',
@@ -374,6 +375,7 @@ export type SyncSnapshot = {
 export type SyncStartRequest = {
   force?: boolean;
   automatic?: boolean;
+  sourceKeys?: readonly string[];
 };
 
 export type CacheSummary = {
@@ -720,6 +722,9 @@ export type NyamiDesktopApi = {
     refreshFavoriteSources: (
       request: FavoriteSourceRequest,
     ) => Promise<FavoriteSourceSummary[]>;
+    deleteFavoriteSourceIndexes: (
+      request: FavoriteSourceRequest,
+    ) => Promise<void>;
     getFavoriteVideos: (
       request: FavoriteVideoContentRequest,
     ) => Promise<DesktopPage<DesktopVideo>>;
