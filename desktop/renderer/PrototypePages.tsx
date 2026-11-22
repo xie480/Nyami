@@ -872,6 +872,17 @@ export function PrototypeSelect({
   );
 }
 
+/** 仅在真实同步运行时展示同步中，避免恢复旧状态造成误导。 */
+function getDisplayedSyncStatus(
+  status: FavoriteSourceSummary['syncStatus'],
+  syncActive: boolean,
+): FavoriteSourceSummary['syncStatus'] {
+  if (!syncActive && (status === 'syncing' || status === 'running')) {
+    return 'idle';
+  }
+  return status;
+}
+
 /** 音乐库页读取真实收藏夹，并提供导入范围与全局随机播放。 */
 function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
   const [sources, setSources] = useState<FavoriteSourceSummary[]>([]);
@@ -1043,12 +1054,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
       sourceKey: source.sourceKey,
       title: source.title,
       subtitle: `${source.kind === 'owned' ? 'Bilibili 收藏夹' : '导入来源'} · ${getSyncStatusLabel(
-        syncActive &&
-          (source.syncStatus === 'syncing' || source.syncStatus === 'running')
-          ? source.syncStatus
-          : source.syncStatus === 'syncing' || source.syncStatus === 'running'
-          ? 'idle'
-          : source.syncStatus,
+        getDisplayedSyncStatus(source.syncStatus, syncActive),
       )}`,
       count: source.mediaCount,
       cover: source.cover || coverSummerUrl,
@@ -1186,14 +1192,7 @@ function DesignLibraryPage(props: PrototypePageProps): JSX.Element {
                     <small>
                       {source.mediaCount.toLocaleString()} 首 ·{' '}
                       {getSyncStatusLabel(
-                        syncActive &&
-                          (source.syncStatus === 'syncing' ||
-                            source.syncStatus === 'running')
-                          ? source.syncStatus
-                          : source.syncStatus === 'syncing' ||
-                            source.syncStatus === 'running'
-                          ? 'idle'
-                          : source.syncStatus,
+                        getDisplayedSyncStatus(source.syncStatus, syncActive),
                       )}
                     </small>
                   </span>
@@ -2102,6 +2101,7 @@ function SourceCover({
   title: string;
 }): JSX.Element {
   const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [cover]);
   const initials = title.trim().slice(0, 2) || 'NY';
   const hue = Array.from(title).reduce(
     (total, character) => total + character.charCodeAt(0),
