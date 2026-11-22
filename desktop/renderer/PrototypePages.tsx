@@ -45,11 +45,16 @@ import {
 } from './coverPalette';
 import {SmoothProgressInput} from './SmoothProgressInput';
 import {
-  DEFAULT_SEARCH_TAG_FILTER,
   filterSearchVideosByTags,
-  migrateSearchTagFilter,
   type SearchTagFilterState,
 } from '../shared/searchTagFilters';
+import {
+  DEFAULT_SEARCH_FILTER_PREFERENCES,
+  LEGACY_SEARCH_TAG_FILTER_STORAGE_KEY,
+  SEARCH_FILTER_PREFERENCES_STORAGE_KEY,
+  normalizeSearchFilterPreferences,
+  type SearchFilterPreferences,
+} from '../shared/searchFilterPreferences';
 
 /** PC 端设计稿对应的路由集合，沉浸式页面不参与普通导航。 */
 export type PrototypeRoute =
@@ -61,9 +66,48 @@ export type PrototypeRoute =
 
 type PrototypeNoticeTone = 'info' | 'success' | 'error';
 
-const SEARCH_TAG_FILTER_STORAGE_KEY = 'nyami-search-tag-filter-v1';
 const DEFAULT_SEARCH_KEYWORD = '音乐';
 const SOURCE_COVER_HYDRATION_LIMIT = 16;
+
+/** 读取桌面搜索筛选方案，并兼容旧版仅保存标签的本地键。 */
+function loadSearchFilterPreferences(): SearchFilterPreferences {
+  if (typeof window === 'undefined') {
+    return cloneSearchFilterPreferences(DEFAULT_SEARCH_FILTER_PREFERENCES);
+  }
+  try {
+    const stored = window.localStorage.getItem(
+      SEARCH_FILTER_PREFERENCES_STORAGE_KEY,
+    );
+    if (stored) {
+      return normalizeSearchFilterPreferences(JSON.parse(stored));
+    }
+    const legacyStored = window.localStorage.getItem(
+      LEGACY_SEARCH_TAG_FILTER_STORAGE_KEY,
+    );
+    if (legacyStored) {
+      return normalizeSearchFilterPreferences({
+        tagFilter: JSON.parse(legacyStored),
+      });
+    }
+  } catch {
+    // 本地筛选偏好损坏时使用默认条件，不阻断搜索页面。
+  }
+  return cloneSearchFilterPreferences(DEFAULT_SEARCH_FILTER_PREFERENCES);
+}
+
+/** 复制搜索方案及标签数组，避免多个表单状态共享引用。 */
+function cloneSearchFilterPreferences(
+  preferences: SearchFilterPreferences,
+): SearchFilterPreferences {
+  return {
+    ...preferences,
+    tagFilter: {
+      ...preferences.tagFilter,
+      whitelistTags: [...preferences.tagFilter.whitelistTags],
+      blacklistTags: [...preferences.tagFilter.blacklistTags],
+    },
+  };
+}
 
 type PrototypePageProps = {
   audioElementRef: RefObject<HTMLAudioElement | null>;
@@ -225,18 +269,25 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
   const [searchRequested, setSearchRequested] = useState(
     Boolean(props.searchQuery.trim()),
   );
-  const [sort, setSort] = useState('综合排序');
-  const [dateFilter, setDateFilter] = useState('全部日期');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [minDuration, setMinDuration] = useState('');
-  const [maxDuration, setMaxDuration] = useState('');
+  const [initialFilterPreferences] = useState(loadSearchFilterPreferences);
+  const [sort, setSort] = useState(initialFilterPreferences.sort);
+  const [dateFilter, setDateFilter] = useState(
+    initialFilterPreferences.dateFilter,
+  );
+  const [startDate, setStartDate] = useState(initialFilterPreferences.startDate);
+  const [endDate, setEndDate] = useState(initialFilterPreferences.endDate);
+  const [minDuration, setMinDuration] = useState(
+    initialFilterPreferences.minDuration,
+  );
+  const [maxDuration, setMaxDuration] = useState(
+    initialFilterPreferences.maxDuration,
+  );
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [whitelistTagInput, setWhitelistTagInput] = useState('');
   const [blacklistTagInput, setBlacklistTagInput] = useState('');
   const [tagFilter, setTagFilter] = useState<SearchTagFilterState>(
-    DEFAULT_SEARCH_TAG_FILTER,
+    initialFilterPreferences.tagFilter,
   );
   const [result, setResult] = useState<DesktopPage<DesktopVideo> | null>(null);
   const [searchRevision, setSearchRevision] = useState(0);
@@ -249,26 +300,30 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(SEARCH_TAG_FILTER_STORAGE_KEY);
-      if (!raw) {
-        return;
-      }
-      setTagFilter(migrateSearchTagFilter(JSON.parse(raw)));
-    } catch {
-      // 本地筛选偏好损坏时使用默认条件，不阻断搜索页面。
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
       window.localStorage.setItem(
-        SEARCH_TAG_FILTER_STORAGE_KEY,
-        JSON.stringify(tagFilter),
+        SEARCH_FILTER_PREFERENCES_STORAGE_KEY,
+        JSON.stringify({
+          sort,
+          dateFilter,
+          startDate,
+          endDate,
+          minDuration,
+          maxDuration,
+          tagFilter,
+        }),
       );
     } catch {
       // 本地存储不可用时保留当前会话筛选条件。
     }
-  }, [tagFilter]);
+  }, [
+    dateFilter,
+    endDate,
+    maxDuration,
+    minDuration,
+    sort,
+    startDate,
+    tagFilter,
+  ]);
 
   const cancelActiveRequest = useCallback((): void => {
     const requestId = requestIdRef.current;
@@ -454,14 +509,19 @@ function DesignSearchPage(props: PrototypePageProps): JSX.Element {
     tagFilter,
   );
 
-  const sortOptions = [
+  const sortOptions: SearchFilterPreferences['sort'][] = [
     '综合排序',
     '最多播放',
     '最新发布',
     '最多弹幕',
     '最多收藏',
   ];
-  const dateOptions = ['全部日期', '最近一天', '最近一周', '最近半年'];
+  const dateOptions: SearchFilterPreferences['dateFilter'][] = [
+    '全部日期',
+    '最近一天',
+    '最近一周',
+    '最近半年',
+  ];
 
   return (
     <div className="prototype-content prototype-search-page">
