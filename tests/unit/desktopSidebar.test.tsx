@@ -19,4 +19,22 @@ describe('桌面端侧边栏', () => {
 
     expect(libraryNav.findAllByProps({className: 'nav-hint'})).toHaveLength(0);
   });
+
+  it('设置导航图标使用独立的对齐类', () => {
+    const tree = renderer.create(
+      <Sidebar
+        auth={{loggedIn: false, uid: null}}
+        onLogin={jest.fn()}
+        onRouteChange={jest.fn()}
+        profile={null}
+        route="settings"
+      />,
+    );
+    const settingsNav = tree.root.findByProps({
+      className: 'nav-item active',
+    });
+    const settingsIcon = settingsNav.findByType('svg');
+
+    expect(settingsIcon.props.className).toBe('nav-icon-settings');
+  });
 });

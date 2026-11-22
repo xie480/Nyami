@@ -376,6 +376,11 @@ img {
   color: var(--accent);
 }
 
+/* 设置图标外齿轮路径的视觉重心偏右，校正到导航图标列中心。 */
+.nav-item > .nav-icon-settings {
+  transform: translateX(-1px);
+}
+
 .nav-item span:nth-child(2) {
   flex: 1;
   font-size: 13px;
