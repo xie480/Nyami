@@ -14,6 +14,7 @@ import kotlin.math.sqrt
  * - setEnabled(enabled: boolean)
  * - setMode(mode: number)
  * - applyPreset(gains: number[])
+ * - getDiagnostics()
  * - reset()
  */
 class AudioDSPModule(reactContext: ReactApplicationContext) :
@@ -131,6 +132,26 @@ class AudioDSPModule(reactContext: ReactApplicationContext) :
             promise.resolve(map)
         } catch (e: Exception) {
             promise.reject("SPECTRUM_ERROR", e.message, e)
+        }
+    }
+
+    /** 获取 DSP 注入状态和真实 PCM 处理计数，供启动日志和问题排查使用。 */
+    @ReactMethod
+    fun getDiagnostics(promise: Promise) {
+        try {
+            val diagnostics = dspProcessor.getDiagnostics()
+            val map = Arguments.createMap()
+            map.putBoolean("processorAttached", diagnostics.processorAttached)
+            map.putString("attachmentFailure", diagnostics.attachmentFailure)
+            map.putDouble("processedBlockCount", diagnostics.processedBlockCount.toDouble())
+            map.putDouble("processedSampleCount", diagnostics.processedSampleCount.toDouble())
+            map.putDouble("lastProcessedAtMs", diagnostics.lastProcessedAtMs.toDouble())
+            map.putInt("sampleRate", diagnostics.sampleRate)
+            map.putInt("channelCount", diagnostics.channelCount)
+            map.putBoolean("enabled", diagnostics.enabled)
+            promise.resolve(map)
+        } catch (e: Exception) {
+            promise.reject("DSP_DIAGNOSTICS_ERROR", e.message, e)
         }
     }
 

@@ -23,6 +23,28 @@ class DSPAudioProcessor {
     companion object {
         @Volatile
         var instance: DSPAudioProcessor? = null
+
+        @Volatile
+        var processorAttached = false
+            private set
+
+        @Volatile
+        var attachmentFailure: String? = "not-attached"
+            private set
+
+        /** 由 TrackPlayer 注入补丁在 AudioProcessor 成功挂载后调用。 */
+        @JvmStatic
+        fun markProcessorAttached() {
+            processorAttached = true
+            attachmentFailure = null
+        }
+
+        /** 记录反射注入失败原因，供设置页和日志诊断。 */
+        @JvmStatic
+        fun markProcessorAttachmentFailed(reason: String) {
+            processorAttached = false
+            attachmentFailure = reason.take(200)
+        }
     }
 
     // 每个声道独立保存 IIR 历史；不能把交错立体声当作一条采样流。
@@ -47,6 +69,21 @@ class DSPAudioProcessor {
     private var spectrumAnalysisEnabled = false
     private var pcmFloatBuffer: FloatArray? = null
     private var pcmFloatOutputBuffer: ByteBuffer? = null
+
+    @Volatile
+    private var processedBlockCount = 0L
+
+    @Volatile
+    private var processedSampleCount = 0L
+
+    @Volatile
+    private var lastProcessedAtMs = 0L
+
+    @Volatile
+    private var lastProcessedSampleRate = sampleRate
+
+    @Volatile
+    private var lastProcessedChannelCount = channelCount
 
     // 配置锁，保证线程安全
     private val lock = ReentrantReadWriteLock()
@@ -188,6 +225,11 @@ class DSPAudioProcessor {
     fun process(buffer: FloatArray, channels: Int = 2, sampleCount: Int = buffer.size): FloatArray {
         require(sampleCount in 0..buffer.size && channels > 0)
         if (sampleCount == 0) return buffer
+        processedBlockCount += 1
+        processedSampleCount += sampleCount.toLong()
+        lastProcessedAtMs = System.currentTimeMillis()
+        lastProcessedSampleRate = sampleRate
+        lastProcessedChannelCount = channels
         if (channelCount != channels) configure(sampleRate, channels)
         if (!enabled) {
             // EQ 关闭时保持音频直通；仅在界面有频谱消费者时继续分析。
@@ -299,4 +341,30 @@ class DSPAudioProcessor {
             fftAnalyzer.reset()
         }
     }
+
+    /** 返回 DSP 注入和实际 PCM 处理状态，供诊断日志使用。 */
+    fun getDiagnostics(): Diagnostics {
+        return Diagnostics(
+            processorAttached = processorAttached,
+            attachmentFailure = attachmentFailure,
+            processedBlockCount = processedBlockCount,
+            processedSampleCount = processedSampleCount,
+            lastProcessedAtMs = lastProcessedAtMs,
+            sampleRate = lastProcessedSampleRate,
+            channelCount = lastProcessedChannelCount,
+            enabled = enabled,
+        )
+    }
+
+    /** DSP 诊断快照，不携带音频内容。 */
+    data class Diagnostics(
+        val processorAttached: Boolean,
+        val attachmentFailure: String?,
+        val processedBlockCount: Long,
+        val processedSampleCount: Long,
+        val lastProcessedAtMs: Long,
+        val sampleRate: Int,
+        val channelCount: Int,
+        val enabled: Boolean,
+    )
 }

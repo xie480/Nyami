@@ -60,7 +60,9 @@ class EqAudioProcessorAdapter(
     /**
      * 是否处于激活状态（已配置且可以处理数据）。
      */
-    override fun isActive(): Boolean = true
+    override fun isActive(): Boolean =
+        pendingEncoding == C.ENCODING_PCM_FLOAT ||
+            pendingEncoding == C.ENCODING_PCM_16BIT
 
     /**
      * 配置处理器。返回输出格式（与输入相同，不做重采样/编码转换）。

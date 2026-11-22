@@ -27,6 +27,7 @@ import {loadMorePersonalizedSongs} from './homeRecommendationService';
 import {searchVideoToFavoriteVideo} from './transformers';
 import {consumeExpiredSleepTimer} from './sleepTimer';
 import {QueueController} from '../../packages/core/src/player';
+import {audioDSP} from '../native/AudioDSPModule';
 
 let _ready = false;
 
@@ -321,6 +322,12 @@ export async function setupPlayer() {
       ],
       progressUpdateEventInterval: config.playback.progressUpdateIntervalSeconds,
     });
+    try {
+      const diagnostics = await audioDSP.getDiagnostics();
+      LoggerService.info('TrackPlayer', 'setupPlayer', 'DSP pipeline status', diagnostics);
+    } catch (error) {
+      LoggerService.warn('TrackPlayer', 'setupPlayer', 'DSP diagnostics unavailable', error);
+    }
     await TrackPlayer.setVolume(preferredPlayerVolume);
 
     AppState.addEventListener('change', async nextAppState => {

@@ -1300,7 +1300,7 @@ index afa6b0f..27f331d 100644
          observeEvents()
          setupForegrounding()
      }
-@@ -600,6 +615,122 @@ class MusicService : HeadlessJsTaskService() {
+@@ -600,8 +615,133 @@ class MusicService : HeadlessJsTaskService() {
          }
      }
  
@@ -1375,6 +1375,7 @@ index afa6b0f..27f331d 100644
 +                    sinkField.set(renderer, customAudioSink)
 +                    injected = true
 +                    Timber.d("DSP AudioProcessor injected into renderer #$i")
++                    markDSPProcessorAttached(dspClass)
 +                } catch (e: Exception) {
 +                    Timber.w(e, "Failed to set audioSink on renderer #$i")
 +                }
@@ -1388,6 +1389,15 @@ index afa6b0f..27f331d 100644
 +        }
 +    }
 +
++    /** 通过静态反射把注入结果写入应用侧 DSP 诊断状态。 */
++    private fun markDSPProcessorAttached(dspClass: Class<*>) {
++        try {
++            dspClass.getDeclaredMethod("markProcessorAttached").invoke(null)
++        } catch (e: Exception) {
++            Timber.w(e, "Cannot mark DSP processor as attached")
++        }
++    }
+
 +    /**
 +     * 备选注入方案：通过反射访问渲染器内部 AudioProcessor 列表
 +     */

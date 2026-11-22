@@ -42,18 +42,30 @@ export interface AudioDSPModuleInterface {
 
   /** 应用预设（快捷设置所有频段） */
   applyPreset(gains: number[]): void;
-/** 重置所有 DSP 状态 */
-reset(): void;
 
-/**
- * 获取当前 FFT 频谱电平（已按固定 dBFS 范围映射为 0~1）
- * @returns Promise 包含 spectrum, catEarLeft, catEarRight
- */
-getSpectrumData(maxSpectrumBins: number, includeCatEars: boolean): Promise<{
-  spectrum: number[];
-  catEarLeft?: number[];
-  catEarRight?: number[];
-}>;
+  /** 获取注入和真实 PCM 处理状态。 */
+  getDiagnostics(): Promise<{
+    processorAttached: boolean;
+    attachmentFailure?: string | null;
+    processedBlockCount: number;
+    processedSampleCount: number;
+    lastProcessedAtMs: number;
+    sampleRate: number;
+    channelCount: number;
+    enabled: boolean;
+  }>;
+  /** 重置所有 DSP 状态 */
+  reset(): void;
+
+  /**
+   * 获取当前 FFT 频谱电平（已按固定 dBFS 范围映射为 0~1）
+   * @returns Promise 包含 spectrum, catEarLeft, catEarRight
+   */
+  getSpectrumData(maxSpectrumBins: number, includeCatEars: boolean): Promise<{
+    spectrum: number[];
+    catEarLeft?: number[];
+    catEarRight?: number[];
+  }>;
 }
 
 
@@ -70,6 +82,16 @@ export const audioDSP: AudioDSPModuleInterface = AudioDSPModule ?? {
   setSpectrumEnabled: () => {},
   setMode: () => {},
   applyPreset: () => {},
+  getDiagnostics: async () => ({
+    processorAttached: false,
+    attachmentFailure: 'native-module-unavailable',
+    processedBlockCount: 0,
+    processedSampleCount: 0,
+    lastProcessedAtMs: 0,
+    sampleRate: 0,
+    channelCount: 0,
+    enabled: false,
+  }),
   reset: () => {},
   getSpectrumData: async () => ({
     spectrum: [],
