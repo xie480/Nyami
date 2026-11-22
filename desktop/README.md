@@ -10,20 +10,22 @@ npm run desktop:typecheck
 npm run desktop:build
 npm run desktop:package
 npm run desktop:release:check
+npm run build:win
 ```
 
-`desktop:package` 使用 `desktop/electron-builder.yml` 生成 NSIS 安装包和便携版，目标为 Windows 10 19041+ / Windows 11 x64；构建结束后会在 `release/desktop/` 生成 `latest.json` 和 `SHA256SUMS.txt`。NSIS 使用差分 blockmap 压缩策略，便于后续接入增量更新。
+`desktop:package`（`build:win` 的别名）使用 `desktop/electron-builder.yml` 生成唯一的 `NYAMI-Setup-x64.exe` NSIS 安装包，目标为 Windows 10 19041+ / Windows 11 x64；构建结束后会在 `release/desktop/` 生成 Setup.exe、`latest.json` 和 `SHA256SUMS.txt`，不会生成 portable、MSI、AppX 或 ZIP。
 
 ### 阶段 7 发布配置
 
 - 桌面端版本号以 `desktop/package.json` 为唯一来源，当前发布版本为 `1.0.0`。
 - 安装包显式使用 `resource/icon.ico`，注册 `.nyami` 播放队列文件关联，并启用已有的单实例锁。
-- NSIS 使用 assisted installer 和 x64 目标；覆盖升级不会删除 `%APPDATA%/Nyami/`，卸载只清理安装目录和卸载注册信息。
-- 构建文件过滤 source map、调试日志、测试目录和测试凭证；`desktop-release.mjs --check` 会校验安装包、便携版、SHA-256 和更新清单。
-- 设置页的“检查更新”默认读取 Nyami GitHub Releases 的 `latest.json`：`https://github.com/xie480/Nyami/releases/latest/download/latest.json`。`NYAMI_UPDATE_URL` 可以覆盖默认地址，也可以配置为包含 `latest.json` 的 HTTPS 目录；本机开发允许 `http://localhost`。
-- `.github/workflows/release-desktop.yml` 会在推送匹配桌面版本的 `v*` 标签后构建 Windows x64 安装包，并把 `latest.json`、安装包、便携版、blockmap 和校验和上传到 GitHub Release；发布 Release 后上述默认更新源即可正常读取。
+- NSIS 使用 assisted installer、简体中文界面和 x64 目标；默认当前用户安装，允许自定义安装目录，创建桌面和开始菜单快捷方式，安装完成可立即启动 NYAMI。
+- 覆盖升级不会删除 `%APPDATA%/Nyami/`；卸载只清理程序文件、快捷方式和卸载注册信息，默认保留用户数据、缓存、数据库、设置和登录凭证。
+- 构建文件过滤 source map、调试日志、测试目录和测试凭证；`desktop-release.mjs --check` 只校验唯一的 Setup.exe、SHA-256 和更新清单。
+- 设置页的“检查更新”默认读取 NYAMI GitHub Releases 的 `latest.json`：`https://github.com/xie480/Nyami/releases/latest/download/latest.json`。`NYAMI_UPDATE_URL` 可以覆盖默认地址，也可以配置为包含 `latest.json` 的 HTTPS 目录；本机开发允许 `http://localhost`。
+- `.github/workflows/release-desktop.yml` 会在推送匹配桌面版本的 `v*` 标签后构建 Windows x64 安装包，并把 `latest.json`、Setup.exe 和校验和上传到 GitHub Release；发布 Release 后上述默认更新源即可正常读取。
 - GitHub 仓库尚未发布桌面 Release 时，检查更新会提示“Nyami GitHub Releases 尚未发布桌面端安装包”，不会把原因误报成更新地址未配置。
-- 当前更新流程只检查清单并打开已校验的下载地址，用户手动运行安装包完成升级。清单中的 `blockmapUrl` 为后续 `electron-updater` 增量下载保留入口。
+- 当前更新流程只检查清单并打开已校验的 Setup.exe 地址，用户手动运行安装包完成升级；本次不配置自动更新服务器或增量更新。
 
 ### 代码签名
 

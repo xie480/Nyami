@@ -1,14 +1,12 @@
 import {app} from 'electron';
 import path from 'node:path';
-import {DESKTOP_APP_ID} from './constants';
+import {DESKTOP_APP_ID, DESKTOP_USER_DATA_DIRECTORY_NAME} from './constants';
 import {
   registerLocalAudioHandler,
   registerLocalAudioScheme,
 } from './audio/localAudioProtocol';
 import {AppLogger} from './logging/appLogger';
-import {
-  installProcessErrorBoundary,
-} from './process/errorBoundary';
+import {installProcessErrorBoundary} from './process/errorBoundary';
 import {
   ensureAppDirectories,
   getAppDirectories,
@@ -17,6 +15,7 @@ import {SettingsStore} from './storage/settingsStore';
 import {createMainWindow} from './window/createWindow';
 
 registerLocalAudioScheme();
+configureUserDataPath();
 
 const logger = new AppLogger();
 const disposeProcessErrorBoundary = installProcessErrorBoundary(logger);
@@ -137,6 +136,18 @@ async function bootstrap(): Promise<void> {
     shouldFocusWhenReady = false;
     focusMainWindow(runtime.window);
   }
+}
+
+/**
+ * 固定旧版桌面端使用的 userData 根目录，保证升级后设置、收藏、缓存和凭证仍可见。
+ * @returns 无返回值
+ */
+function configureUserDataPath(): void {
+  const appDataPath = app.getPath('appData');
+  app.setPath(
+    'userData',
+    path.join(appDataPath, DESKTOP_USER_DATA_DIRECTORY_NAME),
+  );
 }
 
 /**

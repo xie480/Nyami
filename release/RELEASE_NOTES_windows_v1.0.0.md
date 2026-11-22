@@ -1,10 +1,11 @@
-# Nyami Windows v1.0.0
+# NYAMI Windows v1.0.0
 
 ## 发布内容
 
-- 提供 Windows x64 NSIS 安装包和便携版。
+- 提供唯一的 `NYAMI-Setup-x64.exe` Windows x64 NSIS 安装包。
+- 安装器使用 assisted installer，默认当前用户安装，支持自定义目录、桌面快捷方式和开始菜单快捷方式。
 - 安装器注册 `.nyami` 播放队列文件关联，并保留 `%APPDATA%/Nyami/` 用户数据。
-- 发布脚本生成 `latest.json`、`SHA256SUMS.txt` 和 NSIS blockmap 引用，支持配置更新源进行手动升级。
+- 发布脚本生成 `latest.json` 和 `SHA256SUMS.txt`，支持配置更新源进行手动升级。
 - 发行构建默认关闭 source map，排除调试日志、测试凭证和测试目录。
 
 ## 已知限制

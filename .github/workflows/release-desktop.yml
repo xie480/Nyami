@@ -3,7 +3,7 @@ name: 发布 Nyami Windows 桌面端
 on:
   push:
     tags:
-      - 'v*'
+      - 'desktop-v*'
 
 permissions:
   contents: write
@@ -33,17 +33,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $package = Get-Content desktop/package.json -Raw | ConvertFrom-Json
-          $expectedTag = "v$($package.version)"
+          $expectedTag = "desktop-v$($package.version)"
           if ($env:GITHUB_REF_NAME -ne $expectedTag) {
             throw "Git tag $env:GITHUB_REF_NAME does not match desktop version $expectedTag"
           }
-          $assets = @(Get-ChildItem release/desktop -File | Where-Object {
-            $_.Name -match '\.(exe|blockmap)$' -or
-            $_.Name -in @('latest.json', 'SHA256SUMS.txt')
-          } | ForEach-Object { $_.FullName })
-          if ($assets.Count -lt 4) {
-            throw 'Release directory does not contain the expected update assets'
+          $assetNames = @(
+            'NYAMI-Setup-x64.exe',
+            'latest.json',
+            'SHA256SUMS.txt'
+          )
+          $assets = @($assetNames | ForEach-Object {
+            $path = Join-Path 'release/desktop' $_
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Missing release asset: $path"
+            }
+            (Resolve-Path -LiteralPath $path).Path
+          })
+          if ($assets.Count -ne $assetNames.Count) {
+            throw 'Release directory does not contain exactly the expected NYAMI Setup assets'
           }
           gh release create $env:GITHUB_REF_NAME $assets `
-            --title "Nyami $($package.version)" `
+            --title "NYAMI PC $($package.version)" `
             --generate-notes

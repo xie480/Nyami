@@ -12,6 +12,17 @@ const DESKTOP_PACKAGE_PATH = path.join(
 );
 const RELEASE_DIRECTORY = path.join(PROJECT_ROOT, 'release', 'desktop');
 const DESKTOP_OUTPUT_DIRECTORY = path.join(PROJECT_ROOT, 'desktop', 'out');
+const SETUP_ARTIFACT_NAME = 'NYAMI-Setup-x64.exe';
+
+/**
+ * 清理仓库内的桌面发布生成目录，不触碰 Electron userData 或其他用户数据。
+ * @returns 清理完成后的 Promise
+ */
+async function cleanReleaseArtifacts() {
+  await fs.rm(RELEASE_DIRECTORY, {recursive: true, force: true});
+  await fs.mkdir(RELEASE_DIRECTORY, {recursive: true});
+  console.log(`已清理桌面发布生成目录：${RELEASE_DIRECTORY}`);
+}
 
 /**
  * 读取桌面端版本，并保证发布脚本只使用桌面 package.json 的版本号。
@@ -32,12 +43,9 @@ async function readDesktopVersion() {
  */
 async function generateReleaseMetadata() {
   const version = await readDesktopVersion();
-  const artifacts = await listArtifacts(version);
-  const setupArtifact = artifacts.find(name => /-setup\.exe$/i.test(name));
-  const portableArtifact = artifacts.find(name => /-portable\.exe$/i.test(name));
-  if (!setupArtifact || !portableArtifact) {
-    throw new Error('发布目录缺少 x64 NSIS 安装包或便携版');
-  }
+  await assertNoDebugFiles(DESKTOP_OUTPUT_DIRECTORY);
+  const artifacts = await listArtifacts();
+  assertOnlySetupArtifact(artifacts);
 
   const checksums = await Promise.all(
     artifacts.map(async artifact => ({
@@ -45,7 +53,6 @@ async function generateReleaseMetadata() {
       sha256: await calculateSha256(path.join(RELEASE_DIRECTORY, artifact)),
     })),
   );
-  const blockmapArtifact = artifacts.find(name => name.endsWith('.blockmap'));
   const notesPath = path.join(
     PROJECT_ROOT,
     'release',
@@ -56,11 +63,9 @@ async function generateReleaseMetadata() {
     version,
     channel: 'stable',
     releaseDate: new Date().toISOString(),
-    notes: notes || `Nyami Windows ${version} 发布。`,
-    url: setupArtifact,
-    portableUrl: portableArtifact,
-    sha256: checksums.find(item => item.artifact === setupArtifact)?.sha256,
-    blockmapUrl: blockmapArtifact || null,
+    notes: notes || `NYAMI Windows ${version} 发布。`,
+    url: SETUP_ARTIFACT_NAME,
+    sha256: checksums.find(item => item.artifact === SETUP_ARTIFACT_NAME)?.sha256,
   };
 
   await fs.writeFile(
@@ -76,7 +81,7 @@ async function generateReleaseMetadata() {
     'utf8',
   );
   console.log(
-    `已生成 Nyami ${version} 发布清单、SHA-256 校验和和增量 blockmap 引用。`,
+    `已生成 NYAMI ${version} 发布清单和 SHA-256 校验和。`,
   );
 }
 
@@ -87,17 +92,16 @@ async function generateReleaseMetadata() {
 async function checkReleaseArtifacts() {
   const version = await readDesktopVersion();
   await assertNoDebugFiles(DESKTOP_OUTPUT_DIRECTORY);
-  const artifacts = await listArtifacts(version);
-  if (!artifacts.some(name => /-setup\.exe$/i.test(name))) {
-    throw new Error('未找到 NSIS 安装包');
-  }
-  if (!artifacts.some(name => /-portable\.exe$/i.test(name))) {
-    throw new Error('未找到便携版');
-  }
+  await assertNoDebugFiles(RELEASE_DIRECTORY);
+  const artifacts = await listArtifacts();
+  assertOnlySetupArtifact(artifacts);
   const manifestPath = path.join(RELEASE_DIRECTORY, 'latest.json');
   const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
   if (manifest.version !== version) {
     throw new Error('latest.json 版本与 desktop/package.json 不一致');
+  }
+  if (manifest.url !== SETUP_ARTIFACT_NAME) {
+    throw new Error(`latest.json 必须指向 ${SETUP_ARTIFACT_NAME}`);
   }
   if (!isVersion(manifest.version) || !isSha256(manifest.sha256)) {
     throw new Error('latest.json 缺少有效版本或安装包 SHA-256');
@@ -110,35 +114,37 @@ async function checkReleaseArtifacts() {
   const checksumPath = path.join(RELEASE_DIRECTORY, 'SHA256SUMS.txt');
   await fs.access(checksumPath);
   console.log(
-    `发布质量检查通过：${version}，x64 安装包、便携版、校验和和更新清单均存在。`,
+    `发布质量检查通过：${version}，仅有 x64 NSIS 安装包及其校验和、更新清单。`,
   );
 }
 
 /**
- * 列出当前发布目录中的可分发二进制和 blockmap 文件。
+ * 确认发布目录只包含正式 Setup.exe，防止旧 portable 或其他分发格式混入发布结果。
+ * @param artifacts 发布目录中的可分发产物
+ * @returns 无返回值
+ */
+function assertOnlySetupArtifact(artifacts) {
+  if (artifacts.length !== 1 || artifacts[0] !== SETUP_ARTIFACT_NAME) {
+    throw new Error(
+      `发布目录必须只包含 ${SETUP_ARTIFACT_NAME}，当前产物：${artifacts.join(', ') || '无'}`,
+    );
+  }
+}
+
+/**
+ * 列出当前发布目录中的可分发 Windows 可执行文件。
  * @returns 产物文件名列表
  */
-async function listArtifacts(version) {
+async function listArtifacts() {
   const entries = await fs.readdir(RELEASE_DIRECTORY, {withFileTypes: true});
-  const versionPattern = new RegExp(`-${escapeRegExp(version)}-`);
   return entries
     .filter(
       entry =>
         entry.isFile() &&
-        versionPattern.test(entry.name) &&
-        (entry.name.endsWith('.exe') || entry.name.endsWith('.blockmap')),
+        entry.name.endsWith('.exe'),
     )
     .map(entry => entry.name)
     .sort();
-}
-
-/**
- * 将版本文本转成可安全拼接到正则表达式中的片段。
- * @param value 原始文本
- * @returns 转义后的正则片段
- */
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
@@ -236,8 +242,13 @@ function isSha256(value) {
   return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
 }
 
+const cleanOnly = process.argv.includes('--clean');
 const checkOnly = process.argv.includes('--check');
-const action = checkOnly ? checkReleaseArtifacts : generateReleaseMetadata;
+const action = cleanOnly
+  ? cleanReleaseArtifacts
+  : checkOnly
+    ? checkReleaseArtifacts
+    : generateReleaseMetadata;
 action().catch(error => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;

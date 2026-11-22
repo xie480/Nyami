@@ -1,4 +1,5 @@
 import {
+  app,
   BrowserWindow,
   session,
   type BrowserWindowConstructorOptions,
@@ -312,6 +313,9 @@ function toAudioQuality(quality: DesktopPlaybackQuality): AudioQuality {
  * @returns 仅允许本机 HTTP/HTTPS 的开发地址；生产环境返回 null
  */
 function getRendererUrl(): string | null {
+  if (app.isPackaged) {
+    return null;
+  }
   const value = process.env.ELECTRON_RENDERER_URL?.trim();
   if (!value) {
     return null;

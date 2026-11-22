@@ -7,6 +7,9 @@ import {config} from '../../packages/core/src/config';
 
 export const DESKTOP_APP_ID = 'com.nyami.desktop';
 
+/** 保持既有 Windows userData 目录名，避免产品名大小写变更导致数据迁移。 */
+export const DESKTOP_USER_DATA_DIRECTORY_NAME = 'Nyami';
+
 export const DESKTOP_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
