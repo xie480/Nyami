@@ -189,6 +189,10 @@ export function createMainWindow(
   let disposed = false;
 
   window.once('ready-to-show', () => {
+    // 窗口保持隐藏到最大化完成，避免启动时先显示还原尺寸再跳转到最大化。
+    if (!window.isMaximized()) {
+      window.maximize();
+    }
     window.show();
   });
   window.on('close', event => {
