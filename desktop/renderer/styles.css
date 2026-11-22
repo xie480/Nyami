@@ -1454,10 +1454,27 @@ kbd {
   font-size: 11px;
 }
 
-.audio-select-control .prototype-select-options {
+/* prototype.css 后加载，显式覆盖默认向上展开，避免 top/bottom 同时生效压缩菜单高度。 */
+.prototype-app .audio-select-control .prototype-select-options {
+  position: absolute;
   z-index: 500;
   top: calc(100% + 7px);
+  right: 0;
   bottom: auto;
+  display: flex;
+  min-width: 156px;
+  height: auto;
+  max-height: none;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.prototype-app .audio-select-control .prototype-select-option {
+  display: block;
+  min-height: 30px;
+  flex: 0 0 30px;
+  box-sizing: border-box;
+  line-height: 1.4;
 }
 
 .audio-select-control .prototype-select-menu.is-open {
