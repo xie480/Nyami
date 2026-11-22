@@ -21,6 +21,7 @@ import type {
   PlaybackCommandEvent,
   PlaybackModeRequest,
   PlaybackQueueItemRequest,
+  PlaybackQueueAppendRequest,
   PlaybackQueueRequest,
   PlaybackRemoveRequest,
   PlaybackReorderRequest,
@@ -92,6 +93,8 @@ const api: NyamiDesktopApi = {
     getState: () => ipcRenderer.invoke(CHANNELS.playback.getState),
     loadQueue: (request: PlaybackQueueRequest) =>
       ipcRenderer.invoke(CHANNELS.playback.loadQueue, request),
+    appendQueue: (request: PlaybackQueueAppendRequest) =>
+      ipcRenderer.invoke(CHANNELS.playback.appendQueue, request),
     addToQueue: (request: PlaybackQueueItemRequest) =>
       ipcRenderer.invoke(CHANNELS.playback.addToQueue, request),
     removeFromQueue: (request: PlaybackRemoveRequest) =>

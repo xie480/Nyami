@@ -74,6 +74,20 @@ const THEME_OPTIONS: Array<{
   description: string;
 }> = [{value: 'light', label: '浅色', description: '适合明亮环境'}];
 
+/** 单次 IPC 队列窗口大小，必须小于等于主进程的安全上限。 */
+const PLAYBACK_QUEUE_BATCH_SIZE = 500;
+
+/** 播放到窗口尾部前提前装载下一批，避免切歌时等待 IPC。 */
+const PLAYBACK_QUEUE_PREFETCH_THRESHOLD = 80;
+
+type PlaybackQueueWindow = {
+  items: PlaybackQueueItem[];
+  nextIndex: number;
+  queueKey: string;
+  loading: boolean;
+  retryAt: number;
+};
+
 const EMPTY_PLAYBACK: PlaybackSnapshot = {
   state: 'idle',
   trackId: null,
@@ -166,6 +180,7 @@ export function App(): JSX.Element {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const noticeSequenceRef = useRef(0);
   const authRefreshSequenceRef = useRef(0);
+  const playbackWindowRef = useRef<PlaybackQueueWindow | null>(null);
 
   /** 追加全局任务通知，并保留最近的通知历史。 */
   const pushNotice = useCallback((tone: NoticeTone, message: string): void => {
@@ -307,6 +322,69 @@ export function App(): JSX.Element {
     }
   }, []);
 
+  /** 清理大队列窗口，避免旧播放来源继续追加项目。 */
+  const clearPlaybackWindow = useCallback((): void => {
+    playbackWindowRef.current = null;
+  }, []);
+
+  /** 在播放窗口接近尾部时追加下一批项目，保持超大收藏夹连续播放。 */
+  const appendPlaybackWindow = useCallback(
+    async (snapshot: PlaybackSnapshot): Promise<void> => {
+      const pending = playbackWindowRef.current;
+      if (
+        !pending ||
+        pending.loading ||
+        pending.retryAt > Date.now() ||
+        snapshot.state === 'idle' ||
+        snapshot.state === 'error' ||
+        snapshot.queueIndex < 0
+      ) {
+        return;
+      }
+      const remaining = snapshot.queue.length - snapshot.queueIndex - 1;
+      if (
+        remaining > PLAYBACK_QUEUE_PREFETCH_THRESHOLD ||
+        pending.nextIndex >= pending.items.length
+      ) {
+        return;
+      }
+      const batchEnd = Math.min(
+        pending.nextIndex + PLAYBACK_QUEUE_BATCH_SIZE,
+        pending.items.length,
+      );
+      const batch = pending.items.slice(pending.nextIndex, batchEnd);
+      if (!batch.length) {
+        return;
+      }
+      pending.loading = true;
+      try {
+        const next = await window.nyamiDesktop.playback.appendQueue({
+          items: batch,
+          queueKey: pending.queueKey,
+        });
+        if (playbackWindowRef.current !== pending) {
+          return;
+        }
+        pending.nextIndex = batchEnd;
+        pending.retryAt = 0;
+        setPlayback(next);
+      } catch (error) {
+        if (playbackWindowRef.current === pending) {
+          pending.retryAt = Date.now() + 5000;
+          pushNotice(
+            'error',
+            getErrorMessage(error, '加载后续播放队列失败'),
+          );
+        }
+      } finally {
+        if (playbackWindowRef.current === pending) {
+          pending.loading = false;
+        }
+      }
+    },
+    [pushNotice],
+  );
+
   /** 执行播放器的播放/暂停控制。 */
   const togglePlayback = useCallback(async (): Promise<void> => {
     if (!playback.trackId) {
@@ -331,6 +409,7 @@ export function App(): JSX.Element {
   const playVideo = useCallback(
     (video: DesktopVideo): void => {
       rememberRecentVideo(video);
+      clearPlaybackWindow();
       void window.nyamiDesktop.playback
         .loadQueue({
           items: [toPlaybackQueueItem(video)],
@@ -349,18 +428,17 @@ export function App(): JSX.Element {
           pushNotice('error', getErrorMessage(error, '音频加载失败'));
         });
     },
-    [pushNotice, rememberRecentVideo],
+    [clearPlaybackWindow, pushNotice, rememberRecentVideo],
   );
 
-  /** 将多个真实视频一次性载入播放器，支持收藏夹全局随机播放。 */
-  const playVideos = useCallback(
+  /** 将大列表切成安全窗口载入播放器，支持收藏夹和全局随机连续播放。 */
+  const playQueueItems = useCallback(
     (
-      videos: DesktopVideo[],
+      items: PlaybackQueueItem[],
       shuffle: boolean,
       context: PlaybackQueueContext | null = null,
       startIndex = 0,
     ): void => {
-      const items = videos.map(toPlaybackQueueItem);
       if (!items.length) {
         pushNotice('info', '当前列表没有可播放内容');
         return;
@@ -369,13 +447,29 @@ export function App(): JSX.Element {
       const safeStartIndex = shuffle
         ? 0
         : Math.min(Math.max(0, startIndex), queue.length - 1);
+      const windowStart = shuffle
+        ? 0
+        : Math.max(0, safeStartIndex - PLAYBACK_QUEUE_BATCH_SIZE + 1);
+      const windowEnd = Math.min(
+        windowStart + PLAYBACK_QUEUE_BATCH_SIZE,
+        queue.length,
+      );
+      const queueKey = makeRequestId('playback-window');
+      playbackWindowRef.current = {
+        items: queue,
+        nextIndex: windowEnd,
+        queueKey,
+        loading: false,
+        retryAt: 0,
+      };
       void window.nyamiDesktop.playback
         .loadQueue({
-          items: queue,
-          startIndex: safeStartIndex,
+          items: queue.slice(windowStart, windowEnd),
+          startIndex: safeStartIndex - windowStart,
           autoplay: true,
           expandParts: false,
           context,
+          queueKey,
         })
         .then(snapshot => {
           setPlayback(snapshot);
@@ -384,18 +478,44 @@ export function App(): JSX.Element {
           }
         })
         .catch(error => {
+          if (playbackWindowRef.current?.queueKey === queueKey) {
+            clearPlaybackWindow();
+          }
           pushNotice('error', getErrorMessage(error, '收藏夹播放失败'));
         });
     },
-    [pushNotice],
+    [clearPlaybackWindow, pushNotice],
+  );
+
+  /** 将内容视频转换为播放器项目后交给窗口化队列。 */
+  const playVideos = useCallback(
+    (
+      videos: DesktopVideo[],
+      shuffle: boolean,
+      context: PlaybackQueueContext | null = null,
+      startIndex = 0,
+    ): void => {
+      playQueueItems(
+        videos.map(toPlaybackQueueItem),
+        shuffle,
+        context,
+        startIndex,
+      );
+    },
+    [playQueueItems],
   );
 
   /** 将内容卡片追加到当前播放队列。 */
   const addVideoToQueue = useCallback(
     (video: DesktopVideo): void => {
+      const item = toPlaybackQueueItem(video);
+      const pending = playbackWindowRef.current;
+      if (pending && !pending.items.some(current => current.id === item.id)) {
+        pending.items.push(item);
+      }
       void window.nyamiDesktop.playback
         .addToQueue({
-          item: toPlaybackQueueItem(video),
+          item,
           autoplay: false,
           context: getPopularQueueContext(video),
         })
@@ -465,6 +585,18 @@ export function App(): JSX.Element {
   /** 从播放队列移除一个项目。 */
   const removePlaybackItem = useCallback(
     (trackId: string): void => {
+      const pending = playbackWindowRef.current;
+      if (pending) {
+        const pendingIndex = pending.items.findIndex(
+          item => item.id === trackId,
+        );
+        if (pendingIndex >= 0) {
+          pending.items.splice(pendingIndex, 1);
+          if (pendingIndex < pending.nextIndex) {
+            pending.nextIndex -= 1;
+          }
+        }
+      }
       void window.nyamiDesktop.playback
         .removeFromQueue({trackId})
         .then(setPlayback)
@@ -478,6 +610,7 @@ export function App(): JSX.Element {
   /** 按拖拽结果保存播放队列顺序。 */
   const reorderPlaybackQueue = useCallback(
     (trackIds: string[]): void => {
+      clearPlaybackWindow();
       void window.nyamiDesktop.playback
         .reorderQueue({trackIds})
         .then(setPlayback)
@@ -485,35 +618,21 @@ export function App(): JSX.Element {
           pushNotice('error', getErrorMessage(error, '调整播放队列失败'));
         });
     },
-    [pushNotice],
+    [clearPlaybackWindow, pushNotice],
   );
 
   /** 从队列面板选择指定歌曲并保持其余项目顺序。 */
   const playQueueTrack = useCallback(
     (trackId: string): void => {
-      const startIndex = playback.queue.findIndex(item => item.id === trackId);
+      const pending = playbackWindowRef.current;
+      const sourceItems = pending?.items ?? playback.queue;
+      const startIndex = sourceItems.findIndex(item => item.id === trackId);
       if (startIndex < 0) {
         return;
       }
-      void window.nyamiDesktop.playback
-        .loadQueue({
-          items: playback.queue,
-          startIndex,
-          autoplay: true,
-          expandParts: false,
-          context: playback.queueContext,
-        })
-        .then(snapshot => {
-          setPlayback(snapshot);
-          if (snapshot.error) {
-            pushNotice('error', snapshot.error);
-          }
-        })
-        .catch(error => {
-          pushNotice('error', getErrorMessage(error, '切换队列项目失败'));
-        });
+      playQueueItems(sourceItems, false, playback.queueContext, startIndex);
     },
-    [playback.queue, playback.queueContext, pushNotice],
+    [playQueueItems, playback.queue, playback.queueContext],
   );
 
   /** 读取音频和图片缓存摘要，供设置页展示容量。 */
@@ -713,7 +832,10 @@ export function App(): JSX.Element {
     const unsubscribeSettings =
       window.nyamiDesktop.settings.onChanged(setSettings);
     const unsubscribePlayback = window.nyamiDesktop.playback.onStateChanged(
-      event => setPlayback(event.snapshot),
+      event => {
+        setPlayback(event.snapshot);
+        void appendPlaybackWindow(event.snapshot);
+      },
     );
     const unsubscribeSync = window.nyamiDesktop.sync.onStateChanged(event =>
       setSync(event.snapshot),
@@ -739,7 +861,7 @@ export function App(): JSX.Element {
       unsubscribeSync();
       unsubscribeCache();
     };
-  }, [pushNotice, refreshAuth]);
+  }, [appendPlaybackWindow, pushNotice, refreshAuth]);
 
   /** 初始化自绘窗口边框状态，并订阅主进程的最大化变化。 */
   useEffect(() => {

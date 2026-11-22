@@ -28,6 +28,7 @@ export const IPC_CHANNELS = {
     play: 'playback:play',
     pause: 'playback:pause',
     stop: 'playback:stop',
+    appendQueue: 'playback:append-queue',
     seek: 'playback:seek',
     skipNext: 'playback:skip-next',
     skipPrevious: 'playback:skip-previous',
@@ -238,6 +239,14 @@ export type PlaybackQueueRequest = {
   autoplay?: boolean;
   expandParts?: boolean;
   context?: PlaybackQueueContext | null;
+  /** Renderer 侧的大队列窗口标识，用于拒绝旧窗口的追加请求。 */
+  queueKey?: string;
+};
+
+export type PlaybackQueueAppendRequest = {
+  items: PlaybackQueueItem[];
+  /** 只允许追加到同一播放窗口，避免旧请求污染新队列。 */
+  queueKey: string;
 };
 
 export type PlaybackQueueItemRequest = {
@@ -668,6 +677,9 @@ export type NyamiDesktopApi = {
   playback: {
     getState: () => Promise<PlaybackSnapshot>;
     loadQueue: (request: PlaybackQueueRequest) => Promise<PlaybackSnapshot>;
+    appendQueue: (
+      request: PlaybackQueueAppendRequest,
+    ) => Promise<PlaybackSnapshot>;
     addToQueue: (
       request: PlaybackQueueItemRequest,
     ) => Promise<PlaybackSnapshot>;

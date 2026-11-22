@@ -43,6 +43,20 @@ describe('共享队列控制器', () => {
     await expect(first).resolves.toBeUndefined();
   });
 
+  it('追加大队列窗口时保留当前播放 revision', () => {
+    const controller = new QueueController<Video>();
+    controller.replaceQueue([video('current')], 'current');
+    const revision = controller.getRevision();
+
+    controller.appendPreservingRevision([video('next')]);
+
+    expect(controller.getRevision()).toBe(revision);
+    expect(controller.getSnapshot().queue.map(item => item.bvid)).toEqual([
+      'current',
+      'next',
+    ]);
+  });
+
   it('按 P 展开时保留 CID 和稳定队列键', () => {
     const result = expandVideoParts(
       [

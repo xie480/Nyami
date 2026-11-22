@@ -141,13 +141,27 @@ export class QueueController<TItem extends QueueItem> {
   /** 在队列末尾追加项目，并保留当前播放项。 */
   append(items: TItem[]): number {
     const revision = this.beginOperation();
+    this.updateQueueWithAppend(items, false);
+    return revision;
+  }
+
+  /** 追加窗口项目但保持当前播放 revision，避免中断正在解析的当前歌曲。 */
+  appendPreservingRevision(items: TItem[]): void {
+    this.updateQueueWithAppend(items, true);
+  }
+
+  /** 合并追加项目并保留当前播放项。 */
+  private updateQueueWithAppend(
+    items: TItem[],
+    updateOriginalQueue: boolean,
+  ): void {
     const normalized = this.unique([...this.snapshot.queue, ...items]);
     const current = this.snapshot.currentBvid;
     this.snapshot = {
       ...this.snapshot,
       queue: normalized,
       originalQueue:
-        this.snapshot.mode === 'sequential'
+        this.snapshot.mode === 'sequential' || updateOriginalQueue
           ? [...normalized]
           : this.snapshot.originalQueue,
       currentBvid:
@@ -159,7 +173,6 @@ export class QueueController<TItem extends QueueItem> {
           : normalized[0] ? this.idOf(normalized[0]) : null,
     };
     this.emit();
-    return revision;
   }
 
   /** 在当前播放项后插入一首歌。 */

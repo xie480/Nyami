@@ -15,6 +15,7 @@ import {
   type FavoriteSourceVideoRequest,
   type FavoriteVideoContentRequest,
   type PlaybackAudioEvent,
+  type PlaybackQueueAppendRequest,
   type PlaybackQueueContext,
   type PlaybackModeRequest,
   type PlaybackQueueItemRequest,
@@ -40,6 +41,9 @@ import {PlaybackRuntime} from '../runtime/playbackRuntime';
 import {SyncRuntime} from '../runtime/syncRuntime';
 import {SettingsStore} from '../storage/settingsStore';
 import {UpdateService} from '../updater/updateService';
+
+/** 大队列窗口累计加载后允许一次性重排的最大项目数。 */
+const MAX_PLAYBACK_REORDER_ITEMS = 10000;
 
 /**
  * IPC 处理器依赖。
@@ -186,6 +190,10 @@ export function registerIpcHandlers(
   register(IPC_CHANNELS.playback.addToQueue, async (_event, request) => {
     assertPlaybackQueueItemRequest(request);
     return dependencies.playbackRuntime.addToQueue(request);
+  });
+  register(IPC_CHANNELS.playback.appendQueue, async (_event, request) => {
+    assertPlaybackQueueAppendRequest(request);
+    return dependencies.playbackRuntime.appendQueue(request);
   });
   register(IPC_CHANNELS.playback.removeFromQueue, async (_event, request) => {
     assertPlaybackRemoveRequest(request);
@@ -760,6 +768,33 @@ function assertPlaybackQueueRequest(
   if (value.context !== undefined && value.context !== null) {
     assertPlaybackQueueContext(value.context);
   }
+  assertPlaybackQueueKey(value.queueKey);
+}
+
+/** 校验大队列窗口的一次追加请求，单次追加仍限制为 500 项。 */
+function assertPlaybackQueueAppendRequest(
+  value: unknown,
+): asserts value is PlaybackQueueAppendRequest {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    throw new Error('播放队列追加参数格式无效');
+  }
+  if (value.items.length > 500) {
+    throw new Error('播放队列一次最多追加 500 项');
+  }
+  value.items.forEach(assertPlaybackQueueItem);
+  if (
+    !isBoundedString(value.queueKey, 128) ||
+    !value.queueKey.trim()
+  ) {
+    throw new Error('播放队列窗口标识无效');
+  }
+}
+
+/** 校验跨进程播放窗口标识，防止旧窗口追加到新队列。 */
+function assertPlaybackQueueKey(value: unknown): void {
+  if (value !== undefined && !isBoundedString(value, 128)) {
+    throw new Error('播放队列窗口标识无效');
+  }
 }
 
 /** 校验追加单项队列请求。 */
@@ -866,7 +901,7 @@ function assertPlaybackReorderRequest(
     throw new Error('播放队列排序参数无效');
   }
   if (
-    value.trackIds.length > 500 ||
+    value.trackIds.length > MAX_PLAYBACK_REORDER_ITEMS ||
     value.trackIds.some(id => !isBoundedString(id, 512))
   ) {
     throw new Error('播放队列排序项目无效');

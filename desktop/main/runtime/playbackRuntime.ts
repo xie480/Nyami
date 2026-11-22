@@ -7,6 +7,7 @@ import type {
   PlaybackCommand,
   PlaybackDiagnostic,
   PlaybackModeRequest,
+  PlaybackQueueAppendRequest,
   PlaybackQueueContext,
   PlaybackQueueItem,
   PlaybackQueueItemRequest,
@@ -101,6 +102,8 @@ export class PlaybackRuntime {
 
   private currentSource: PlaybackSource | null = null;
 
+  private queueSessionKey: string | null = null;
+
   private operationController: AbortController | null = null;
 
   private retryCount = 0;
@@ -131,6 +134,7 @@ export class PlaybackRuntime {
   async loadQueue(request: PlaybackQueueRequest): Promise<PlaybackSnapshot> {
     const items = normalizeQueueItems(request.items);
     this.abortCurrentOperation();
+    this.queueSessionKey = normalizeQueueSessionKey(request.queueKey);
     if (items.length === 0) {
       this.queueController.replaceQueue([]);
       this.currentSource = null;
@@ -183,6 +187,25 @@ export class PlaybackRuntime {
         this.operationController = null;
       }
     }
+  }
+
+  /** 向当前大队列窗口追加一批项目，避免单次 IPC 携带超过 500 项。 */
+  async appendQueue(
+    request: PlaybackQueueAppendRequest,
+  ): Promise<PlaybackSnapshot> {
+    const requestKey = normalizeQueueSessionKey(request.queueKey);
+    if (requestKey !== this.queueSessionKey) {
+      return this.getState();
+    }
+    const items = normalizeQueueItems(request.items);
+    if (!items.length) {
+      return this.getState();
+    }
+    this.queueController.appendPreservingRevision(items);
+    this.snapshot = this.snapshotFromQueue(this.snapshot.state);
+    await this.persistState();
+    this.emitState();
+    return this.getState();
   }
 
   /** 将一首歌加入当前队列；空队列时直接开始播放。 */
@@ -998,6 +1021,12 @@ function normalizeQueueItems(items: PlaybackQueueItem[]): PlaybackQueueItem[] {
     });
   }
   return normalized;
+}
+
+/** 规范化大队列窗口标识，空值统一为无窗口。 */
+function normalizeQueueSessionKey(value: string | undefined): string | null {
+  const normalized = value?.trim() ?? '';
+  return normalized || null;
 }
 
 /** 判断队列上下文是否为受支持的热门续页游标。 */
