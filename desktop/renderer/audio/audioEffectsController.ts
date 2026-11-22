@@ -339,15 +339,37 @@ class NyamiDspProcessor extends AudioWorkletProcessor {
             }
           }
         }
-        if (this.settings.enabled && this.settings.limiterEnabled) {
-          const threshold = Math.min(1, Math.max(0.5, this.settings.limiterThreshold));
-          sample = Math.tanh(sample / threshold) * threshold;
-        }
-        output[channel][frame] = Math.min(1, Math.max(-1, sample));
+        output[channel][frame] = sample;
         mono += sample;
       }
       if (this.settings.spectrumEnabled) {
         this.pushSpectrumSample(mono / output.length);
+      }
+    }
+
+    // 先扫描整块峰值，再统一衰减，避免逐采样 tanh 改变低电平细节。
+    if (this.settings.enabled && this.settings.limiterEnabled) {
+      const threshold = Math.min(1, Math.max(0.5, this.settings.limiterThreshold));
+      let peak = 0;
+      for (let channel = 0; channel < output.length; channel += 1) {
+        for (let frame = 0; frame < frameCount; frame += 1) {
+          peak = Math.max(peak, Math.abs(output[channel][frame]));
+        }
+      }
+      if (peak > threshold) {
+        const gain = threshold / peak;
+        for (let channel = 0; channel < output.length; channel += 1) {
+          for (let frame = 0; frame < frameCount; frame += 1) {
+            output[channel][frame] *= gain;
+          }
+        }
+      }
+    }
+
+    // 输出端保留最后一道边界，避免禁用 Limiter 时向 AudioContext 写入非法幅度。
+    for (let channel = 0; channel < output.length; channel += 1) {
+      for (let frame = 0; frame < frameCount; frame += 1) {
+        output[channel][frame] = Math.min(1, Math.max(-1, output[channel][frame]));
       }
     }
     return true;
