@@ -32,6 +32,7 @@ function createQueueItem(id: string) {
 function createRuntime(
   statePath: string,
   cacheOverrides: Record<string, unknown> = {},
+  resolverOverrides: Record<string, unknown> = {},
 ): PlaybackRuntime {
   const cache = {
     get: jest.fn().mockResolvedValue(null),
@@ -51,6 +52,7 @@ function createRuntime(
         duration: 60,
         parts: [],
       }),
+      ...resolverOverrides,
     } as never,
     cache: cache as never,
     logger: {
@@ -235,6 +237,55 @@ describe('PlaybackRuntime 大队列窗口', () => {
       expect(cacheGet).not.toHaveBeenCalled();
       expect(snapshot.cached).toBe(false);
       expect(sources).toEqual(['https://audio.example.test/BV1.m4s']);
+    } finally {
+      await fs.rm(statePath, {force: true});
+      await fs.rm(`${statePath}.tmp`, {force: true});
+    }
+  });
+
+  it('切换到下一首时清零上一首的播放进度', async () => {
+    const statePath = path.join(
+      os.tmpdir(),
+      `nyami-playback-${randomUUID()}.json`,
+    );
+    const runtime = createRuntime(statePath, {}, {
+      resolve: jest.fn().mockImplementation(async (track: ReturnType<typeof createQueueItem>) => ({
+        track,
+        cid: 1,
+        url: `https://audio.example.test/${track.id}.m4s`,
+        backupUrls: [],
+        mimeType: 'audio/mp4',
+        duration: track.duration,
+        parts: [],
+      })),
+    });
+    const commands: Array<{type: string; position?: number}> = [];
+    runtime.subscribe(event => {
+      if (event.type === 'command') {
+        commands.push(event.command);
+      }
+    });
+
+    try {
+      await runtime.loadQueue({
+        items: [createQueueItem('BV1'), createQueueItem('BV2')],
+        autoplay: false,
+        expandParts: false,
+      });
+      await runtime.reportAudioEvent({
+        type: 'timeupdate',
+        trackId: 'BV1',
+        position: 25,
+        duration: 60,
+      });
+
+      const next = await runtime.skipNext();
+
+      expect(next.trackId).toBe('BV2');
+      expect(next.position).toBe(0);
+      expect(
+        commands.filter(command => command.type === 'seek'),
+      ).toHaveLength(0);
     } finally {
       await fs.rm(statePath, {force: true});
       await fs.rm(`${statePath}.tmp`, {force: true});

@@ -93,7 +93,8 @@ export class ElectronAudioPlayerAdapter
     }
     this.activeRevision = source.revision;
     this.activeTrackId = source.trackId;
-    this.pendingSeekPosition = null;
+    // 新资源的元数据到达前，部分浏览器会暂时沿用旧时间线；先挂起零点跳转，避免切歌继承旧进度。
+    this.pendingSeekPosition = 0;
     this.cancelFade();
     this.audio.pause();
     this.audio.currentTime = 0;
