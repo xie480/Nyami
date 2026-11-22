@@ -710,13 +710,8 @@ export class PlaybackRuntime {
       this.emitState();
       return this.getState();
     }
-    if (!net.isOnline()) {
-      return this.failPlayback(
-        new Error('当前处于离线状态，且该音频尚未缓存'),
-        'network-offline',
-        false,
-      );
-    }
+    // Electron 启动早期的 net.isOnline() 可能尚未完成探测，不能据此阻断首次远程解析。
+    // 解析失败后仍会按最新网络状态归类为离线并等待网络恢复。
     const quality = this.getQuality();
     const resolved = await this.options.resolver.resolve(track, signal, quality);
     if (!this.queueController.isCurrent(revision)) {

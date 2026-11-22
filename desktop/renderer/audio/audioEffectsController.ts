@@ -50,6 +50,11 @@ export class AudioEffectsController {
   setSettings(settings: DesktopAudioSettings): void {
     this.settings = cloneSettings(settings);
     this.postSettings();
+    if (!this.available && !this.setupPromise) {
+      void this.setup().catch(error => {
+        console.warn('Nyami AudioWorklet 重试初始化失败', error);
+      });
+    }
   }
 
   /** 在切换音轨时清理响度跟踪，避免上一首歌的增益残留。 */
@@ -93,6 +98,7 @@ export class AudioEffectsController {
       (window as typeof window & {webkitAudioContext?: typeof AudioContext})
         .webkitAudioContext;
     if (!AudioContextConstructor) {
+      this.setupPromise = null;
       return;
     }
     const context = new AudioContextConstructor();
@@ -121,6 +127,7 @@ export class AudioEffectsController {
       this.postSettings();
     } catch (error) {
       context.close().catch(() => undefined);
+      this.setupPromise = null;
       // 处理链不可用时保留 HTMLAudioElement 的直通播放，避免 EQ 失败阻断听歌。
       console.warn('Nyami AudioWorklet 不可用，已回退直通播放', error);
     }

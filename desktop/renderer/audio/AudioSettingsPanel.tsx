@@ -310,7 +310,6 @@ export function AudioSettingsPanel({
         </span>
         <input
           aria-label="响度目标"
-          disabled={!settings.loudnessEnabled}
           max={LOUDNESS_TARGET_MAX}
           min={LOUDNESS_TARGET_MIN}
           onChange={event =>

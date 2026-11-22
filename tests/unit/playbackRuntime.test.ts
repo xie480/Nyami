@@ -1,6 +1,8 @@
+let mockNetworkOnline = true;
+
 jest.mock('electron', () => ({
   net: {
-    isOnline: () => true,
+    isOnline: () => mockNetworkOnline,
   },
 }));
 
@@ -11,6 +13,10 @@ jest.mock('../../desktop/main/runtime/audioCacheStore', () => ({
     }
   },
 }));
+
+afterEach(() => {
+  mockNetworkOnline = true;
+});
 
 import {randomUUID} from 'node:crypto';
 import {promises as fs} from 'node:fs';
@@ -337,6 +343,52 @@ describe('PlaybackRuntime 大队列窗口', () => {
       expect(cacheGet).not.toHaveBeenCalled();
       expect(snapshot.cached).toBe(false);
       expect(sources).toEqual(['https://audio.example.test/BV1.m4s']);
+    } finally {
+      await fs.rm(statePath, {force: true});
+      await fs.rm(`${statePath}.tmp`, {force: true});
+    }
+  });
+
+  it('重启后网络探测尚未就绪时仍尝试解析未缓存音频', async () => {
+    const statePath = path.join(
+      os.tmpdir(),
+      `nyami-playback-${randomUUID()}.json`,
+    );
+    const queueItem = createQueueItem('BV1');
+    await fs.writeFile(
+      statePath,
+      JSON.stringify({
+        queue: [queueItem],
+        currentTrackId: queueItem.id,
+        mode: 'sequential',
+        context: {kind: 'search', keyword: '重启歌曲', page: 1},
+        position: 9,
+        duration: 60,
+        volume: 1,
+      }),
+      'utf8',
+    );
+    mockNetworkOnline = false;
+    const resolve = jest.fn().mockResolvedValue({
+      track: queueItem,
+      cid: 1,
+      url: 'https://audio.example.test/BV1.m4s',
+      backupUrls: [],
+      mimeType: 'audio/mp4',
+      duration: 60,
+      parts: [],
+    });
+    const runtime = createRuntime(statePath, {}, {resolve});
+
+    try {
+      const snapshot = await runtime.play();
+
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(snapshot).toMatchObject({
+        state: 'loading',
+        trackId: 'BV1',
+        position: 9,
+      });
     } finally {
       await fs.rm(statePath, {force: true});
       await fs.rm(`${statePath}.tmp`, {force: true});
