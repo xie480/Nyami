@@ -83,9 +83,8 @@ export const BILIBILI_IMAGE_HOST_SUFFIXES = [
 
 export const AUDIO_REQUEST_LOG_LIMIT = 40;
 
-/** PC 端收藏夹同步并发数，与 Android 端保持一致，避免多个来源同时触发风控。 */
-export const DESKTOP_SYNC_PLAYLIST_CONCURRENCY =
-  config.favoriteSync.playlistConcurrency;
+/** PC 端收藏夹同步只串行处理一个来源，避免多个来源同时触发 B 站限流。 */
+export const DESKTOP_SYNC_PLAYLIST_CONCURRENCY = 1;
 
 /** PC 端单个收藏夹按页顺序拉取，与 Android 端的断点和增量语义一致。 */
 export const DESKTOP_SYNC_PAGE_CONCURRENCY = 1;

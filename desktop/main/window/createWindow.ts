@@ -80,6 +80,8 @@ export function createMainWindow(
       webSecurity: true,
       webviewTag: false,
       allowRunningInsecureContent: false,
+      // 最小化后仍需及时派发 HTMLAudioElement 的 ended 事件，保证自动切歌不中断。
+      backgroundThrottling: false,
     },
   };
   if (settings.window.x !== null) {
