@@ -3,11 +3,11 @@ import {
   BrowserWindow,
   globalShortcut,
   Menu,
-  nativeImage,
   Notification,
   Tray,
 } from 'electron';
 import type {SyncSnapshot} from '../../shared/types';
+import {getDesktopIconPath} from '../appIcon';
 import {AppLogger} from '../logging/appLogger';
 import {PlaybackRuntime, type PlaybackRuntimeEvent} from '../runtime/playbackRuntime';
 import {SyncRuntime} from '../runtime/syncRuntime';
@@ -21,12 +21,6 @@ const GLOBAL_ACCELERATORS = [
   'MediaNextTrack',
   'MediaPreviousTrack',
 ] as const;
-
-const TRAY_ICON_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="9" fill="#84b8ff"/>
-  <path d="M9 9h4v10.5c0 2.2 1.7 3.8 3.8 3.8s3.8-1.6 3.8-3.8V9h4v10.5c0 4.4-3.4 7.8-7.8 7.8S9 23.9 9 19.5V9Z" fill="#06111f"/>
-</svg>`;
 
 /**
  * Windows 桌面系统能力聚合器。
@@ -55,7 +49,7 @@ export class DesktopShell {
     private readonly logger: AppLogger,
   ) {
     this.lastSyncSnapshot = syncRuntime.getStatus();
-    this.tray = new Tray(createTrayIcon());
+    this.tray = new Tray(getDesktopIconPath());
     this.tray.setToolTip('Nyami');
     this.tray.on('double-click', () => this.showWindow());
     this.disposePlayback = playbackRuntime.subscribe(event => {
@@ -253,18 +247,20 @@ export class DesktopShell {
       return;
     }
     try {
-      new Notification({title: `Nyami · ${title}`, body}).show();
+      const notification = new Notification({
+        title: `Nyami · ${title}`,
+        body,
+        icon: getDesktopIconPath(),
+      });
+      notification.on('click', () => this.showWindow());
+      notification.on('failed', (_event, error) => {
+        this.logger.warn('desktop.notification-failed', {error});
+      });
+      notification.show();
     } catch (error) {
       this.logger.warn('desktop.notification-failed', {error});
     }
   }
-}
-
-/** 创建独立的 SVG 托盘图标，避免依赖用户磁盘上的外部文件。 */
-function createTrayIcon(): Electron.NativeImage {
-  return nativeImage.createFromDataURL(
-    `data:image/svg+xml;charset=utf-8,${encodeURIComponent(TRAY_ICON_SVG)}`,
-  );
 }
 
 /** 将同步快照转换成托盘菜单的短状态文案。 */

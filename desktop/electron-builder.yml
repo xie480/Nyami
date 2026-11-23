@@ -13,6 +13,8 @@ files:
   - '!**/__tests__/**'
   - '!**/tests/**'
 extraResources:
+  - from: ../resource/icon.ico
+    to: resource/icon.ico
   - from: ../resource/silence_10s.wav
     to: resource/silence_10s.wav
 asar: true

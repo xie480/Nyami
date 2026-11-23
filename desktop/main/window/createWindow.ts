@@ -8,6 +8,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {AudioProbe} from '../audio/audioProbe';
+import {getDesktopIconPath} from '../appIcon';
 import {
   BiliAudioResolver,
   type AudioQuality,
@@ -72,6 +73,7 @@ export function createMainWindow(
     frame: false,
     autoHideMenuBar: true,
     backgroundColor: '#10131a',
+    icon: getDesktopIconPath(),
     webPreferences: {
       preload: path.join(currentDir, '../preload/index.js'),
       contextIsolation: true,
