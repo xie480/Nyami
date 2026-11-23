@@ -15,6 +15,7 @@ import type {
 import type {AppDirectories} from './appDirectories';
 
 const SETTINGS_FILE_NAME = 'desktop.json';
+const GLOBAL_INDEX_REMINDER_MARKER_FILE_NAME = 'global-index-reminder-shown';
 const SETTINGS_VERSION = 4 as const;
 const MIN_WINDOW_WIDTH = 960;
 const MIN_WINDOW_HEIGHT = 640;
@@ -108,6 +109,8 @@ export class SettingsStore {
 
   private loaded = false;
 
+  private globalIndexReminderShown: boolean | null = null;
+
   /**
    * 创建设置存储并绑定 settings 目录。
    * @param directories 应用数据目录
@@ -171,12 +174,60 @@ export class SettingsStore {
     await this.update({window: bounds});
   }
 
+  /** 判断首次全局索引提醒是否已经展示过。 */
+  async hasShownGlobalIndexReminder(): Promise<boolean> {
+    if (this.globalIndexReminderShown !== null) {
+      return this.globalIndexReminderShown;
+    }
+    try {
+      await fs.access(this.getGlobalIndexReminderMarkerPath());
+      this.globalIndexReminderShown = true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') {
+        throw error;
+      }
+      this.globalIndexReminderShown = false;
+    }
+    return this.globalIndexReminderShown;
+  }
+
+  /** 持久化首次全局索引提醒已展示，避免后续启动重复通知。 */
+  async markGlobalIndexReminderShown(): Promise<void> {
+    if (this.globalIndexReminderShown === true) {
+      return;
+    }
+    await fs.mkdir(this.directories.settings, {recursive: true});
+    const markerPath = this.getGlobalIndexReminderMarkerPath();
+    const temporaryPath = `${markerPath}.${process.pid}.tmp`;
+    await fs.writeFile(temporaryPath, 'shown', {encoding: 'utf8'});
+    try {
+      await fs.rename(temporaryPath, markerPath);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST' && code !== 'EPERM') {
+        throw error;
+      }
+      await fs.rm(markerPath, {force: true});
+      await fs.rename(temporaryPath, markerPath);
+    }
+    this.globalIndexReminderShown = true;
+  }
+
   /**
    * 返回设置文件路径，仅供主进程内部使用。
    * @returns 设置文件绝对路径
    */
   getFilePath(): string {
     return path.join(this.directories.settings, SETTINGS_FILE_NAME);
+  }
+
+  /** 返回首次全局索引提醒标记文件路径。 */
+  private getGlobalIndexReminderMarkerPath(): string {
+    return path.join(
+      this.directories.settings,
+      GLOBAL_INDEX_REMINDER_MARKER_FILE_NAME,
+    );
   }
 
   /**

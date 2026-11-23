@@ -121,6 +121,7 @@ export function createMainWindow(
     dependencies.logger,
   );
   const updateService = new UpdateService(dependencies.logger);
+  let shellForReminder: DesktopShell | null = null;
   const qrLogin = new QrLoginController(
     window,
     credentialStore,
@@ -130,6 +131,7 @@ export function createMainWindow(
         await syncRuntime.cancel();
       }
       libraryRuntime.handleAccountChanged(previousUid, nextUid);
+      await shellForReminder?.notifyFirstGlobalIndexSyncRequired();
     },
     () => contentRuntime.getProfile(),
   );
@@ -177,10 +179,13 @@ export function createMainWindow(
   const shell = new DesktopShell(
     window,
     dependencies.settingsStore,
+    credentialStore,
+    libraryRuntime,
     playbackRuntime,
     syncRuntime,
     dependencies.logger,
   );
+  shellForReminder = shell;
   const disposeIpc = registerIpcHandlers(
     window,
     qrLogin,

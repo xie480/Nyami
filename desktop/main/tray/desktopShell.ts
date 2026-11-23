@@ -8,6 +8,8 @@ import {
 } from 'electron';
 import type {SyncSnapshot} from '../../shared/types';
 import {getDesktopIconPath} from '../appIcon';
+import type {CredentialStore} from '../auth/credentialStore';
+import type {DesktopLibraryRuntime} from '../content/desktopLibraryRuntime';
 import {AppLogger} from '../logging/appLogger';
 import {PlaybackRuntime, type PlaybackRuntimeEvent} from '../runtime/playbackRuntime';
 import {SyncRuntime} from '../runtime/syncRuntime';
@@ -41,9 +43,13 @@ export class DesktopShell {
 
   private lastSyncSnapshot: SyncSnapshot;
 
+  private firstGlobalIndexReminderPromise: Promise<void> | null = null;
+
   constructor(
     private readonly window: BrowserWindow,
     private readonly settingsStore: SettingsStore,
+    private readonly credentials: CredentialStore,
+    private readonly library: DesktopLibraryRuntime,
     private readonly playbackRuntime: PlaybackRuntime,
     private readonly syncRuntime: SyncRuntime,
     private readonly logger: AppLogger,
@@ -60,6 +66,7 @@ export class DesktopShell {
     });
     this.registerGlobalShortcuts();
     this.refreshTrayMenu();
+    void this.notifyFirstGlobalIndexSyncRequired();
   }
 
   /** 将应用标记为主动退出，防止 closeToTray 拦截 app.quit。 */
@@ -95,6 +102,22 @@ export class DesktopShell {
       this.window.show();
     }
     this.window.focus();
+  }
+
+  /** 首次登录且尚未建立全局索引时发送一次同步提醒。 */
+  notifyFirstGlobalIndexSyncRequired(): Promise<void> {
+    if (this.firstGlobalIndexReminderPromise) {
+      return this.firstGlobalIndexReminderPromise;
+    }
+    const reminderPromise = this.checkFirstGlobalIndexReminder()
+      .catch(error => {
+        this.logger.warn('desktop.global-index-reminder-failed', {error});
+      })
+      .finally(() => {
+        this.firstGlobalIndexReminderPromise = null;
+      });
+    this.firstGlobalIndexReminderPromise = reminderPromise;
+    return reminderPromise;
   }
 
   /** 切换当前歌曲播放状态，供托盘和媒体播放键共用。 */
@@ -189,6 +212,26 @@ export class DesktopShell {
     this.showNotification(
       snapshot.state === 'completed' ? '同步完成' : '同步失败',
       body,
+    );
+  }
+
+  /** 检查登录账号是否需要首次全局索引同步提醒。 */
+  private async checkFirstGlobalIndexReminder(): Promise<void> {
+    if (await this.settingsStore.hasShownGlobalIndexReminder()) {
+      return;
+    }
+    const status = await this.credentials.getStatus();
+    if (!status.loggedIn || !status.uid) {
+      return;
+    }
+    if (this.library.hasLocalIndex(status.uid)) {
+      await this.settingsStore.markGlobalIndexReminderShown();
+      return;
+    }
+    await this.settingsStore.markGlobalIndexReminderShown();
+    this.showNotification(
+      '首次使用提醒',
+      '首次使用前，请先同步全局索引，再浏览和播放收藏内容',
     );
   }
 
